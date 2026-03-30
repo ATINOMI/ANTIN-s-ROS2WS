@@ -1,0 +1,13 @@
+package.xml
+setup.py
+launch/detector.launch.py
+resource/yolo_detector
+yolo_detector/__init__.py
+yolo_detector/detector_node.py
+yolo_detector.egg-info/PKG-INFO
+yolo_detector.egg-info/SOURCES.txt
+yolo_detector.egg-info/dependency_links.txt
+yolo_detector.egg-info/entry_points.txt
+yolo_detector.egg-info/requires.txt
+yolo_detector.egg-info/top_level.txt
+yolo_detector.egg-info/zip-safe
