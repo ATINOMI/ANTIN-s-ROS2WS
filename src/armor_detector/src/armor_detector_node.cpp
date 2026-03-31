@@ -5,7 +5,7 @@
 #include <opencv2/opencv.hpp>
 
 using namespace cv;
-using namespace std;
+
 
 class ArmorDetectorNode : public rclcpp::Node
 {
@@ -57,7 +57,7 @@ private:
         morphologyEx(red_cleaned,  red_cleaned,  MORPH_OPEN,  open_kernel);
 
         // 第三步：轮廓检测
-        vector<vector<Point>> blue_contours;
+        std::vector<std::vector<Point>> blue_contours;
         findContours(blue_cleaned, blue_contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         RCLCPP_INFO(this->get_logger(), "原始轮廓数量： %zu", blue_contours.size());
 
@@ -65,7 +65,7 @@ private:
         drawContours(display, blue_contours, -1, Scalar(0, 255, 0), 2);
 
         // 第四步：灯条筛选
-        vector<RotatedRect> light_bars;
+        std::vector<RotatedRect> light_bars;
         srand(42);
         int idx = 0;
 
@@ -102,7 +102,7 @@ private:
                 line(display, pts[j], pts[(j+1)%4], color, 2);
 
             putText(display,
-                    "[" + to_string(idx) + "]" + to_string(ratio).substr(0, 4),
+                    "[" + std::to_string(idx) + "]" + std::to_string(ratio).substr(0, 4),
                     rect.center,
                     FONT_HERSHEY_SIMPLEX,
                     0.5, color, 1);
