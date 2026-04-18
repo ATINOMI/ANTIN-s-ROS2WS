@@ -25,5 +25,8 @@ class HikCameraNode : public rclcpp::Node
         // camera_info 管理器
         std::shared_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
 
+        //海康相机句柄
+        void* handle_;
+
 
 };

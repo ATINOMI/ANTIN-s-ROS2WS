@@ -4,6 +4,7 @@
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.hpp>
+#include <thread>
 
 class AppleDetectorNode:public rclcpp::Node
 {
