@@ -12,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(image_transport REQUIRED)
 
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -23,5 +24,22 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+add_executable(hik_camera_node src/hik_camera_node.cpp)
+
+ament_target_dependencies(hik_camera_node
+  rclcpp
+  sensor_msgs
+  camera_info_manager
+  image_transport
+)
+
+target_include_directories(hik_camera_node PRIVATE /opt/MVS/include)
+target_link_libraries(hik_camera_node /opt/MVS/lib/64/libMvCameraControl.so)
+
+install(TARGETS hik_camera_node
+DESTINATION lib/${PROJECT_NAME}
+)
+
 
 ament_package()

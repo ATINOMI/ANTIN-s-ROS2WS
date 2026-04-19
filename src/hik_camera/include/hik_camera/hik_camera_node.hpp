@@ -22,11 +22,12 @@ class HikCameraNode : public rclcpp::Node
         std::thread grab_thread_;
         std::atomic<bool> running_;
 
+        //海康相机句柄
+        void* handle_;
+
         // camera_info 管理器
         std::shared_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
 
-        //海康相机句柄
-        void* handle_;
 
 
 };
