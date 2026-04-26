@@ -48,6 +48,42 @@ HikCameraNode::HikCameraNode() : Node("hik_camera"),running_(false),handle_(null
         return;        
     }
 
+    //声明参数
+    this->declare_parameter("exposure_time",5000.0);
+    this->declare_parameter("gain",10.0);
+    this->declare_parameter("frame_rate",90.0);
+
+    //应用初始参数到相机
+    MV_CC_SetFloatValue(handle_,"ExposureTime",5000.0);
+    MV_CC_SetFloatValue(handle_,"Gain",10.0);
+    MV_CC_SetEnumValueByString(handle_, "ExposureAuto", "Off");
+    MV_CC_SetEnumValueByString(handle_, "GainAuto", "Off");
+
+
+
+    //注册参数变化回调
+    param_callback_handle_ = this->add_on_set_parameters_callback(
+        [this](const std::vector<rclcpp::Parameter>& params){
+            for (const auto & param : params){
+                if (param.get_name()=="exposure_time"){
+                    MV_CC_SetFloatValue(handle_,"ExposureTime",param.as_double());
+                }
+                else if (param.get_name()=="gain"){
+                    MV_CC_SetFloatValue(handle_,"Gain",param.as_double());
+                }
+                else if (param.get_name()=="frame_rate")
+                {
+                    MV_CC_SetBoolValue( handle_,"AcquisitionFrameRateEnable",true);
+                    MV_CC_SetFloatValue(handle_,"AcquisitionFrameRate",param.as_double());
+                }
+                
+            }
+            rcl_interfaces::msg::SetParametersResult result;
+            result.successful = true;
+            return result;
+        }
+    );
+
     //启动取帧线程
     running_ = true;
     grab_thread_ = std::thread(&HikCameraNode::grab_thread,this);

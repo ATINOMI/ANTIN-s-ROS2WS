@@ -29,6 +29,8 @@ class HikCameraNode : public rclcpp::Node
         // camera_info 管理器
         std::shared_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
 
+        rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
+
 
 
 };
