@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(OpenCV REQUIRED)
 
 
 if(BUILD_TESTING)
@@ -32,10 +33,11 @@ ament_target_dependencies(hik_camera_node
   sensor_msgs
   camera_info_manager
   image_transport
+  OpenCV
 )
 
 target_include_directories(hik_camera_node PRIVATE /opt/MVS/include)
-target_link_libraries(hik_camera_node /opt/MVS/lib/64/libMvCameraControl.so)
+target_link_libraries(hik_camera_node /opt/MVS/lib/64/libMvCameraControl.so ${OpenCV_LIBS})
 
 install(TARGETS hik_camera_node
 DESTINATION lib/${PROJECT_NAME}

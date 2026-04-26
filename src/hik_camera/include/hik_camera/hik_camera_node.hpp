@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <MvCameraControl.h>
+#include <opencv2/opencv.hpp>
 
 class HikCameraNode : public rclcpp::Node
 {

@@ -27,6 +27,8 @@ HikCameraNode::HikCameraNode() : Node("hik_camera"),running_(false),handle_(null
 
     //打开设备
     nRet = MV_CC_OpenDevice(handle_);
+    //注意：工业相机的bayerRG8不是真正的彩色格式，只是传感器数据，需要OpenCV进行去马赛克化
+    MV_CC_SetEnumValueByString(handle_,"PixelFormat","BayerRG8");
     if (nRet !=MV_OK){
         RCLCPP_ERROR(this->get_logger(),"Open camera failed!");
         return;       
@@ -89,9 +91,15 @@ void HikCameraNode::grab_thread()
         img_msg->header.frame_id = "camera";
         img_msg->width = frame.stFrameInfo.nExtendWidth;
         img_msg->height = frame.stFrameInfo.nExtendHeight;
-        img_msg->encoding = "mono8";
-        img_msg->step = frame.stFrameInfo.nExtendWidth*1;
-        img_msg->data.assign(frame.pBufAddr,frame.pBufAddr+frame.stFrameInfo.nFrameLen);
+        //把海康buffer包装成OpenCV矩阵，不拷贝数据，只是借用指针
+        cv::Mat bayer(frame.stFrameInfo.nExtendHeight,frame.stFrameInfo.nExtendWidth,CV_8UC1,frame.pBufAddr);
+        //Bayer解码:把棋盘格排列的单通道数据还原成真正的BGR彩色图
+        cv::Mat bgr;
+        cv::cvtColor(bayer,bgr,cv::COLOR_BayerBG2BGR);//BayerRGBGR是插值算法，根据周围RGB邻居推算完整的BGR彩色图，这个过程加去马赛克
+
+        img_msg->encoding = "bgr8";
+        img_msg->step     = frame.stFrameInfo.nExtendWidth*3;//BGR三个通道，字节数是mono8的3倍
+        img_msg->data.assign(bgr.data,bgr.data + bgr.total()*3);
 
         image_pub_->publish(*img_msg);
 
