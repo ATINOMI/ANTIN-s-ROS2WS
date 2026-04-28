@@ -24,9 +24,8 @@ void MainWindow::setupUI()
     QWidget* central = new QWidget(this);
     setCentralWidget(central);
 
-    image_label_ = new QLabel(this);
-    image_label_->setAlignment(Qt::AlignCenter);
-    image_label_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    camera_view_ = new CameraView(this);
+    camera_view_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     exposure_slider_ = new QSlider(Qt::Horizontal, this);
     exposure_slider_->setRange(1, 100000);
@@ -63,18 +62,13 @@ void MainWindow::setupUI()
     slider_layout->addStretch();
 
     QHBoxLayout* main_layout = new QHBoxLayout(central);
-    main_layout->addWidget(image_label_, 3);
+    main_layout->addWidget(camera_view_, 3);
     main_layout->addLayout(slider_layout, 1);
 }
 
 void MainWindow::onImageReceived(QImage image)
 {
-    QPixmap pixmap = QPixmap::fromImage(image).scaled(
-        image_label_->size(),
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
-    );
-    image_label_->setPixmap(pixmap);
+    camera_view_->updateImage(image);
 }
 
 void MainWindow::onExposureChanged(int value)

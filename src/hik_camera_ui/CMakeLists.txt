@@ -8,14 +8,16 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(image_transport REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
 
 add_executable(hik_camera_ui
   src/main.cpp
   src/ros_worker.cpp
   src/main_window.cpp
+  src/camera_view.cpp
   include/hik_camera_ui/main_window.hpp
   include/hik_camera_ui/ros_worker.hpp
+  include/hik_camera_ui/camera_view.hpp
 )
 
 target_include_directories(hik_camera_ui PRIVATE
@@ -25,6 +27,8 @@ target_include_directories(hik_camera_ui PRIVATE
 target_link_libraries(hik_camera_ui
   Qt6::Core
   Qt6::Widgets
+  Qt6::OpenGL
+  Qt6::OpenGLWidgets
 )
 
 ament_target_dependencies(hik_camera_ui

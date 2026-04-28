@@ -7,6 +7,7 @@
 #include <QHBoxLayout>
 #include <QWidget>
 #include "hik_camera_ui/ros_worker.hpp"
+#include "hik_camera_ui/camera_view.hpp"
 
 class MainWindow : public QMainWindow
 {
@@ -25,7 +26,7 @@ private slots:
 private:
     void setupUI();
 
-    QLabel* image_label_;
+    CameraView* camera_view_;
     QLabel* exposure_value_label_;
     QLabel* gain_value_label_;
     QLabel* frame_rate_value_label_;
