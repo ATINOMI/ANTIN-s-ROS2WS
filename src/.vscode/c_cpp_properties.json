@@ -1,25 +1,26 @@
 {
-  "configurations": [
-    {
-      "browse": {
-        "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
-        "limitSymbolsToIncludedHeaders": false
-      },
-      "includePath": [
-        "/opt/ros/jazzy/include/**",
-        "/home/a/ros2_ws/src/anti/include/**",
-        "/home/a/ros2_ws/src/my_cpp_pkg/include/**",
-        "/home/a/ros2_ws/src/publisher1/include/**",
-        "/home/a/ros2_ws/src/review/include/**",
-        "/usr/include/**",
-	"/opt/MVS/include"
-      ],
-      "name": "ros2",
-      "intelliSenseMode": "gcc-x64",
-      "compilerPath": "/usr/bin/gcc",
-      "cStandard": "gnu11",
-      "cppStandard": "c++17"
-    }
-  ],
-  "version": 4
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
+                "limitSymbolsToIncludedHeaders": false
+            },
+            "includePath": [
+                "/opt/ros/jazzy/include/**",
+                "/home/a/ros2_ws/src/anti/include/**",
+                "/home/a/ros2_ws/src/my_cpp_pkg/include/**",
+                "/home/a/ros2_ws/src/publisher1/include/**",
+                "/home/a/ros2_ws/src/review/include/**",
+                "/usr/include/**",
+                "/opt/MVS/include",
+                "${workspaceFolder}/hik_camera_ui/include"
+            ],
+            "name": "ros2",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
 }
