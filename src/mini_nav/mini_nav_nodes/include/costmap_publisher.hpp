@@ -1,0 +1,165 @@
+#pragma once
+
+/* Includes ----------------------------------------------------------------*/
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
+#include "nav_msgs/msg/path.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
+
+#include "astar_navigator.hpp"
+#include "mini_nav_core/costmap_2d.hpp"
+
+/* Namespace ---------------------------------------------------------------*/
+namespace mini_nav_nodes
+{
+    /* Class definition --------------------------------------------------------*/
+    /**
+     * @brief 将 mini_nav_core::Costmap2D 转换并发布为 ROS 2 OccupancyGrid。
+     *
+     * 这个节点暂时创建一张演示用的静态地图：空闲区域为 0，障碍物为 100。
+     * 后续接入传感器后，只需要更新 costmap_，发布部分可以保持不变。
+     */
+    class CostmapPublisherNode : public rclcpp::Node
+    {
+
+        /* Public API -----------------------------------------------------------*/
+
+        public:
+            CostmapPublisherNode(int size_x, 
+                                 int size_y, 
+                                 double resolution, 
+                                 double origin_x, 
+                                 double origin_y, 
+                                 unsigned char default_value, 
+                                 unsigned int publish_period_ms);
+
+            /**
+             * @brief 在地图指定位置生成一堵单栅格宽的墙。
+            * @param start_x 墙起点的栅格 x 坐标。
+            * @param start_y 墙起点的栅格 y 坐标。
+            * @param length 墙的长度，单位为栅格。
+            * @param vertical true：竖墙，向 +y 延伸；
+            *                 false：横墙，向 +x 延伸。
+            */
+            void addWall(unsigned int start_x, 
+                         unsigned int start_y, 
+                         unsigned int length, 
+                        bool vertical = true );
+
+            /**
+             *  对当前地图执行 A*，并发布标准 Path 消息供 RViz 显示。
+             *  start 起点栅格坐标。
+             *  goal 终点栅格坐标。
+             *  找到可行路径时返回 true。
+             */
+            bool PlanAndPublish(
+              const mini_nav_core::MapLocation & start,
+              const mini_nav_core::MapLocation & goal);
+
+
+        /* Private members ------------------------------------------------------*/
+
+        private:
+            const unsigned int size_x_;
+            const unsigned int size_y_;
+            const double resolution_;
+            const double origin_x_;
+            const double origin_y_;
+            const unsigned char default_value_;
+            const unsigned int publish_period_ms_;
+            bool add_demo_obstacles_;
+
+            /* Cost constants ----------------------------------------------------*/
+
+            /// Nav2 常用约定：254 表示致命障碍物；转换后会变为 OccupancyGrid 的 100。
+            static constexpr unsigned char kLethalObstacle = 254;
+            /// OccupancyGrid 约定：-1 表示未知；这里用 255 作为内部未知代价。
+            static constexpr unsigned char kUnknownCost = 255;
+
+            /* ROS entities and map state ----------------------------------------*/
+
+            /// ROS 无关的地图数据模型；将来由传感器回调或地图加载器更新。 
+            std::unique_ptr<mini_nav_core::Costmap2D> costmap_;
+            /// /mini_nav/map 的发布器。
+            rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
+            /// /mini_nav/global_path 的 A* 路径发布器。
+            rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
+            /// 缓存的 A* 路径；由定时器持续发布，保证 RViz 后启动也能显示。
+            nav_msgs::msg::Path global_path_;
+            /// /mini_nav/map_axes 的 RViz 坐标轴标记发布器。
+            rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr axes_publisher_;
+            /// RViz 2D Pose Estimate 发送的起点订阅器。
+            rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
+            /// RViz 2D Goal Pose 发送的终点订阅器。
+            rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_subscription_;
+            /// 最近一次从 RViz 接收并成功转换的起点栅格。
+            std::optional<mini_nav_core::MapLocation> start_cell_;
+            /// 最近一次从 RViz 接收并成功转换的终点栅格。
+            std::optional<mini_nav_core::MapLocation> goal_cell_;
+            /// 周期发布定时器，避免在回调中阻塞等待。
+            rclcpp::TimerBase::SharedPtr timer_;
+            /// 发布消息使用的坐标系名称，默认是 map。
+            const std::string frame_id_;
+
+
+            /* Private API ------------------------------------------------------*/
+            
+            /**
+             * @brief 声明一个必须大于零的整型参数。
+             * @param name 参数名称，例如 map.size_x。
+             * @param default_value 参数未设置时使用的默认值。
+             * @return 已验证并转换为 unsigned int 的参数值。
+             * @throws std::invalid_argument 参数小于或等于零时抛出。
+             */            
+            unsigned int declarePositiveIntParameter(const std::string & name, int default_value);
+
+            /**
+             * @brief 声明一个必须大于零的浮点参数。
+             * @param name 参数名称，例如 map.resolution。
+             * @param default_value 参数未设置时使用的默认值。
+             * @return 已验证的参数值。
+             * @throws std::invalid_argument 参数小于或等于零时抛出。
+             */            
+            double declarePositiveDoubleParameter(const std::string & name, double default_value);
+
+            /**
+             * @brief 声明一个取值范围为 [0, 255] 的代价参数。
+             * @param name 参数名称。
+             * @param default_value 参数未设置时使用的默认值。
+             * @return 转换为 unsigned char 的代价值。
+             * @throws std::invalid_argument 参数超出一个字节的可表示范围时抛出。
+             */
+            unsigned char declareByteParameter(const std::string & name, int default_value);
+
+
+
+            /**
+             * @brief 将 Costmap2D 转换为 OccupancyGrid 并发布。
+             *
+             * OccupancyGrid 的 data 同样是按行存储，索引公式为 my * width + mx，
+             * 因此可以按相同的双层循环逐栅格拷贝。ROS 约定：0 为空闲、100 为占据、-1 为未知。
+             */
+            void publishMap();
+
+            /**  发布 map 坐标系原点以及 +X、+Y 方向的 RViz 标记。 */
+            void publishCoordinateAxes();
+
+            /* RViz interactive planning -------------------------------------------*/
+            void initialPoseCallback(
+              const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message);
+            void goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr message);
+            void planIfReady();
+
+
+    };
+}
