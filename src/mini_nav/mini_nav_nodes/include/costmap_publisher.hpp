@@ -16,7 +16,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
-#include "astar_navigator.hpp"
+#include "mini_nav_core/astar_navigator.hpp"
 #include "mini_nav_core/costmap_2d.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
@@ -44,17 +44,10 @@ namespace mini_nav_nodes
                                  unsigned int publish_period_ms);
 
             /**
-             * @brief 在地图指定位置生成一堵单栅格宽的墙。
-            * @param start_x 墙起点的栅格 x 坐标。
-            * @param start_y 墙起点的栅格 y 坐标。
-            * @param length 墙的长度，单位为栅格。
-            * @param vertical true：竖墙，向 +y 延伸；
-            *                 false：横墙，向 +x 延伸。
-            */
-            void addWall(unsigned int start_x, 
-                         unsigned int start_y, 
-                         unsigned int length, 
-                        bool vertical = true );
+             * @brief 获取节点维护的代价地图，用于构建或更新地图内容。
+             * @return 可修改的 Costmap2D 引用。
+             */
+            mini_nav_core::Costmap2D & GetCostmap();
 
             /**
              *  对当前地图执行 A*，并发布标准 Path 消息供 RViz 显示。

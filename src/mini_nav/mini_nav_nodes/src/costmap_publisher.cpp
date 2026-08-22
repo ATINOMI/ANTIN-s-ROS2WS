@@ -86,26 +86,10 @@ unsigned char mini_nav_nodes::CostmapPublisherNode::declareByteParameter(const s
     return static_cast<unsigned char>(value);
 }
 
-/* Map editing -------------------------------------------------------------*/
-void mini_nav_nodes::CostmapPublisherNode::addWall(unsigned int start_x, unsigned int start_y, unsigned int length, bool vertical)
+/* Costmap access -----------------------------------------------------------*/
+mini_nav_core::Costmap2D & mini_nav_nodes::CostmapPublisherNode::GetCostmap()
 {
-    const auto size_x = costmap_->GetSizeInCellsX();
-    const auto size_y = costmap_->GetSizeInCellsY();
-
-    for (unsigned int i = 0; i < length; ++i) 
-    {
-        const unsigned int mx = vertical ? start_x : (start_x + i);
-        const unsigned int my = vertical ? (start_y + i) : start_y;
-
-        // 墙超出地图时停止，防止 SetCost 越界
-        if (mx >= size_x || my >= size_y) {
-            break;
-        }
-
-        costmap_->SetCost(mx, my, kLethalObstacle);
-
-    }
-
+    return *costmap_;
 }
 
 /* Path planning and publication ------------------------------------------*/
@@ -229,6 +213,14 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
 {
     visualization_msgs::msg::MarkerArray markers;
     const auto stamp = now();
+    const double origin_x = costmap_->GetOriginX();
+    const double origin_y = costmap_->GetOriginY();
+    const double map_width = costmap_->GetSizeInCellsX() * costmap_->GetResolution();
+    const double map_height = costmap_->GetSizeInCellsY() * costmap_->GetResolution();
+    const double axis_length = (map_width < map_height ? map_width : map_height) * 0.20;
+    const float shaft_diameter = static_cast<float>(axis_length * 0.10);
+    const float head_diameter = static_cast<float>(axis_length * 0.20);
+    const float label_height = static_cast<float>(axis_length / 3.0);
 
     auto make_arrow = [&](int id, const char * label, double end_x, double end_y,
                           float red, float green, float blue) {
@@ -239,16 +231,19 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
         arrow.id = id;
         arrow.type = visualization_msgs::msg::Marker::ARROW;
         arrow.action = visualization_msgs::msg::Marker::ADD;
-        arrow.scale.x = 0.06;
-        arrow.scale.y = 0.12;
+        // 箭头尺寸随地图尺度变化，保持与地图相同的视觉比例。
+        arrow.scale.x = shaft_diameter;
+        arrow.scale.y = head_diameter;
         arrow.color.r = red;
         arrow.color.g = green;
         arrow.color.b = blue;
         arrow.color.a = 1.0F;
         geometry_msgs::msg::Point start;
+        start.x = origin_x;
+        start.y = origin_y;
         geometry_msgs::msg::Point end;
-        end.x = end_x;
-        end.y = end_y;
+        end.x = origin_x + end_x;
+        end.y = origin_y + end_y;
         arrow.points = {start, end};
         markers.markers.push_back(arrow);
 
@@ -259,16 +254,16 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
         text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
         text.action = visualization_msgs::msg::Marker::ADD;
         text.pose.position = end;
-        text.pose.position.z = 0.12;
+        text.pose.position.z = head_diameter;
         text.pose.orientation.w = 1.0;
-        text.scale.z = 0.20;
+        text.scale.z = label_height;
         text.color = arrow.color;
         text.text = label;
         markers.markers.push_back(text);
     };
 
-    make_arrow(0, "+X", 0.60, 0.0, 1.0F, 0.0F, 0.0F);
-    make_arrow(1, "+Y", 0.0, 0.60, 0.0F, 1.0F, 0.0F);
+    make_arrow(0, "+X", axis_length, 0.0, 1.0F, 0.0F, 0.0F);
+    make_arrow(1, "+Y", 0.0, axis_length, 0.0F, 1.0F, 0.0F);
 
     visualization_msgs::msg::Marker origin_label;
     origin_label.header.frame_id = frame_id_;
@@ -277,14 +272,16 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
     origin_label.id = 2;
     origin_label.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
     origin_label.action = visualization_msgs::msg::Marker::ADD;
-    origin_label.pose.position.z = 0.12;
+    origin_label.pose.position.x = origin_x;
+    origin_label.pose.position.y = origin_y;
+    origin_label.pose.position.z = head_diameter;
     origin_label.pose.orientation.w = 1.0;
-    origin_label.scale.z = 0.20;
+    origin_label.scale.z = label_height;
     origin_label.color.r = 1.0F;
     origin_label.color.g = 1.0F;
     origin_label.color.b = 1.0F;
     origin_label.color.a = 1.0F;
-    origin_label.text = "O (0, 0)";
+    origin_label.text = "O";
     markers.markers.push_back(origin_label);
 
     axes_publisher_->publish(markers);

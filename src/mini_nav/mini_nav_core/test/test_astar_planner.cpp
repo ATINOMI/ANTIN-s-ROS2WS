@@ -1,7 +1,7 @@
 /* Includes ----------------------------------------------------------------*/
 #include <gtest/gtest.h>
 
-#include "astar_navigator.hpp"
+#include "mini_nav_core/astar_navigator.hpp"
 
 /* Type aliases ------------------------------------------------------------*/
 using mini_nav_core::AStarPlanner;
@@ -14,9 +14,7 @@ TEST(AStarPlanner, FindsPathAroundWall)
   Costmap2D map(7, 5, 1.0, 0.0, 0.0);
 
   // 在 x=3 放一堵不封顶的墙，路径只能从最上面一行绕过。
-  for (unsigned int my = 0; my < 4; ++my) {
-    map.SetCost(3, my, 254);
-  }
+  map.DrawLine({3, 0}, {3, 3}, 254);
 
   AStarPlanner planner;
   const MapLocation start{1, 1};
