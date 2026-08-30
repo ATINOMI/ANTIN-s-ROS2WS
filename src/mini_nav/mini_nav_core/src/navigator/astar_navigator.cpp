@@ -1,5 +1,5 @@
 /* Includes ----------------------------------------------------------------*/
-#include "mini_nav_core/astar_navigator.hpp"
+#include "mini_nav_core/navigator/astar_navigator.hpp"
 #include <algorithm>
 #include <limits>
 #include <queue>

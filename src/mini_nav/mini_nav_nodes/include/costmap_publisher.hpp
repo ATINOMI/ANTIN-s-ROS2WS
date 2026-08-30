@@ -16,18 +16,18 @@
 #include "rclcpp/rclcpp.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
-#include "mini_nav_core/astar_navigator.hpp"
-#include "mini_nav_core/costmap_2d.hpp"
+#include "mini_nav_core/navigator/astar_navigator.hpp"
+#include "mini_nav_core/map/costmap_2d.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_nodes
 {
     /* Class definition --------------------------------------------------------*/
     /**
-     * @brief 将 mini_nav_core::Costmap2D 转换并发布为 ROS 2 OccupancyGrid。
+     * @brief 将 /map 的 OccupancyGrid 转换为 Costmap2D，并运行 A*。
      *
-     * 这个节点暂时创建一张演示用的静态地图：空闲区域为 0，障碍物为 100。
-     * 后续接入传感器后，只需要更新 costmap_，发布部分可以保持不变。
+     * 地图的权威来源是 map_server 发布的 /map；本节点保留一份
+     * mini_nav_core 使用的 ROS 无关代价地图，并发布规划结果供可视化。
      */
     class CostmapPublisherNode : public rclcpp::Node
     {
@@ -83,6 +83,8 @@ namespace mini_nav_nodes
 
             /// ROS 无关的地图数据模型；将来由传感器回调或地图加载器更新。 
             std::unique_ptr<mini_nav_core::Costmap2D> costmap_;
+            /// map_server 发布的静态地图输入。
+            rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
             /// /mini_nav/map 的发布器。
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
             /// /mini_nav/global_path 的 A* 路径发布器。
@@ -101,8 +103,14 @@ namespace mini_nav_nodes
             std::optional<mini_nav_core::MapLocation> goal_cell_;
             /// 周期发布定时器，避免在回调中阻塞等待。
             rclcpp::TimerBase::SharedPtr timer_;
+            /// 输入地图的话题名称，默认为 map_server 的 /map。
+            const std::string map_topic_;
+            /// 可选的外部 YAML 地图文件；非空时由本节点直接加载。
+            const std::string map_file_;
             /// 发布消息使用的坐标系名称，默认是 map。
             const std::string frame_id_;
+            /// 只有收到并成功转换地图后才允许规划和发布。
+            bool map_received_ = false;
 
 
             /* Private API ------------------------------------------------------*/
@@ -133,6 +141,15 @@ namespace mini_nav_nodes
              * @throws std::invalid_argument 参数超出一个字节的可表示范围时抛出。
              */
             unsigned char declareByteParameter(const std::string & name, int default_value);
+
+            /** 将 map_server 的 OccupancyGrid 原子式转换为内部 Costmap2D。 */
+            void mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message);
+
+            /** 从标准 trinary PGM 地图 YAML 加载并发布一张静态地图。 */
+            void loadMapFromYaml(const std::string & yaml_file);
+
+            /** 将一张已经构造好的 OccupancyGrid 更新到内部代价地图。 */
+            void loadMapMessage(const nav_msgs::msg::OccupancyGrid & message);
 
 
 

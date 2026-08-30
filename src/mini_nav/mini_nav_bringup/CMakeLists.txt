@@ -10,8 +10,14 @@ find_package(ament_cmake REQUIRED)
 
 # This package contains Python launch files and configuration only.  ROS 2's
 # launch packages are runtime dependencies, not CMake packages.
-install(DIRECTORY launch config
+install(DIRECTORY launch config maps
   DESTINATION share/${PROJECT_NAME}
+)
+
+# RViz configurations are project-wide assets kept in the parent mini_nav/rviz directory.
+install(DIRECTORY ../rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz
+  PATTERN "*.orig" EXCLUDE
 )
 
 if(BUILD_TESTING)

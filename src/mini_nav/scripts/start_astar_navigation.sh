@@ -5,6 +5,7 @@ set -eo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workspace_dir="$(cd "${script_dir}/../../.." && pwd)"
 rviz_config="${script_dir}/../rviz/astar_navigation.rviz"
+map_yaml="${workspace_dir}/maps/turtlebot3_map.yaml"
 ros_setup="/opt/ros/jazzy/setup.bash"
 
 if [[ ! -f "${ros_setup}" ]]; then
@@ -23,8 +24,13 @@ if [[ ! -f "${rviz_config}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${map_yaml}" ]]; then
+  echo "Map YAML was not found: ${map_yaml}" >&2
+  exit 1
+fi
+
 existing_publishers="$(
-  { ros2 topic info /mini_nav/map 2>/dev/null |
+  { timeout 5 ros2 topic info --no-daemon --spin-time 2 /mini_nav/map 2>/dev/null |
       awk '/Publisher count:/ { print $3; exit }'; } || true
 )"
 if [[ "${existing_publishers:-0}" != "0" ]]; then
@@ -32,7 +38,7 @@ if [[ "${existing_publishers:-0}" != "0" ]]; then
   exit 1
 fi
 
-ros2 run mini_nav_nodes costmap_publisher_node &
+setsid ros2 run mini_nav_nodes costmap_publisher_node --ros-args -p "map_file:=${map_yaml}" &
 node_pid=$!
 rviz_runtime_config=""
 
@@ -41,14 +47,14 @@ cleanup() {
     rm -f "${rviz_runtime_config}"
   fi
   if kill -0 "${node_pid}" 2>/dev/null; then
-    kill "${node_pid}"
+    kill -- "-${node_pid}" 2>/dev/null || kill "${node_pid}"
     wait "${node_pid}" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
 
 # 等待首张地图，使用实际发布的几何信息配置 RViz 视角。
-map_info="$(timeout 10 ros2 topic echo --once /mini_nav/map --field info)" || {
+map_info="$(timeout 10 ros2 topic echo --no-daemon --spin-time 3 --qos-reliability reliable --qos-durability transient_local --once /mini_nav/map --field info)" || {
   echo "Timed out while waiting for /mini_nav/map" >&2
   exit 1
 }

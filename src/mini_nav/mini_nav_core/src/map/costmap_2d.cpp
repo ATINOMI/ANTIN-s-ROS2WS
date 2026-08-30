@@ -1,5 +1,5 @@
 /* Includes ----------------------------------------------------------------*/
-#include "mini_nav_core/costmap_2d.hpp"
+#include "mini_nav_core/map/costmap_2d.hpp"
 
 #include <cmath>
 #include <cstdint>

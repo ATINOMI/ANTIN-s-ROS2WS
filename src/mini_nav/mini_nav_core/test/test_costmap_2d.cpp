@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <gtest/gtest.h>
 
-#include "mini_nav_core/costmap_2d.hpp"
+#include "mini_nav_core/map/costmap_2d.hpp"
 
 /* Type aliases ------------------------------------------------------------*/
 using mini_nav_core::Costmap2D;

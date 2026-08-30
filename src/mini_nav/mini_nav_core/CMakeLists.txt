@@ -8,8 +8,14 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME}
-  src/costmap_2d.cpp
-  src/astar_navigator.cpp
+  src/map/costmap_2d.cpp
+  src/navigator/astar_navigator.cpp
+  src/localization/localization_map.cpp
+  src/localization/differential_motion_model.cpp
+  src/localization/likelihood_field_model.cpp
+  src/localization/beam_model.cpp
+  src/localization/kd_tree.cpp
+  src/localization/particle_filter.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
@@ -40,6 +46,11 @@ if(BUILD_TESTING)
   ament_add_gtest(test_astar_planner test/test_astar_planner.cpp)
   if(TARGET test_astar_planner)
     target_link_libraries(test_astar_planner ${PROJECT_NAME})
+  endif()
+
+  ament_add_gtest(test_particle_filter test/test_particle_filter.cpp)
+  if(TARGET test_particle_filter)
+    target_link_libraries(test_particle_filter ${PROJECT_NAME})
   endif()
 
   find_package(ament_lint_auto REQUIRED)

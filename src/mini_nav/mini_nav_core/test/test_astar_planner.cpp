@@ -1,7 +1,7 @@
 /* Includes ----------------------------------------------------------------*/
 #include <gtest/gtest.h>
 
-#include "mini_nav_core/astar_navigator.hpp"
+#include "mini_nav_core/navigator/astar_navigator.hpp"
 
 /* Type aliases ------------------------------------------------------------*/
 using mini_nav_core::AStarPlanner;
