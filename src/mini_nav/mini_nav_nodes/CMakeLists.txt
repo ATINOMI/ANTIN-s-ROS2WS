@@ -74,6 +74,34 @@ install(TARGETS mini_nav_amcl_node
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_amcl_tf_cache
+    test/test_amcl_tf_cache.cpp
+    src/amcl_node.cpp
+  )
+  if(TARGET test_amcl_tf_cache)
+    target_compile_features(test_amcl_tf_cache PUBLIC cxx_std_17)
+    target_include_directories(test_amcl_tf_cache PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_amcl_tf_cache
+      geometry_msgs
+      message_filters
+      mini_nav_core
+      nav2_msgs
+      nav_msgs
+      rclcpp
+      rclcpp_lifecycle
+      sensor_msgs
+      std_srvs
+      tf2
+      tf2_geometry_msgs
+      tf2_ros
+    )
+    target_link_libraries(test_amcl_tf_cache mini_nav_core::mini_nav_core)
+  endif()
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)

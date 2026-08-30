@@ -7,6 +7,7 @@
 #include <string>
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "message_filters/subscriber.h"
 #include "nav2_msgs/msg/particle_cloud.hpp"
 #include "nav2_msgs/srv/set_initial_pose.hpp"
@@ -41,6 +42,7 @@ protected:
   CallbackReturn on_shutdown(const rclcpp_lifecycle::State & state) override;
 
 private:
+  friend class AmclNodeTfCacheTest;
   void mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message);
   void initialPoseCallback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr message);
@@ -78,10 +80,14 @@ private:
     const rclcpp::Time & stamp,
     const mini_nav_core::localization::Pose2D & odom_pose);
   void publishParticleCloud(const rclcpp::Time & stamp);
-  void publishMapToOdom(
+  void invalidateMapToOdom();
+  void cacheMapToOdom(
     const mini_nav_core::localization::PoseEstimate & estimate,
-    const mini_nav_core::localization::Pose2D & odom_pose,
-    const rclcpp::Time & stamp);
+    const mini_nav_core::localization::Pose2D & odom_pose);
+  bool makeCachedMapToOdomTransform(
+    const rclcpp::Time & scan_stamp,
+    geometry_msgs::msg::TransformStamped & message) const;
+  void publishCachedMapToOdom(const rclcpp::Time & scan_stamp);
 
   std::string global_frame_id_;
   std::string odom_frame_id_;
@@ -95,6 +101,7 @@ private:
   bool first_map_only_{true};
   bool initial_pose_known_{false};
   bool have_odom_pose_{false};
+  bool map_to_odom_valid_{false};
   double update_min_d_{0.25};
   double update_min_a_{0.2};
   double transform_tolerance_{0.5};
@@ -148,6 +155,7 @@ private:
   std::unique_ptr<mini_nav_core::localization::ParticleFilter> particle_filter_;
   mini_nav_core::localization::Pose2D last_odom_pose_;
   mini_nav_core::localization::Pose2D laser_pose_in_base_;
+  geometry_msgs::msg::Transform cached_map_to_odom_;
 };
 
 }  // namespace mini_nav_nodes

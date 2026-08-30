@@ -157,13 +157,16 @@ AmclNode::CallbackReturn AmclNode::on_cleanup(const rclcpp_lifecycle::State &)
   map_received_ = false;
   initial_pose_known_ = false;
   have_odom_pose_ = false;
+  invalidateMapToOdom();
   resample_count_ = 0;
   return CallbackReturn::SUCCESS;
 }
 
 AmclNode::CallbackReturn AmclNode::on_shutdown(const rclcpp_lifecycle::State &)
 {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   active_ = false;
+  invalidateMapToOdom();
   return CallbackReturn::SUCCESS;
 }
 
@@ -365,6 +368,7 @@ void AmclNode::mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr me
     map_received_ = true;
     initial_pose_known_ = false;
     have_odom_pose_ = false;
+    invalidateMapToOdom();
     force_update_ = false;
     RCLCPP_INFO(get_logger(), "Loaded localization map: %u x %u at %.3f m/cell",
       width, height, message->info.resolution);
@@ -418,6 +422,7 @@ void AmclNode::handleInitialPose(
     particle_filter_->InitializeLocalized(pose, covariance);
     initial_pose_known_ = true;
     have_odom_pose_ = false;
+    invalidateMapToOdom();
     force_update_ = true;
     RCLCPP_INFO(get_logger(), "Initialized AMCL at %.3f %.3f %.3f", pose.x, pose.y, pose.yaw);
   } catch (const std::exception & exception) {
@@ -443,6 +448,7 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
 
   const bool first_update = !have_odom_pose_;
   if (!first_update && !shouldUpdate(odom_pose)) {
+    publishCachedMapToOdom(message->header.stamp);
     return;
   }
   try {
@@ -468,7 +474,8 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
     force_update_ = false;
     publishEstimate(estimate, message->header.stamp, odom_pose);
     publishParticleCloud(message->header.stamp);
-    publishMapToOdom(estimate, odom_pose, message->header.stamp);
+    cacheMapToOdom(estimate, odom_pose);
+    publishCachedMapToOdom(message->header.stamp);
   } catch (const std::exception & exception) {
     RCLCPP_ERROR(get_logger(), "AMCL update failed: %s", exception.what());
   }
@@ -488,6 +495,7 @@ void AmclNode::globalLocalizationCallback(
     particle_filter_->InitializeGlobal(*localization_map_);
     initial_pose_known_ = true;
     have_odom_pose_ = false;
+    invalidateMapToOdom();
     force_update_ = true;
   } catch (const std::exception & exception) {
     RCLCPP_ERROR(get_logger(), "Global localization failed: %s", exception.what());
@@ -604,14 +612,16 @@ void AmclNode::publishParticleCloud(const rclcpp::Time & stamp)
   particle_cloud_publisher_->publish(message);
 }
 
-void AmclNode::publishMapToOdom(
-  const mini_nav_core::localization::PoseEstimate & estimate,
-  const mini_nav_core::localization::Pose2D & odom_pose,
-  const rclcpp::Time & stamp)
+void AmclNode::invalidateMapToOdom()
 {
-  if (!tf_broadcast_) {
-    return;
-  }
+  map_to_odom_valid_ = false;
+  cached_map_to_odom_ = geometry_msgs::msg::Transform();
+}
+
+void AmclNode::cacheMapToOdom(
+  const mini_nav_core::localization::PoseEstimate & estimate,
+  const mini_nav_core::localization::Pose2D & odom_pose)
+{
   tf2::Transform map_to_base;
   tf2::Quaternion map_rotation;
   map_rotation.setRPY(0.0, 0.0, estimate.pose.yaw);
@@ -625,12 +635,33 @@ void AmclNode::publishMapToOdom(
   odom_to_base.setRotation(odom_rotation);
 
   const tf2::Transform map_to_odom = map_to_base * odom_to_base.inverse();
-  geometry_msgs::msg::TransformStamped message;
-  message.header.stamp = stamp + rclcpp::Duration::from_seconds(transform_tolerance_);
+  cached_map_to_odom_ = tf2::toMsg(map_to_odom);
+  map_to_odom_valid_ = true;
+}
+
+bool AmclNode::makeCachedMapToOdomTransform(
+  const rclcpp::Time & scan_stamp,
+  geometry_msgs::msg::TransformStamped & message) const
+{
+  if (!map_to_odom_valid_) {
+    return false;
+  }
   message.header.frame_id = global_frame_id_;
   message.child_frame_id = odom_frame_id_;
-  message.transform = tf2::toMsg(map_to_odom);
-  tf_broadcaster_->sendTransform(message);
+  message.transform = cached_map_to_odom_;
+  message.header.stamp = scan_stamp + rclcpp::Duration::from_seconds(transform_tolerance_);
+  return true;
+}
+
+void AmclNode::publishCachedMapToOdom(const rclcpp::Time & scan_stamp)
+{
+  if (!tf_broadcast_ || !tf_broadcaster_) {
+    return;
+  }
+  geometry_msgs::msg::TransformStamped message;
+  if (makeCachedMapToOdomTransform(scan_stamp, message)) {
+    tf_broadcaster_->sendTransform(message);
+  }
 }
 
 }  // namespace mini_nav_nodes

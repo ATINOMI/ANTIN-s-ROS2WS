@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-08-30
+最后更新：2026-08-31
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -25,6 +25,7 @@
   - 通过 RViz 的 `/initialpose` 和 `/goal_pose` 接收起点、终点。
   - 将 A* 结果发布为 `/mini_nav/global_path`。
   - `AmclNode` 生命周期节点及 `/amcl_pose`、`/particle_cloud`、`map -> odom` 适配。
+  - AMCL 定位更新与 TF 发布解耦：未达运动阈值时，仍按激光时间戳重发缓存的 `map -> odom`。
 - 可视化
   - 已有 RViz 配置可显示静态地图、全局路径和地图坐标轴。
 
@@ -70,6 +71,14 @@
 - 重启 `mini_localization_astar.launch.py` 后，已确认自研 AMCL 能接收初始位姿并发布 `/amcl_pose`、`/particle_cloud` 和动态 `map -> odom`。
 - 基础定位链路已验证；Gazebo 中长时间运动、定位收敛指标和官方对照尚未完成。
 
+### AMCL TF 平滑发布（2026-08-31）
+
+- 对照 Jazzy 官方 AMCL 后确认，原实现在位移未达 `update_min_d` 且转角未达 `update_min_a` 时直接返回，导致 `map -> odom` 也停止刷新。旧 TF 超出 `transform_tolerance` 后，RViz 会表现为机器人暂停后跳动。
+- `AmclNode` 现在保存最近一次有效 `map -> odom` 的几何值。粒子滤波更新时重新计算缓存；未达运动阈值时保持几何值不变，使用当前激光时间戳加 `transform_tolerance` 重新发布。
+- 成功替换地图、设置新初始位姿、全局定位、节点 cleanup 或 shutdown 时会使旧 TF 缓存失效，避免跨定位周期复用旧变换。
+- 新增 `test_amcl_tf_cache.cpp` 的 3 项测试，覆盖首次估计前禁止发布、缓存重时间戳和缓存失效。已重新构建 `mini_nav_core`、`mini_nav_nodes`、`mini_nav_bringup`；`colcon test-result --verbose` 为 30 项测试、0 错误、0 失败、0 跳过。
+- 已通过 Gazebo teleop 移动 Waffle 并在 RViz 观察验收；自研 AMCL 在低速、未频繁触发粒子滤波更新时的显示已保持连续，本次卡顿问题通过。
+
 ### M1：自研定位核心（2026-08-27）
 
 - 在 `mini_nav_core` 增加 ROS 无关的 `localization/` 子模块。
@@ -88,7 +97,7 @@
 
 因此，当前阶段不能把 `/mini_nav/global_path` 视为机器人可执行轨迹。
 
-现有 `maps/turtlebot3_map.yaml` 已接入官方 map_server 和自研 AMCL，初始位姿、激光、TF 和 `map -> odom` 基础链路已验证；仍需通过长时间运动确认地图、激光和坐标原点在动态过程中的一致性。
+现有 `maps/turtlebot3_map.yaml` 已接入官方 map_server 和自研 AMCL，初始位姿、激光、TF 和 `map -> odom` 基础链路已验证，低速 teleop 下的 TF 连续刷新也已通过；仍需用长时间和可量化的运动轨迹评估定位误差、收敛速度和丢失恢复能力。
 
 ## 下一里程碑：路径跟踪与安全停止
 
@@ -110,7 +119,7 @@
 
 1. **Astar 可视化**（已完成）：静态地图、选点和全局路径。
 2. **仿真接口基座**（已完成）：Waffle、时钟、TF、里程计、激光与速度接口。
-3. **定位与坐标系**（官方入口已验证，自研基础链路已验证）：理解并继续评估合法的 `map -> odom -> base_*` 链路。
+3. **定位与坐标系**（官方入口、自研基础链路和 TF 平滑刷新已验证）：继续量化评估 `map -> odom -> base_*` 链路下的定位误差、收敛和丢失恢复。
 4. **路径跟踪与安全停止**：将路径转换为受限速度命令，并加入目标到达、超时和零速度保护。
 5. **代价地图与障碍处理**：利用激光数据构建局部代价地图。
 6. **官方 Nav2 对照**：将自研模块与 `nav2_learning` 的 AMCL、规划、控制和恢复行为逐项比较。
