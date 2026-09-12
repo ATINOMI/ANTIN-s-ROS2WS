@@ -1,0 +1,194 @@
+/* Includes ----------------------------------------------------------------*/
+#include "mini_nav_core/costmap_2d.hpp"
+
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
+/* Namespace ---------------------------------------------------------------*/
+namespace mini_nav_core
+{
+    /* Construction and resizing ----------------------------------------------*/
+    // 初始化地图几何信息，并将所有栅格填充为默认代价。
+    Costmap2D::Costmap2D(
+                unsigned int cells_size_x,
+                unsigned int cells_size_y,
+                double resolution,
+                double origin_x,
+                double origin_y,
+                unsigned char default_value):size_x_(0),
+                                            size_y_(0),
+                                            resolution_(0.0),
+                                            origin_x_(0.0),
+                                            origin_y_(0.0),
+                                            default_value_(default_value)
+    {
+        // 构造过程复用重置逻辑，保证两处使用相同的参数校验规则。
+        ResizeMap(cells_size_x, cells_size_y, resolution, origin_x, origin_y);
+    }
+
+    // 重建底层数组；旧地图的代价会恢复为 default_value_。
+    void Costmap2D::ResizeMap(
+                unsigned int size_x,
+                unsigned int size_y,
+                double resolution,
+                double origin_x,
+                double origin_y)
+    {
+        // 先校验地图几何信息，避免无效尺寸和坐标进入后续计算。
+        ValidateGeometry(size_x, size_y, resolution, origin_x, origin_y);
+        // 在分配前计算总格数，并检查乘法溢出和容器容量。
+        const std::size_t cell_count = CalculateCellCount(size_x, size_y);
+
+        // 先创建新地图。若分配失败，当前地图的元数据和栅格数据保持不变。
+        std::vector<unsigned char> new_costmap(cell_count, default_value_);
+
+        size_x_ = size_x;
+        size_y_ = size_y;
+        resolution_ = resolution;
+        origin_x_ = origin_x;
+        origin_y_ = origin_y;
+        costmap_.swap(new_costmap);
+    }
+
+    /* Cell cost access --------------------------------------------------------*/
+    // 二维坐标先转换为一维下标，再读取对应栅格。
+    unsigned char Costmap2D::GetCost(unsigned int mx, unsigned int my) const
+    {
+        // 先检查坐标，避免底层数组发生越界访问。
+            throw std::out_of_range("Costmap cell coordinates are out of bounds");
+        }
+        return costmap_[GetIndex(mx, my)];
+    }
+
+    // 调用方已持有一维下标时，可以直接读取底层数组。
+    unsigned char Costmap2D::GetCost(unsigned int index) const
+    {
+        if (static_cast<std::size_t>(index) >= costmap_.size()) {
+            throw std::out_of_range("Costmap cell index is out of bounds");
+        }
+        return costmap_[index];
+    }
+
+    // 二维坐标先转换为一维下标，再写入新的代价。
+    void Costmap2D::SetCost(unsigned int mx, unsigned int my, unsigned char cost)
+    {
+        if (!IsInBounds(mx, my)) {
+            throw std::out_of_range("Costmap cell coordinates are out of bounds");
+        }
+        costmap_[GetIndex(mx, my)] = cost;
+    }
+
+    /* Coordinate conversion ---------------------------------------------------*/
+    /* Coordinate conversion ---------------------------------------------------*/
+    // 加上 0.5，使输出坐标落在栅格中心而不是左下角边界。
+    void Costmap2D::MapToWorld(unsigned int mx,
+                            unsigned int my,
+                            double & wx,
+                            double & wy) const
+    {
+        if (!IsInBounds(mx, my)) {
+            throw std::out_of_range("Costmap cell coordinates are out of bounds");
+        }
+        wx = origin_x_ + (mx + 0.5) * resolution_;
+        wy = origin_y_ + (my + 0.5) * resolution_;
+    }
+
+    // 先检查下界，避免负数转换为 unsigned int 后得到异常的大数。
+    bool Costmap2D::WorldToMap(double wx,
+                            double wy,
+                            unsigned int & mx,
+                            unsigned int & my) const
+    {
+        if (!std::isfinite(wx) || !std::isfinite(wy) ||
+            wx < origin_x_ || wy < origin_y_) {
+            return false;
+        }
+
+        const double map_x = (wx - origin_x_) / resolution_;
+        const double map_y = (wy - origin_y_) / resolution_;
+
+        // 先检查计算结果，再转换为无符号整数，避免非法浮点转换。
+        if (!std::isfinite(map_x) || !std::isfinite(map_y) ||
+            map_x < 0.0 || map_y < 0.0 ||
+            map_x >= static_cast<double>(size_x_) ||
+            map_y >= static_cast<double>(size_y_)) {
+            return false;
+        }
+
+        mx = static_cast<unsigned int>(map_x);
+        my = static_cast<unsigned int>(map_y);
+        return true;
+    }
+
+    /* Metadata accessors ------------------------------------------------------*/
+    /* Metadata accessors ------------------------------------------------------*/
+    unsigned int Costmap2D::GetSizeInCellsX() const
+    {
+        return size_x_;
+    }
+
+    unsigned int Costmap2D::GetSizeInCellsY() const
+    {
+        return size_y_;
+    }
+
+    double Costmap2D::GetOriginX() const
+    {
+        return origin_x_;
+    }
+
+    double Costmap2D::GetOriginY() const
+    {
+        return origin_y_;
+    }
+
+    double Costmap2D::GetResolution() const
+    {
+        return resolution_;
+    }
+
+    /* Internal helpers --------------------------------------------------------*/
+    bool Costmap2D::IsInBounds(unsigned int mx, unsigned int my) const
+    {
+        return mx < size_x_ && my < size_y_;
+    }
+
+    std::size_t Costmap2D::GetIndex(unsigned int mx, unsigned int my) const
+    {
+        return static_cast<std::size_t>(my) * size_x_ + mx;
+    }
+
+    void Costmap2D::ValidateGeometry(
+        unsigned int size_x,
+        unsigned int size_y,
+        double resolution,
+        double origin_x,
+        double origin_y)
+    {
+        if (size_x == 0 || size_y == 0) {
+            throw std::invalid_argument("Costmap dimensions must be greater than zero");
+        }
+        if (!std::isfinite(resolution) || resolution <= 0.0) {
+            throw std::invalid_argument("Costmap resolution must be finite and greater than zero");
+        }
+        if (!std::isfinite(origin_x) || !std::isfinite(origin_y)) {
+            throw std::invalid_argument("Costmap origin must be finite");
+        }
+    }
+
+    std::size_t Costmap2D::CalculateCellCount(unsigned int size_x, unsigned int size_y)
+    {
+        const std::size_t cells_x = static_cast<std::size_t>(size_x);
+        const std::size_t cells_y = static_cast<std::size_t>(size_y);
+        if (cells_x > std::numeric_limits<std::size_t>::max() / cells_y) {
+            throw std::length_error("Costmap cell count overflows size_t");
+        }
+
+        const std::size_t cell_count = cells_x * cells_y;
+        if (cell_count > std::vector<unsigned char>().max_size()) {
+            throw std::length_error("Costmap is too large to allocate");
+        }
+        return cell_count;
+    }
+}

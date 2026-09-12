@@ -1,13 +1,25 @@
+/**
+ * @file types.hpp
+ * @brief 定义了用于粒子滤波器定位的基本类型，包括 Pose2D、Covariance3、Particle 和 PoseEstimate。
+ *
+ * 这些类型用于表示机器人在二维平面上的位姿、协方差矩阵、粒子以及位姿估计结果。
+ */
 #pragma once
 
+/* Includes ----------------------------------------------------------------*/
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
 
+/* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_core::localization
 {
 
+  /**
+   * @brief 表示二维平面上的位姿，包括位置 (x, y) 和朝向 (yaw)。
+   * 
+   */
 struct Pose2D
 {
   double x{0.0};
@@ -15,11 +27,52 @@ struct Pose2D
   double yaw{0.0};
 };
 
+/**
+ * @brief 表示一个粒子，包括位姿和权重。
+ *
+ * 粒子用于粒子滤波器中，表示机器人可能的状态。
+ */
+struct Particle
+{
+  Pose2D pose;
+  double weight{0.0};
+};
+
+/**
+ * @brief 表示一个位姿估计结果，包括有效性、位姿、协方差和权重。
+ *
+ * 该结构体用于存储粒子滤波器的输出，表示机器人当前的位姿估计。
+ */
+struct PoseEstimate
+{
+  bool valid{false};
+  Pose2D pose;
+  Covariance3 covariance;
+  double weight{0.0};
+};
+
+/* Class ------------------------------------------------------------------*/
+
+/**
+ * @brief 表示二维平面上的协方差矩阵，大小为 3x3。
+ *
+ * 该类用于表示位姿的不确定性，包括位置 (x, y) 和朝向 (yaw) 的协方差。
+ */
 class Covariance3
 {
 public:
+/* Functions --------------------------------------------------------------*/
+
+  // 默认构造函数
   Covariance3() = default;
 
+  /**
+   * @brief 创建一个对角协方差矩阵。
+   * @param x 位置 x 的协方差
+   * @param y 位置 y 的协方差
+   * @param yaw 朝向的协方差
+   * @return 对角协方差矩阵
+   */
   static Covariance3 Diagonal(double x, double y, double yaw)
   {
     Covariance3 covariance;
@@ -29,6 +82,13 @@ public:
     return covariance;
   }
 
+  /**
+   * @brief 返回行列索引对应的协方差值元素本身，用于修改。
+   * 
+   * @param row       行索引
+   * @param column    列索引
+   * @return double& 
+   */
   double & At(std::size_t row, std::size_t column)
   {
     if (row >= 3U || column >= 3U) {
@@ -37,6 +97,13 @@ public:
     return values_[row * 3U + column];
   }
 
+  /**
+   * @brief 返回行列索引对应的协方差值元素的常量引用，用于只读访问。
+   * 
+   * @param row       行索引
+   * @param column    列索引
+   * @return double 
+   */
   double At(std::size_t row, std::size_t column) const
   {
     if (row >= 3U || column >= 3U) {
@@ -45,39 +112,51 @@ public:
     return values_[row * 3U + column];
   }
 
+  /**
+   * @brief 只读访问器，返回协方差矩阵的内部数组表示。
+   * 
+   * @return const std::array<double, 9>& 
+   */
   const std::array<double, 9> & Values() const { return values_; }
 
+  /*Private members --------------------------------------------------------*/
+  
 private:
+  // 该类的核心，使用一个一维数组存储 3x3 协方差矩阵的值，按行优先顺序排列。
   std::array<double, 9> values_{};
 };
 
-struct Particle
-{
-  Pose2D pose;
-  double weight{0.0};
-};
+/*inline functions----------------------------------------------------------*/
 
-struct PoseEstimate
-{
-  bool valid{false};
-  Pose2D pose;
-  Covariance3 covariance;
-  double weight{0.0};
-};
-
+/**
+ * @brief 将角度归一化到 [-π, π] 范围内。
+ *
+ * @param angle 输入角度（弧度）
+ * @return double 归一化后的角度（弧度）
+ */
 inline double NormalizeAngle(double angle)
 {
   constexpr double kPi = 3.14159265358979323846;
   constexpr double kTwoPi = 2.0 * kPi;
+  // 取模运算将角度归一化到 [0, 2π] 范围内
   angle = std::fmod(angle + kPi, kTwoPi);
+  // 如果结果为负数，则加上 2π，使其落在 [0, 2π] 范围内
   if (angle < 0.0) {
     angle += kTwoPi;
   }
   return angle - kPi;
 }
 
+/**
+ * @brief 计算两个角度之间的有向距离。
+ *
+ * @param from 起始角度（弧度）
+ * @param to 目标角度（弧度）
+ * @return double 有向距离（弧度）
+ */
 inline double AngularDistance(double from, double to)
 {
+  // 计算两个角度之间的差值，并将其归一化到 [-π, π] 范围内
   return NormalizeAngle(from - to);
 }
 
