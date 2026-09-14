@@ -18,7 +18,7 @@
   - 栅格坐标与世界坐标之间的转换。
   - 四邻域 A* 全局路径规划。
   - 代价地图与 A* 规划器的单元测试。
-  - `localization/` 中的 `LocalizationMap`、差分运动模型、激光模型、`KdTree` 和 `ParticleFilter`。
+  - `localization/` 中的 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`。
 - `mini_nav_nodes`
   - 从 map_server 的 `/map` 接收 `nav_msgs/msg/OccupancyGrid`，转换为 `Costmap2D`。
   - 通过 `map_file` 参数直接加载标准 trinary YAML/PGM 地图，并发布 `/mini_nav/map`。
@@ -85,7 +85,7 @@
 - 完成 `Pose2D`、`Covariance3`、`Particle`、`PoseEstimate` 数据结构。
 - 完成粒子初始化、完整协方差 Cholesky 采样、权重校验/归一化、系统重采样、圆周角度均值和协方差估计。
 - 新增 9 项粒子滤波单元测试；与原有地图/A* 测试一起通过，测试结果为 26 项、0 错误、0 失败、0 跳过。
-- 该记录描述 2026-08-27 的核心阶段；当前已继续完成差分运动模型、激光模型、`KdTree`、ROS 适配节点和自研 launch 接入。
+- 该记录描述 2026-08-27 的核心阶段；当前已继续完成差分运动模型、激光模型、`PoseBinIndex`、ROS 适配节点和自研 launch 接入。
 
 ## 当前边界
 

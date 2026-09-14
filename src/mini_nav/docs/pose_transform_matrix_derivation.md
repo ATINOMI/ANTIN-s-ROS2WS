@@ -158,18 +158,18 @@ $$
 当前 `likelihood_field_model.cpp` 和 `beam_model.cpp` 中的调用是：
 
 ```cpp
-const Pose2D laser_pose = ComposePose(particle.pose, laser_pose_in_base);
+const Pose2D laser_pose = ComposePose(particle.pose, base_to_laser_pose);
 ```
 
 对应的坐标变换链为：
 
 ```text
 particle.pose       = T_map_base
-laser_pose_in_base  = T_base_laser
+base_to_laser_pose  = T_base_laser
 结果                = T_map_laser
 ```
 
-也就是说，粒子表示机器人基座在地图中的假设位姿，`laser_pose_in_base` 表示激光雷达相对于基座的安装位姿，函数将两者组合成激光雷达在地图中的位姿。随后激光端点才能被投影到地图坐标系中。
+也就是说，粒子表示机器人基座在地图中的假设位姿，`base_to_laser_pose` 表示激光雷达相对于基座的安装位姿，函数将两者组合成激光雷达在地图中的位姿。随后激光端点才能被投影到地图坐标系中。
 
 ## 7. 它与 odom -> base 的关系
 

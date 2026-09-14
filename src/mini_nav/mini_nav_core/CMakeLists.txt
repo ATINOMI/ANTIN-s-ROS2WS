@@ -53,6 +53,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_particle_filter ${PROJECT_NAME})
   endif()
 
+  ament_add_gtest(test_localization_naming test/test_localization_naming.cpp)
+  if(TARGET test_localization_naming)
+    target_link_libraries(test_localization_naming ${PROJECT_NAME})
+  endif()
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)

@@ -1,6 +1,7 @@
 #include "mini_nav_core/localization/localization_map.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <queue>
@@ -41,8 +42,8 @@ LocalizationMap::LocalizationMap(const Costmap2D & costmap, double max_obstacle_
     for (unsigned int x = 0; x < size_x_; ++x) {
       const std::size_t index = static_cast<std::size_t>(y) * size_x_ + x;
       costs_[index] = costmap.GetCost(x, y);
-      if (IsFree(MapCell{x, y})) {
-        free_cells_.push_back(MapCell{x, y});
+      if (IsKnownFree(GridCell{x, y})) {
+        free_cells_.push_back(GridCell{x, y});
       }
     }
   }
@@ -50,8 +51,8 @@ LocalizationMap::LocalizationMap(const Costmap2D & costmap, double max_obstacle_
   std::priority_queue<DistanceEntry, std::vector<DistanceEntry>, std::greater<DistanceEntry>> queue;
   for (unsigned int y = 0; y < size_y_; ++y) {
     for (unsigned int x = 0; x < size_x_; ++x) {
-      const MapCell cell{x, y};
-      if (!IsOccupied(cell)) {
+      const GridCell cell{x, y};
+      if (!IsKnownOccupied(cell)) {
         continue;
       }
       const std::size_t index = GetIndex(cell);
@@ -60,9 +61,16 @@ LocalizationMap::LocalizationMap(const Costmap2D & costmap, double max_obstacle_
     }
   }
 
-  constexpr int directions[8][3] = {
-    {1, 0, 1}, {-1, 0, 1}, {0, 1, 1}, {0, -1, 1},
-    {1, 1, 0}, {1, -1, 0}, {-1, 1, 0}, {-1, -1, 0}};
+  struct NeighborOffset
+  {
+    int dx;
+    int dy;
+    double distance_multiplier;
+  };
+  constexpr std::array<NeighborOffset, 8> kNeighborOffsets{{
+    {1, 0, 1.0}, {-1, 0, 1.0}, {0, 1, 1.0}, {0, -1, 1.0},
+    {1, 1, kSqrtTwo}, {1, -1, kSqrtTwo},
+    {-1, 1, kSqrtTwo}, {-1, -1, kSqrtTwo}}};
 
   while (!queue.empty()) {
     const auto current = queue.top();
@@ -73,15 +81,15 @@ LocalizationMap::LocalizationMap(const Costmap2D & costmap, double max_obstacle_
 
     const unsigned int current_x = static_cast<unsigned int>(current.index % size_x_);
     const unsigned int current_y = static_cast<unsigned int>(current.index / size_x_);
-    for (const auto & direction : directions) {
-      const int next_x = static_cast<int>(current_x) + direction[0];
-      const int next_y = static_cast<int>(current_y) + direction[1];
+    for (const auto & direction : kNeighborOffsets) {
+      const int next_x = static_cast<int>(current_x) + direction.dx;
+      const int next_y = static_cast<int>(current_y) + direction.dy;
       if (next_x < 0 || next_y < 0 || next_x >= static_cast<int>(size_x_) ||
           next_y >= static_cast<int>(size_y_)) {
         continue;
       }
 
-      const double step = direction[2] == 1 ? resolution_ : resolution_ * std::sqrt(2.0);
+      const double step = resolution_ * direction.distance_multiplier;
       const std::size_t next_index = static_cast<std::size_t>(next_y) * size_x_ + next_x;
       const double next_distance = std::min(max_obstacle_distance_, current.distance + step);
       if (next_distance < obstacle_distances_[next_index]) {
@@ -92,7 +100,7 @@ LocalizationMap::LocalizationMap(const Costmap2D & costmap, double max_obstacle_
   }
 }
 
-bool LocalizationMap::TryGetCellFromWorld(double world_x, double world_y, MapCell & cell) const
+bool LocalizationMap::TryGetCellFromWorld(double world_x, double world_y, GridCell & cell) const
 {
   if (!std::isfinite(world_x) || !std::isfinite(world_y) ||
       world_x < origin_x_ || world_y < origin_y_) {
@@ -107,13 +115,13 @@ bool LocalizationMap::TryGetCellFromWorld(double world_x, double world_y, MapCel
     return false;
   }
 
-  cell = MapCell{
+  cell = GridCell{
     static_cast<unsigned int>(cell_x),
     static_cast<unsigned int>(cell_y)};
   return true;
 }
 
-void LocalizationMap::GetCellCenter(const MapCell & cell, double & world_x, double & world_y) const
+void LocalizationMap::GetCellCenter(const GridCell & cell, double & world_x, double & world_y) const
 {
   if (!IsInBounds(cell)) {
     throw std::out_of_range("Localization map cell is out of bounds");
@@ -122,53 +130,68 @@ void LocalizationMap::GetCellCenter(const MapCell & cell, double & world_x, doub
   world_y = origin_y_ + (static_cast<double>(cell.y) + 0.5) * resolution_;
 }
 
-bool LocalizationMap::IsFree(const MapCell & cell) const
+bool LocalizationMap::IsKnownFree(const GridCell & cell) const
 {
-  return IsInBounds(cell) && costs_[GetIndex(cell)] < kLethalObstacle &&
-         costs_[GetIndex(cell)] != kUnknownCost;
+  // Unknown cost is above the lethal threshold, so this test means known free.
+  return IsInBounds(cell) && costs_[GetIndex(cell)] < kLethalObstacle;
 }
 
-bool LocalizationMap::IsOccupied(const MapCell & cell) const
+bool LocalizationMap::IsKnownOccupied(const GridCell & cell) const
 {
   return IsInBounds(cell) && costs_[GetIndex(cell)] >= kLethalObstacle &&
          costs_[GetIndex(cell)] != kUnknownCost;
 }
 
-double LocalizationMap::GetObstacleDistanceAtWorld(double world_x, double world_y) const
+bool LocalizationMap::IsUnknown(const GridCell & cell) const
 {
-  MapCell cell;
-  if (!TryGetCellFromWorld(world_x, world_y, cell)) {
-    return max_obstacle_distance_;
-  }
-  return obstacle_distances_[GetIndex(cell)];
+  return IsInBounds(cell) && costs_[GetIndex(cell)] == kUnknownCost;
 }
 
-bool LocalizationMap::CastRay(const Pose2D & pose, double max_range, double & range) const
+bool LocalizationMap::TryGetObstacleDistanceAtWorld(
+  double world_x, double world_y, double & distance_m) const
 {
-  if (!std::isfinite(max_range) || max_range <= 0.0) {
+  GridCell cell;
+  if (!TryGetCellFromWorld(world_x, world_y, cell)) {
     return false;
   }
-
-  const double step = std::max(resolution_ * 0.5, 1.0e-4);
-  for (double distance = 0.0; distance <= max_range; distance += step) {
-    const double x = pose.x + distance * std::cos(pose.yaw);
-    const double y = pose.y + distance * std::sin(pose.yaw);
-    MapCell cell;
-    if (!TryGetCellFromWorld(x, y, cell)) {
-      range = distance;
-      return true;
-    }
-    if (IsOccupied(cell)) {
-      range = distance;
-      return true;
-    }
-  }
-
-  range = max_range;
+  distance_m = obstacle_distances_[GetIndex(cell)];
   return true;
 }
 
-bool LocalizationMap::SampleFreeCell(std::mt19937_64 & generator, MapCell & cell) const
+double LocalizationMap::GetObstacleDistanceAtWorld(double world_x, double world_y) const
+{
+  double distance_m = max_obstacle_distance_;
+  TryGetObstacleDistanceAtWorld(world_x, world_y, distance_m);
+  return distance_m;
+}
+
+bool LocalizationMap::CastRay(
+  const Pose2D & ray_pose, double max_range_m, double & expected_range_m) const
+{
+  if (!std::isfinite(max_range_m) || max_range_m <= 0.0) {
+    return false;
+  }
+
+  const double step = std::max(resolution_ * kRayStepFraction, kMinimumRayStepM);
+  for (double distance = 0.0; distance <= max_range_m; distance += step) {
+    const double x = ray_pose.x + distance * std::cos(ray_pose.yaw);
+    const double y = ray_pose.y + distance * std::sin(ray_pose.yaw);
+    GridCell cell;
+    if (!TryGetCellFromWorld(x, y, cell)) {
+      expected_range_m = distance;
+      return true;
+    }
+    if (IsKnownOccupied(cell)) {
+      expected_range_m = distance;
+      return true;
+    }
+  }
+
+  expected_range_m = max_range_m;
+  return true;
+}
+
+bool LocalizationMap::SampleKnownFreeCell(std::mt19937_64 & generator, GridCell & cell) const
 {
   if (free_cells_.empty()) {
     return false;
@@ -178,7 +201,7 @@ bool LocalizationMap::SampleFreeCell(std::mt19937_64 & generator, MapCell & cell
   return true;
 }
 
-std::size_t LocalizationMap::GetFreeCellCount() const
+std::size_t LocalizationMap::GetKnownFreeCellCount() const
 {
   return free_cells_.size();
 }
@@ -203,12 +226,12 @@ double LocalizationMap::GetMaxObstacleDistance() const
   return max_obstacle_distance_;
 }
 
-std::size_t LocalizationMap::GetIndex(const MapCell & cell) const
+std::size_t LocalizationMap::GetIndex(const GridCell & cell) const
 {
   return static_cast<std::size_t>(cell.y) * size_x_ + cell.x;
 }
 
-bool LocalizationMap::IsInBounds(const MapCell & cell) const
+bool LocalizationMap::IsInBounds(const GridCell & cell) const
 {
   return cell.x < size_x_ && cell.y < size_y_;
 }

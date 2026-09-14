@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <random>
 
+#include "mini_nav_core/localization/localization_constants.hpp"
 #include "mini_nav_core/localization/motion_model.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
@@ -48,12 +49,12 @@ public:
    * @param seed 随机数生成器的种子，用于可重复性
    */
   explicit DifferentialMotionModel(
-    double alpha1 = 0.2,
-    double alpha2 = 0.2,
-    double alpha3 = 0.2,
-    double alpha4 = 0.2,
-    double alpha5 = 0.2,
-    std::uint64_t seed = 1);
+    double alpha1 = kDefaultMotionNoiseCoefficient,
+    double alpha2 = kDefaultMotionNoiseCoefficient,
+    double alpha3 = kDefaultMotionNoiseCoefficient,
+    double alpha4 = kDefaultMotionNoiseCoefficient,
+    double alpha5 = kDefaultMotionNoiseCoefficient,
+    std::uint64_t seed = kDefaultRandomSeed);
 
   /**
    * @brief 更新粒子位置和方向
@@ -72,7 +73,7 @@ private:
   double alpha2_; // 角速度噪声系数
   double alpha3_; // 线速度与角速度的交叉噪声系数
   double alpha4_; // 角速度与线速度的交叉噪声系数
-  double alpha5_; // 角速度的二次噪声系数
+  double alpha5_; // 全向模型兼容保留；当前差速模型运动学不使用该系数
   std::mt19937_64 generator_; // 随机数生成器，用于生成高斯噪声
 };
 

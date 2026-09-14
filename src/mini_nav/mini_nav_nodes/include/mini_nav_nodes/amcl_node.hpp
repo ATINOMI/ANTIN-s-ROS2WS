@@ -123,7 +123,7 @@ private:
   std::size_t min_particles_{500};
   std::size_t max_particles_{2000};
   double pf_err_{0.05};
-  double pf_z_{2.33};
+  double kld_normal_quantile_{2.33};
   double recovery_alpha_fast_{0.0};
   double recovery_alpha_slow_{0.0};
   std::size_t resample_interval_{1};
@@ -154,7 +154,6 @@ private:
   std::unique_ptr<mini_nav_core::localization::LocalizationMap> localization_map_;
   std::unique_ptr<mini_nav_core::localization::ParticleFilter> particle_filter_;
   mini_nav_core::localization::Pose2D last_odom_pose_;
-  mini_nav_core::localization::Pose2D laser_pose_in_base_;
   geometry_msgs::msg::Transform cached_map_to_odom_;
 };
 

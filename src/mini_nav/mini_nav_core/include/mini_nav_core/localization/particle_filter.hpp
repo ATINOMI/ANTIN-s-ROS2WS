@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "mini_nav_core/localization/kd_tree.hpp"
+#include "mini_nav_core/localization/localization_constants.hpp"
 #include "mini_nav_core/localization/laser_model.hpp"
 #include "mini_nav_core/localization/motion_model.hpp"
 
@@ -15,10 +16,10 @@ namespace mini_nav_core::localization
 
 struct ParticleFilterOptions
 {
-  std::size_t min_particles{500};
-  std::size_t max_particles{2000};
-  double pf_err{0.05};
-  double pf_z{2.33};
+  std::size_t min_particles{kDefaultMinParticles};
+  std::size_t max_particles{kDefaultMaxParticles};
+  double pf_err{kDefaultKldError};
+  double kld_normal_quantile{kDefaultKldNormalQuantile};
   double recovery_alpha_fast{0.0};
   double recovery_alpha_slow{0.0};
 };
@@ -26,13 +27,13 @@ struct ParticleFilterOptions
 class ParticleFilter
 {
 public:
-  explicit ParticleFilter(std::size_t particle_count, std::uint64_t seed = 1);
+  explicit ParticleFilter(std::size_t particle_count, std::uint64_t seed = kDefaultRandomSeed);
 
   ParticleFilter(
     std::unique_ptr<MotionModel> motion_model,
     std::unique_ptr<LaserModel> laser_model,
     ParticleFilterOptions options = {},
-    std::uint64_t seed = 1);
+    std::uint64_t seed = kDefaultRandomSeed);
 
   void Initialize(const Pose2D & pose, const Covariance3 & covariance);
   void InitializeLocalized(const Pose2D & pose, const Covariance3 & covariance);
@@ -42,7 +43,7 @@ public:
   void SensorUpdate(
     const LaserScanData & scan,
     const LocalizationMap & map,
-    const Pose2D & laser_pose_in_base);
+    const Pose2D & base_to_laser_pose);
 
   void SetWeights(const std::vector<double> & weights);
   bool NormalizeWeights();
@@ -54,7 +55,6 @@ public:
 
 private:
   void ValidateParticleCount(std::size_t count) const;
-  void InitializeWithSamples(const std::vector<Pose2D> & poses);
   static bool CholeskyDecompose(const Covariance3 & covariance, double lower[3][3]);
   static double NormalQuantile(double probability);
   std::size_t GetTargetParticleCount() const;
@@ -64,10 +64,10 @@ private:
   std::unique_ptr<LaserModel> laser_model_;
   ParticleFilterOptions options_;
   std::mt19937_64 generator_;
-  KdTree kd_tree_;
+  PoseBinIndex pose_bin_index_;
   bool initialized_{false};
-  double w_fast_{0.0};
-  double w_slow_{0.0};
+  double fast_mean_weight_{0.0};
+  double slow_mean_weight_{0.0};
 };
 
 }  // namespace mini_nav_core::localization

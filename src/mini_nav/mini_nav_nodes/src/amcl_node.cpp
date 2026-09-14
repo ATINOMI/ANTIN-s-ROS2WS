@@ -217,7 +217,7 @@ void AmclNode::initializeParameters()
   max_particles_ = static_cast<std::size_t>(max_particles);
   resample_interval_ = static_cast<std::size_t>(resample_interval);
   get_parameter("pf_err", pf_err_);
-  get_parameter("pf_z", pf_z_);
+  get_parameter("pf_z", kld_normal_quantile_);
   get_parameter("recovery_alpha_fast", recovery_alpha_fast_);
   get_parameter("recovery_alpha_slow", recovery_alpha_slow_);
 
@@ -253,7 +253,8 @@ void AmclNode::initializeTransforms()
 void AmclNode::initializeFilter()
 {
   auto motion_model = std::make_unique<mini_nav_core::localization::DifferentialMotionModel>(
-    alpha1_, alpha2_, alpha3_, alpha4_, alpha5_, 1);
+    alpha1_, alpha2_, alpha3_, alpha4_, alpha5_,
+    mini_nav_core::localization::kDefaultRandomSeed);
   std::unique_ptr<mini_nav_core::localization::LaserModel> laser_model;
   if (laser_model_type_ == "beam") {
     laser_model = std::make_unique<mini_nav_core::localization::BeamModel>(
@@ -269,11 +270,12 @@ void AmclNode::initializeFilter()
   options.min_particles = min_particles_;
   options.max_particles = max_particles_;
   options.pf_err = pf_err_;
-  options.pf_z = pf_z_;
+  options.kld_normal_quantile = kld_normal_quantile_;
   options.recovery_alpha_fast = recovery_alpha_fast_;
   options.recovery_alpha_slow = recovery_alpha_slow_;
   particle_filter_ = std::make_unique<mini_nav_core::localization::ParticleFilter>(
-    std::move(motion_model), std::move(laser_model), options, 1);
+    std::move(motion_model), std::move(laser_model), options,
+    mini_nav_core::localization::kDefaultRandomSeed);
 }
 
 void AmclNode::initializeCommunications()
@@ -413,9 +415,9 @@ void AmclNode::handleInitialPose(
   covariance.At(2, 2) = message.pose.covariance[35];
 
   try {
-    mini_nav_core::localization::MapCell cell;
+    mini_nav_core::localization::GridCell cell;
     if (!localization_map_->TryGetCellFromWorld(pose.x, pose.y, cell) ||
-        !localization_map_->IsFree(cell)) {
+        !localization_map_->IsKnownFree(cell)) {
       RCLCPP_WARN(get_logger(), "Ignoring initial pose outside free map space");
       return;
     }
@@ -438,10 +440,10 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
   }
 
   mini_nav_core::localization::Pose2D odom_pose;
-  mini_nav_core::localization::Pose2D laser_pose;
+  mini_nav_core::localization::Pose2D base_to_laser_pose;
   if (!getTransformPose(odom_frame_id_, base_frame_id_, message->header.stamp, odom_pose) ||
       !getTransformPose(base_frame_id_, StripLeadingSlash(message->header.frame_id),
-      message->header.stamp, laser_pose)) {
+      message->header.stamp, base_to_laser_pose)) {
     RCLCPP_DEBUG(get_logger(), "Skipping scan because the required TF is unavailable");
     return;
   }
@@ -455,7 +457,8 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
     if (!first_update) {
       particle_filter_->MotionUpdate(last_odom_pose_, odom_pose);
     }
-    particle_filter_->SensorUpdate(convertScan(*message), *localization_map_, laser_pose);
+    particle_filter_->SensorUpdate(
+      convertScan(*message), *localization_map_, base_to_laser_pose);
     if (!particle_filter_->NormalizeWeights()) {
       RCLCPP_WARN(get_logger(), "AMCL received a scan with unusable particle weights");
       return;

@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "mini_nav_core/localization/localization_constants.hpp"
+
 /* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_core::localization
 {
@@ -38,18 +40,6 @@ struct Particle
   double weight{0.0};
 };
 
-/**
- * @brief 表示一个位姿估计结果，包括有效性、位姿、协方差和权重。
- *
- * 该结构体用于存储粒子滤波器的输出，表示机器人当前的位姿估计。
- */
-struct PoseEstimate
-{
-  bool valid{false};
-  Pose2D pose;
-  Covariance3 covariance;
-  double weight{0.0};
-};
 
 /* Class ------------------------------------------------------------------*/
 
@@ -68,22 +58,30 @@ public:
 
   /**
    * @brief 创建一个对角协方差矩阵。
-   * @param x 位置 x 的协方差
-   * @param y 位置 y 的协方差
-   * @param yaw 朝向的协方差
+   * @param x_variance x 位置方差，单位为 m²
+   * @param y_variance y 位置方差，单位为 m²
+   * @param yaw_variance yaw 方差，单位为 rad²
    * @return 对角协方差矩阵
    */
-  static Covariance3 Diagonal(double x, double y, double yaw)
+  static Covariance3 DiagonalVariances(
+    double x_variance, double y_variance, double yaw_variance)
   {
     Covariance3 covariance;
-    covariance.values_[0] = x;
-    covariance.values_[4] = y;
-    covariance.values_[8] = yaw;
+    covariance.values_[0] = x_variance;
+    covariance.values_[4] = y_variance;
+    covariance.values_[8] = yaw_variance;
     return covariance;
   }
 
+  // Compatibility name retained for existing callers.
+  static Covariance3 Diagonal(
+    double x_variance, double y_variance, double yaw_variance)
+  {
+    return DiagonalVariances(x_variance, y_variance, yaw_variance);
+  }
+
   /**
-   * @brief 返回行列索引对应的协方差值元素本身，用于修改。
+   * @brief 返回行列索引对应的协方差值元素本身，用于修改.
    * 
    * @param row       行索引
    * @param column    列索引
@@ -112,11 +110,7 @@ public:
     return values_[row * 3U + column];
   }
 
-  /**
-   * @brief 只读访问器，返回协方差矩阵的内部数组表示。
-   * 
-   * @return const std::array<double, 9>& 
-   */
+  /// Return the row-major 3x3 covariance storage for read-only inspection.
   const std::array<double, 9> & Values() const { return values_; }
 
   /*Private members --------------------------------------------------------*/
@@ -124,6 +118,24 @@ public:
 private:
   // 该类的核心，使用一个一维数组存储 3x3 协方差矩阵的值，按行优先顺序排列。
   std::array<double, 9> values_{};
+};
+
+// PoseCovariance is the semantic name; Covariance3 remains source-compatible.
+using PoseCovariance = Covariance3;
+
+/**
+ * @brief 表示一个位姿估计结果.
+ *
+ * Pose2D is the estimated base pose in the map frame; covariance diagonal
+ * entries are variances in m², m², and rad².
+ */
+struct PoseEstimate
+{
+  bool valid{false};
+  Pose2D pose;
+  Covariance3 covariance;
+  // Sum of particle weights used by this estimate, before normalization.
+  double weight{0.0};
 };
 
 /*inline functions----------------------------------------------------------*/
@@ -136,8 +148,6 @@ private:
  */
 inline double NormalizeAngle(double angle)
 {
-  constexpr double kPi = 3.14159265358979323846;
-  constexpr double kTwoPi = 2.0 * kPi;
   // 取模运算将角度归一化到 [0, 2π] 范围内
   angle = std::fmod(angle + kPi, kTwoPi);
   // 如果结果为负数，则加上 2π，使其落在 [0, 2π] 范围内

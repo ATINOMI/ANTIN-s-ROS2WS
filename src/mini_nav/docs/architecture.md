@@ -122,7 +122,7 @@ src/mini_nav/                                      # mini_nav 项目集合根目
 - `navigator/astar_navigator.hpp` 是 A* 的外部接缝：调用者只需提供 `Costmap2D`、起点和终点。
 - `navigator/astar_navigator.cpp` 隐藏 open list、代价记录、父节点回溯和无路径处理。
 - `map/costmap_2d.hpp/.cpp` 隐藏栅格内存、世界坐标转换、越界检查和地图绘制。
-- `localization/` 提供 `LocalizationMap`、差分运动模型、激光模型、`KdTree` 和 `ParticleFilter`；定位算法不依赖 ROS。
+- `localization/` 提供 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`；定位算法不依赖 ROS。
 - `test/` 只通过核心模块接口测试行为，不依赖 ROS 节点、Gazebo 或 RViz。
 
 ### 2.1.1 `localization/`：AMCL 算法文件职责
@@ -136,11 +136,11 @@ src/mini_nav/                                      # mini_nav 项目集合根目
 | `localization_map.hpp/.cpp` | 定位地图模块 | 从 `Costmap2D` 构造只读地图快照，保存原点、分辨率和栅格代价；提供世界坐标到栅格查询、自由/障碍判断、障碍距离查询、自由栅格采样和射线投射。构造函数内部用优先队列传播障碍距离场，供似然场模型快速查询。 |
 | `motion_model.hpp` | 运动模型接口 | 定义 `UpdateParticles()` 抽象接口。调用者只提供上一帧和当前帧里程计位姿，具体噪声模型由实现隐藏。 |
 | `differential_motion_model.hpp/.cpp` | 差速运动模型 | 将里程计增量分解为第一次旋转、平移和第二次旋转，依据 `alpha1` 到 `alpha5` 为每个粒子注入高斯噪声，然后原地更新粒子位姿。 |
-| `laser_model.hpp` | 激光模型接口 | 定义 `UpdateWeights()` 抽象接口，使粒子滤波器不依赖某一种激光观测模型。 |
+| `laser_model.hpp` | 激光模型接口 | 定义 `ApplyMeasurementLikelihood()` 抽象接口，使粒子滤波器不依赖某一种激光观测模型。 |
 | `likelihood_field_model.hpp/.cpp` | 似然场模型 | 将有效激光束投影到地图，查询命中点到最近障碍物的距离，并按 `z_hit`、`z_rand` 和 `sigma_hit` 累积粒子权重；按 `max_beams` 降采样以控制计算量。 |
 | `beam_model.hpp/.cpp` | Beam 模型 | 通过 `LocalizationMap::CastRay()` 计算地图预期量程，再组合命中、短测距、最大量程和随机测量概率。它与似然场模型共享 `LaserModel` 接口，目前由参数选择。 |
-| `kd_tree.hpp/.cpp` | 粒子空间统计 | 按线性和角度分辨率把粒子量化到空间 bin，并统计占用 bin 数。当前实现使用哈希分箱，不是对外暴露的通用搜索树；公共接口只有 `Build()` 和 `GetOccupiedBinCount()`，只服务 `ParticleFilter` 的 KLD 自适应粒子数计算。 |
-| `particle_filter.hpp/.cpp` | AMCL 主算法模块 | 持有 `MotionModel`、`LaserModel` 和 `KdTree`，统一实现局部高斯初始化、全局自由栅格初始化、运动更新、传感器更新、权重归一化、系统重采样和位姿/协方差估计。它是算法核心对节点层的主要接缝。 |
+| `kd_tree.hpp/.cpp` | 粒子空间统计 | 按线性和角度分辨率把粒子量化到空间 bin，并统计占用 bin 数。当前实现使用哈希分箱，不是对外暴露的通用搜索树；公共接口只有 `BuildPoseBinIndex()`、兼容入口 `Build()` 和 `GetOccupiedBinCount()`，只服务 `ParticleFilter` 的 KLD 自适应粒子数计算。 |
+| `particle_filter.hpp/.cpp` | AMCL 主算法模块 | 持有 `MotionModel`、`LaserModel` 和 `PoseBinIndex`，统一实现局部高斯初始化、全局自由栅格初始化、运动更新、传感器更新、权重归一化、系统重采样和位姿/协方差估计。它是算法核心对节点层的主要接缝。 |
 | `test_particle_filter.cpp` | 核心测试 | 验证粒子数量、协方差采样、权重校验与归一化、重采样偏好、圆周角度均值和未初始化状态。 |
 
 ### 2.1.2 AMCL 核心调用顺序
@@ -157,10 +157,10 @@ Costmap2D ──► LocalizationMap
                               │
 odom TF ───────────────► MotionModel::UpdateParticles
                               │
-LaserScan + 激光 TF ───► LaserModel::UpdateWeights
+LaserScan + 激光 TF ───► LaserModel::ApplyMeasurementLikelihood
                               │
                               ├── NormalizeWeights
-                              ├── KdTree 分箱 + Resample
+                              ├── PoseBinIndex 分箱 + Resample
                               └── Estimate
                                       │
                                       ├── /amcl_pose
@@ -168,7 +168,7 @@ LaserScan + 激光 TF ───► LaserModel::UpdateWeights
                                       └── map -> odom
 ```
 
-`ParticleFilter` 的接口是外部接缝：节点只负责按时序提供地图、里程计、扫描和传感器安装位姿；运动噪声、激光权重和粒子组织细节都留在核心实现内部。`KdTree` 不应被 `AmclNode` 或其他调用者直接使用。
+`ParticleFilter` 的接口是外部接缝：节点只负责按时序提供地图、里程计、扫描和传感器安装位姿；运动噪声、激光权重和粒子组织细节都留在核心实现内部。`PoseBinIndex` 不应被 `AmclNode` 或其他调用者直接使用。
 
 ### 2.2 `mini_nav_nodes`：ROS 适配模块
 
@@ -557,7 +557,7 @@ ParticleFilter(options)
     Initialize(const Pose2D& pose, const Covariance3& covariance)
     InitializeGlobal(const LocalizationMap& map)
     MotionUpdate(previous_odom_pose, current_odom_pose)
-    SensorUpdate(scan, map, laser_pose_in_base)
+    SensorUpdate(scan, map, base_to_laser_pose)
     NormalizeWeights() / Resample()
     Estimate() -> PoseEstimate
 ```
@@ -568,7 +568,7 @@ ParticleFilter(options)
 - `DifferentialMotionModel` 负责差速里程计增量到粒子位姿的带噪声预测。
 - `LaserModel` 的具体实现负责根据地图和扫描计算粒子权重。
 - `ParticleFilter` 负责调用上述模块，组织初始化、运动更新、传感器更新、归一化、重采样和估计。
-- `KdTree` 的公共接口只服务 `ParticleFilter`，外部调用者不能依赖粒子分箱细节。
+- `PoseBinIndex` 的公共接口只服务 `ParticleFilter`，外部调用者不能依赖粒子分箱细节。
 
 当前核心输入使用弧度和米，支持 yaw 为 0 的二维静态地图；核心不依赖 ROS 消息、节点或 TF。
 

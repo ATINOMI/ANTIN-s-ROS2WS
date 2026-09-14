@@ -11,6 +11,7 @@
 
 /* Includes ----------------------------------------------------------------*/
 #include "mini_nav_core/localization/beam_model.hpp"
+#include "mini_nav_core/localization/pose_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -27,48 +28,18 @@ namespace
 /* Functions ----------------------------------------------------------------*/
 
 /**
- * @brief 组合位姿 base 和 relative，返回组合后的位姿。    
- * @param base 基座坐标系在父坐标系中的位姿。
- * @param relative 目标坐标系在基座坐标系中的相对位姿
- * @return Pose2D 组合后的位姿,目标坐标系在父坐标系中的位姿。
- */
-Pose2D ComposePose(const Pose2D & base, const Pose2D & relative)
-{
-  // 取当前位姿yaw角的sin与cos值，用于计算相对位姿在全局坐标系下的转换
-  const double cosine = std::cos(base.yaw);
-  const double sine = std::sin(base.yaw);
-  return Pose2D{
-    /*  将 relative 的平移从基座坐标系旋转到父坐标系，
-     *  再加上基座在父坐标系中的位置。
-
-     *  ┌   ┐    ┌    ┐   ┌             ┐ ┌    ┐ 
-     *  │ x │    | x0 |   | cosΦ   sinΦ | | x1 |  
-     *  |   | =  |    | + |             | |    |
-     *  │ y │    | y0 |   | -sinΦ  cosΦ | | y1 |
-     *  └   ┘    └    ┘   └             ┘ └    ┘
-     * 
-     *  x = base.x + cos(base.yaw) * relative.x - sin(base.yaw) * relative.y
-     *  y = base.y + sin(base.yaw) * relative.x + cos(base.yaw) * relative.y
-     */
-    base.x + cosine * relative.x - sine * relative.y,
-    base.y + sine * relative.x + cosine * relative.y,
-    NormalizeAngle(base.yaw + relative.yaw)};
-}
-
-/**
  * @brief 计算高斯分布的概率密度函数值。
  * @param difference 观测值与期望值的差异
  * @param sigma 高斯分布的标准差
  * @return double 高斯分布的概率密度函数值
  */
-double Gaussian(double difference, double sigma)
+double NormalPdf(double difference, double sigma)
 {
   //计算公式：e^(-0.5 * (difference^2) / (sigma^2)) / (sqrt(2 * pi) * sigma)
   return std::exp(-0.5 * difference * difference / (sigma * sigma)) /
-         (std::sqrt(2.0 * 3.14159265358979323846) * sigma);
+         (std::sqrt(2.0 * kPi) * sigma);
 }
 }  // namespace
-}
 
 BeamModel::BeamModel(
   double z_hit,
@@ -81,19 +52,24 @@ BeamModel::BeamModel(
         : z_hit_(z_hit), z_short_(z_short), z_max_(z_max), z_rand_(z_rand),
   sigma_hit_(sigma_hit), lambda_short_(lambda_short), max_beams_(max_beams)
 {
-  // 排除无效参数：sigma_hit 和 lambda_short 必须为正数，max_beams 必须大于零
-  if (!std::isfinite(sigma_hit_) || sigma_hit_ <= 0.0 ||
+  // Mixture weights must be valid before they are used in the likelihood sum.
+  if (!std::isfinite(z_hit_) || z_hit_ < 0.0 ||
+      !std::isfinite(z_short_) || z_short_ < 0.0 ||
+      !std::isfinite(z_max_) || z_max_ < 0.0 ||
+      !std::isfinite(z_rand_) || z_rand_ < 0.0 ||
+      z_hit_ + z_short_ + z_max_ + z_rand_ <= 0.0 ||
+      !std::isfinite(sigma_hit_) || sigma_hit_ <= 0.0 ||
       !std::isfinite(lambda_short_) || lambda_short_ <= 0.0 || max_beams_ == 0U) {
-    throw std::invalid_argument("Invalid beam model parameters");
+    throw std::invalid_argument("Beam model parameters must be finite and non-negative");
   }
 }
 
-/// 实现 BeamModel 类的 UpdateWeights 方法。
-void BeamModel::UpdateWeights(
+/// Apply the scan measurement likelihood to each particle weight.
+void BeamModel::ApplyMeasurementLikelihood(
   std::vector<Particle> & particles,
   const LaserScanData & scan,
   const LocalizationMap & map,
-  const Pose2D & laser_pose_in_base) const
+  const Pose2D & base_to_laser_pose) const
 {
   // 如果粒子向量为空，或者激光扫描数据无效，则直接返回，不进行权重更新。 
   if (particles.empty() || scan.ranges.empty() || scan.range_max <= 0.0 ||
@@ -133,10 +109,10 @@ void BeamModel::UpdateWeights(
        变换到当前粒子所代表的世界坐标系位姿中。
      
        particle.pose        ：假设机器人当前所在的位姿
-       laser_pose_in_base   ：激光雷达相对于机器人底盘的位姿
+       base_to_laser_pose   ：激光雷达相对于机器人底盘的位姿
        laser_pose           ：该假设下激光雷达在地图中的实际位姿
     */
-    const Pose2D laser_pose =ComposePose(particle.pose, laser_pose_in_base);
+    const Pose2D laser_pose = ComposePose2D(particle.pose, base_to_laser_pose);
     /* 将粒子原来的权重转换到对数域。
     
       原本最终需要计算：
@@ -156,7 +132,7 @@ void BeamModel::UpdateWeights(
     double log_weight = std::log(
       std::max(
         particle.weight,
-        std::numeric_limits<double>::min()
+        kMinimumPositiveDouble
       )
     );
 
@@ -242,9 +218,9 @@ void BeamModel::UpdateWeights(
       // p_hit ∝ exp(-(z - ẑ)² / (2σ²))
       //
       // 实际距离越接近理论距离，
-      // Gaussian() 返回值越大，
+      // NormalPdf() 返回值越大，
       // 说明当前粒子越符合地图和激光观测。
-      double probability = z_hit_ * Gaussian(observed_range - expected_range,
+      double probability = z_hit_ * NormalPdf(observed_range - expected_range,
                                              sigma_hit_);                                             
 
 
@@ -310,7 +286,7 @@ void BeamModel::UpdateWeights(
       //
       // 1e-12 用于避免 probability = 0 时出现 log(0)。
       log_weight += std::log(
-          std::max(probability, 1.0e-12)
+          std::max(probability, kMinimumProbability)
         );
     }
 
@@ -327,10 +303,11 @@ void BeamModel::UpdateWeights(
     // 将 log_weight 限制在 [-745, 709]，
     // 是为了避免 double 在执行 exp() 时发生上溢或严重下溢。
     particle.weight = std::exp(
-          std::max(-745.0,
-          std::min(709.0, log_weight)
+          std::max(kExpLowerLimit,
+          std::min(kExpUpperLimit, log_weight)
         )
       );
   }
+}
 
 }  // namespace mini_nav_core::localization

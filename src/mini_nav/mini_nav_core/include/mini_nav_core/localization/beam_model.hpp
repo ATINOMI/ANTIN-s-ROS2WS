@@ -60,13 +60,13 @@ public:
    * @param particles 引用的粒子向量，每个粒子包含位姿和权重
    * @param scan 激光扫描数据
    * @param map 地图数据
-   * @param laser_pose_in_base 激光传感器在机器人基座坐标系下的位姿
+   * @param base_to_laser_pose 激光传感器在机器人基座坐标系下的位姿
    */
-  void UpdateWeights(
+  void ApplyMeasurementLikelihood(
     std::vector<Particle> & particles,
     const LaserScanData & scan,
     const LocalizationMap & map,
-    const Pose2D & laser_pose_in_base) const override;
+    const Pose2D & base_to_laser_pose) const override;
 
 /* Private members ------------------------------------------------------------*/
 
