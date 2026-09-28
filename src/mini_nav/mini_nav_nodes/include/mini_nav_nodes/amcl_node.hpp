@@ -20,6 +20,7 @@
 #include "tf2_ros/message_filter.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
+#include "visualization_msgs/msg/marker.hpp"
 
 #include "mini_nav_core/localization/particle_filter.hpp"
 
@@ -80,6 +81,8 @@ private:
     const rclcpp::Time & stamp,
     const mini_nav_core::localization::Pose2D & odom_pose);
   void publishParticleCloud(const rclcpp::Time & stamp);
+  void updateDistanceFieldVisualization(const nav_msgs::msg::OccupancyGrid & map);
+  void publishDistanceFieldVisualization();
   void invalidateMapToOdom();
   void cacheMapToOdom(
     const mini_nav_core::localization::PoseEstimate & estimate,
@@ -102,6 +105,7 @@ private:
   bool initial_pose_known_{false};
   bool have_odom_pose_{false};
   bool map_to_odom_valid_{false};
+  bool distance_field_ready_{false};
   double update_min_d_{0.25};
   double update_min_a_{0.2};
   double transform_tolerance_{0.5};
@@ -147,6 +151,9 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_publisher_;
   rclcpp_lifecycle::LifecyclePublisher<nav2_msgs::msg::ParticleCloud>::SharedPtr particle_cloud_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr distance_field_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr distance_tiles_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr distance_grid_publisher_;
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr global_localization_service_;
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr nomotion_update_service_;
   rclcpp::Service<nav2_msgs::srv::SetInitialPose>::SharedPtr set_initial_pose_service_;
@@ -155,6 +162,9 @@ private:
   std::unique_ptr<mini_nav_core::localization::ParticleFilter> particle_filter_;
   mini_nav_core::localization::Pose2D last_odom_pose_;
   geometry_msgs::msg::Transform cached_map_to_odom_;
+  nav_msgs::msg::OccupancyGrid distance_field_message_;
+  visualization_msgs::msg::Marker distance_tiles_message_;
+  visualization_msgs::msg::Marker distance_grid_message_;
 };
 
 }  // namespace mini_nav_nodes

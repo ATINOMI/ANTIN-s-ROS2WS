@@ -59,8 +59,12 @@ LikelihoodFieldModel::LikelihoodFieldModel(
    * 随后的 log(probability) 将失去概率意义。尽早在构造阶段失败，
    * 能把配置错误与运行时的粒子权重异常区分开。
    */
-  if (!std::isfinite(z_hit_) || !std::isfinite(z_rand_) || z_hit_ < 0.0 || z_rand_ < 0.0 ||
-      z_hit_ + z_rand_ <= 0.0) {
+  if (!std::isfinite(z_hit_)  || 
+      !std::isfinite(z_rand_) || 
+      z_hit_ < 0.0  || 
+      z_rand_ < 0.0 ||
+      z_hit_ + z_rand_ <= 0.0) 
+  {
     throw std::invalid_argument("Laser mixture weights must be finite and non-negative");
   }
 
@@ -97,8 +101,11 @@ void LikelihoodFieldModel::ApplyMeasurementLikelihood(
    * 直接返回会保留预测阶段的粒子权重，而不是把“没有信息”误当作一次
    * 低置信度观测更新。
    */
-  if (particles.empty() || scan.ranges.empty() || scan.range_max <= 0.0 ||
-      !std::isfinite(scan.range_max)) {
+  if (particles.empty()     || 
+      scan.ranges.empty()   || 
+      scan.range_max <= 0.0 ||
+      !std::isfinite(scan.range_max)) 
+  {
     return;
   }
 
@@ -122,12 +129,13 @@ void LikelihoodFieldModel::ApplyMeasurementLikelihood(
    * 因此在循环外计算。random_probability 为 [0, range_max) 上的均匀密度，
    * 为异常反射等情况提供最低概率质量。
    */
-  const double hit_denominator = 2.0 * sigma_hit_ * sigma_hit_;
+  const double hit_denominator    = 2.0 * sigma_hit_ * sigma_hit_;
   const double random_probability = z_rand_ / scan.range_max;
 
   /* Step 3：为每个粒子累加被选激光束的对数似然 ------------------------*/
 
-  for (auto & particle : particles) {
+  for (auto & particle : particles) 
+  {
     /*
      * particle.pose 是该粒子假设的基座在地图中的位姿。与 T_base_laser 组合后，
      * laser_pose 才是此粒子假设下激光原点在地图中的位置与朝向：
@@ -146,7 +154,9 @@ void LikelihoodFieldModel::ApplyMeasurementLikelihood(
     double log_weight = std::log(std::max(particle.weight, kMinimumPositiveDouble));
     bool used_beam = false;
 
-    for (std::size_t index = 0; index < scan.ranges.size(); index += step) {
+    for (std::size_t index = 0; index < scan.ranges.size(); index += step) 
+    {
+
       const double observed_range = scan.ranges[index];
 
       /*
@@ -154,8 +164,10 @@ void LikelihoodFieldModel::ApplyMeasurementLikelihood(
        * [range_min, range_max) 内的量测。把 range_max 也纳入命中项会将“未命中”
        * 误解释为一个靠近障碍物的终点，从而错误提高某些粒子的权重。
        */
-      if (!std::isfinite(observed_range) || observed_range < scan.range_min ||
-          observed_range >= scan.range_max) {
+      if (!std::isfinite(observed_range)  || 
+          observed_range < scan.range_min ||
+          observed_range >= scan.range_max) 
+      {
         continue;
       }
 

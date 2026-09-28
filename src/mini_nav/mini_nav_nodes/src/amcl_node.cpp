@@ -1,6 +1,7 @@
 #include "mini_nav_nodes/amcl_node.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <memory>
@@ -118,7 +119,11 @@ AmclNode::CallbackReturn AmclNode::on_activate(const rclcpp_lifecycle::State &)
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   pose_publisher_->on_activate();
   particle_cloud_publisher_->on_activate();
+  distance_field_publisher_->on_activate();
+  distance_tiles_publisher_->on_activate();
+  distance_grid_publisher_->on_activate();
   active_ = true;
+  publishDistanceFieldVisualization();
   return CallbackReturn::SUCCESS;
 }
 
@@ -131,6 +136,15 @@ AmclNode::CallbackReturn AmclNode::on_deactivate(const rclcpp_lifecycle::State &
   }
   if (particle_cloud_publisher_) {
     particle_cloud_publisher_->on_deactivate();
+  }
+  if (distance_field_publisher_) {
+    distance_field_publisher_->on_deactivate();
+  }
+  if (distance_tiles_publisher_) {
+    distance_tiles_publisher_->on_deactivate();
+  }
+  if (distance_grid_publisher_) {
+    distance_grid_publisher_->on_deactivate();
   }
   return CallbackReturn::SUCCESS;
 }
@@ -149,12 +163,16 @@ AmclNode::CallbackReturn AmclNode::on_cleanup(const rclcpp_lifecycle::State &)
   set_initial_pose_service_.reset();
   pose_publisher_.reset();
   particle_cloud_publisher_.reset();
+  distance_field_publisher_.reset();
+  distance_tiles_publisher_.reset();
+  distance_grid_publisher_.reset();
   tf_broadcaster_.reset();
   tf_listener_.reset();
   tf_buffer_.reset();
   localization_map_.reset();
   particle_filter_.reset();
   map_received_ = false;
+  distance_field_ready_ = false;
   initial_pose_known_ = false;
   have_odom_pose_ = false;
   invalidateMapToOdom();
@@ -295,6 +313,13 @@ void AmclNode::initializeCommunications()
     "amcl_pose", rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
   particle_cloud_publisher_ = create_publisher<nav2_msgs::msg::ParticleCloud>(
     "particle_cloud", rclcpp::SensorDataQoS());
+  const auto visualization_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+  distance_field_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+    "obstacle_distance_field", visualization_qos);
+  distance_tiles_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
+    "obstacle_distance_tiles", visualization_qos);
+  distance_grid_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
+    "obstacle_distance_grid", visualization_qos);
 
   laser_subscription_ = std::make_unique<message_filters::Subscriber<
     sensor_msgs::msg::LaserScan, rclcpp_lifecycle::LifecycleNode>>(
@@ -367,16 +392,131 @@ void AmclNode::mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr me
     auto new_map = std::make_unique<mini_nav_core::localization::LocalizationMap>(
       costmap, laser_likelihood_max_dist_);
     localization_map_ = std::move(new_map);
+    updateDistanceFieldVisualization(*message);
     map_received_ = true;
     initial_pose_known_ = false;
     have_odom_pose_ = false;
     invalidateMapToOdom();
     force_update_ = false;
+    publishDistanceFieldVisualization();
     RCLCPP_INFO(get_logger(), "Loaded localization map: %u x %u at %.3f m/cell",
       width, height, message->info.resolution);
   } catch (const std::exception & exception) {
     RCLCPP_ERROR(get_logger(), "Failed to construct localization map: %s", exception.what());
   }
+}
+
+void AmclNode::updateDistanceFieldVisualization(const nav_msgs::msg::OccupancyGrid & map)
+{
+  distance_field_message_.header = map.header;
+  distance_field_message_.info = map.info;
+  // 把热力图抬离原始地图，避免两个栅格层共面闪烁。
+  distance_field_message_.info.origin.position.z += 0.02;
+  distance_field_message_.data.resize(map.data.size());
+  const double max_distance = localization_map_->GetMaxObstacleDistance();
+
+  auto & tiles = distance_tiles_message_;
+  tiles.header = map.header;
+  tiles.ns = "obstacle_distance_tiles";
+  tiles.id = 0;
+  tiles.type = visualization_msgs::msg::Marker::CUBE_LIST;
+  tiles.action = visualization_msgs::msg::Marker::ADD;
+  tiles.pose.orientation.w = 1.0;
+  tiles.scale.x = map.info.resolution;
+  tiles.scale.y = map.info.resolution;
+  tiles.scale.z = 0.005;
+  tiles.color.a = 1.0F;
+  tiles.points.clear();
+  tiles.colors.clear();
+  tiles.points.reserve(map.data.size());
+  tiles.colors.reserve(map.data.size());
+  const double left = map.info.origin.position.x;
+  const double bottom = map.info.origin.position.y;
+  const double tile_z = map.info.origin.position.z + 0.02;
+  // 深灰、红、琥珀、青、紫、浅灰：每个距离段只使用一种固定颜色。
+  constexpr std::array<std::array<float, 3>, 6> colors{{
+    {{0.188F, 0.204F, 0.247F}},
+    {{0.773F, 0.231F, 0.196F}},
+    {{0.937F, 0.749F, 0.224F}},
+    {{0.322F, 0.706F, 0.784F}},
+    {{0.525F, 0.392F, 0.702F}},
+    {{0.851F, 0.871F, 0.890F}},
+  }};
+  for (unsigned int y = 0; y < map.info.height; ++y) {
+    for (unsigned int x = 0; x < map.info.width; ++x) {
+      const double distance = localization_map_->GetObstacleDistanceAtCell({x, y});
+      // 100 表示障碍物格，0 表示距离已达到观测模型的截断上限。
+      const double proximity = 1.0 - distance / max_distance;
+      distance_field_message_.data[static_cast<std::size_t>(y) * map.info.width + x] =
+        static_cast<int8_t>(std::lround(100.0 * std::clamp(proximity, 0.0, 1.0)));
+
+      geometry_msgs::msg::Point point;
+      point.x = left + (x + 0.5) * map.info.resolution;
+      point.y = bottom + (y + 0.5) * map.info.resolution;
+      point.z = tile_z;
+      tiles.points.push_back(point);
+      const double fraction = distance / max_distance;
+      const std::size_t band = fraction <= 0.0 ? 0U :
+        fraction < 0.125 ? 1U :
+        fraction < 0.25 ? 2U :
+        fraction < 0.5 ? 3U :
+        fraction < 0.75 ? 4U : 5U;
+      auto & color = tiles.colors.emplace_back();
+      color.r = colors[band][0];
+      color.g = colors[band][1];
+      color.b = colors[band][2];
+      color.a = 1.0F;
+    }
+  }
+
+  auto & grid = distance_grid_message_;
+  grid.header = map.header;
+  grid.ns = "obstacle_distance_grid";
+  grid.id = 0;
+  grid.type = visualization_msgs::msg::Marker::LINE_LIST;
+  grid.action = visualization_msgs::msg::Marker::ADD;
+  grid.pose.orientation.w = 1.0;
+  grid.scale.x = std::min(0.006, static_cast<double>(map.info.resolution) * 0.08);
+  grid.color.r = 0.2F;
+  grid.color.g = 0.2F;
+  grid.color.b = 0.2F;
+  grid.color.a = 0.65F;
+  grid.points.clear();
+  grid.points.reserve(2U * (map.info.width + map.info.height + 2U));
+  const double right = left + map.info.width * map.info.resolution;
+  const double top = bottom + map.info.height * map.info.resolution;
+  const double z = map.info.origin.position.z + 0.03;
+  for (unsigned int x = 0; x <= map.info.width; ++x) {
+    geometry_msgs::msg::Point start;
+    start.x = left + x * map.info.resolution;
+    start.y = bottom;
+    start.z = z;
+    auto end = start;
+    end.y = top;
+    grid.points.push_back(start);
+    grid.points.push_back(end);
+  }
+  for (unsigned int y = 0; y <= map.info.height; ++y) {
+    geometry_msgs::msg::Point start;
+    start.x = left;
+    start.y = bottom + y * map.info.resolution;
+    start.z = z;
+    auto end = start;
+    end.x = right;
+    grid.points.push_back(start);
+    grid.points.push_back(end);
+  }
+  distance_field_ready_ = true;
+}
+
+void AmclNode::publishDistanceFieldVisualization()
+{
+  if (!active_ || !distance_field_ready_) {
+    return;
+  }
+  distance_field_publisher_->publish(distance_field_message_);
+  distance_tiles_publisher_->publish(distance_tiles_message_);
+  distance_grid_publisher_->publish(distance_grid_message_);
 }
 
 void AmclNode::initialPoseCallback(
@@ -464,7 +604,7 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
       return;
     }
     ++resample_count_;
-    if (resample_count_ % resample_interval_ == 0U && !particle_filter_->Resample()) {
+    if (resample_count_ % resample_interval_ == 0U && !particle_filter_->Resample(*localization_map_)) {
       RCLCPP_WARN(get_logger(), "AMCL particle resampling failed");
       return;
     }

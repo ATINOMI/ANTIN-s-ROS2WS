@@ -62,6 +62,7 @@ ament_target_dependencies(mini_nav_amcl_node
   tf2
   tf2_geometry_msgs
   tf2_ros
+  visualization_msgs
 )
 target_link_libraries(mini_nav_amcl_node mini_nav_core::mini_nav_core)
 
@@ -98,6 +99,7 @@ if(BUILD_TESTING)
       tf2
       tf2_geometry_msgs
       tf2_ros
+      visualization_msgs
     )
     target_link_libraries(test_amcl_tf_cache mini_nav_core::mini_nav_core)
   endif()

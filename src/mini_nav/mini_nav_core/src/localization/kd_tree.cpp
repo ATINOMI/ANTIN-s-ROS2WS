@@ -490,16 +490,23 @@ std::size_t PoseBinIndex::PoseBinKeyHash::operator()(const PoseBinKey & key) con
  */
 PoseBinIndex::PoseBinKey PoseBinIndex::MakePoseBinKey(const Pose2D & pose) const
 {
-  const auto to_bin_index = [](double coordinate, double bin_size, const char * name) {
-    if (!std::isfinite(coordinate)) {
+  const auto to_bin_index = [](double coordinate, double bin_size, const char * name) 
+  {
+
+    if (!std::isfinite(coordinate)) 
+    {
       throw std::invalid_argument(std::string("Pose coordinate is not finite: ") + name);
     }
+
     const double bin = std::floor(coordinate / bin_size);
+
     if (!std::isfinite(bin) ||
         bin < static_cast<double>(std::numeric_limits<int>::min()) ||
-        bin > static_cast<double>(std::numeric_limits<int>::max())) {
+        bin > static_cast<double>(std::numeric_limits<int>::max())) 
+    {
       throw std::invalid_argument(std::string("Pose coordinate bin is outside int range: ") + name);
     }
+
     return static_cast<int>(bin);
   };
 
