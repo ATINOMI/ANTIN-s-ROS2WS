@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME}
   src/map/costmap_2d.cpp
+  src/map/inflation_layer.cpp
   src/navigator/astar_navigator.cpp
   src/localization/localization_map.cpp
   src/localization/differential_motion_model.cpp

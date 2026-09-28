@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-08-31
+最后更新：2026-09-28
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -10,6 +10,7 @@
 - [架构说明](architecture.md)：模块职责、依赖方向、ROS 接口、TF 和启动链路。
 - [贡献指南](contributing.md)：修改位置、代码风格、测试命令、运行验收和提交检查清单。
 - [官方 AMCL 代码导读](amcl_code_walkthrough.md)：从节点启动、地图和初始位姿，到粒子更新、激光模型和 `map -> odom` 发布的源码承接关系。
+- [规划代价地图](planning_costmap.md)：障碍膨胀、安全余量、A* 代价与 RViz 显示。
 
 ## 当前已完成
 
@@ -17,6 +18,7 @@
   - 二维静态代价地图 `Costmap2D`。
   - 栅格坐标与世界坐标之间的转换。
   - 四邻域 A* 全局路径规划。
+  - 静态障碍物膨胀、安全区与软代价 A* 规划。
   - 代价地图与 A* 规划器的单元测试。
   - `localization/` 中的 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`。
 - `mini_nav_nodes`
@@ -24,6 +26,7 @@
   - 通过 `map_file` 参数直接加载标准 trinary YAML/PGM 地图，并发布 `/mini_nav/map`。
   - 通过 RViz 的 `/initialpose` 和 `/goal_pose` 接收起点、终点。
   - 将 A* 结果发布为 `/mini_nav/global_path`。
+  - 独立发布 `/mini_nav/planning_costmap`，不改变原始地图和 AMCL 输入。
   - `AmclNode` 生命周期节点及 `/amcl_pose`、`/particle_cloud`、`map -> odom` 适配。
   - AMCL 定位更新与 TF 发布解耦：未达运动阈值时，仍按激光时间戳重发缓存的 `map -> odom`。
 - 可视化
@@ -78,6 +81,13 @@
 - 成功替换地图、设置新初始位姿、全局定位、节点 cleanup 或 shutdown 时会使旧 TF 缓存失效，避免跨定位周期复用旧变换。
 - 新增 `test_amcl_tf_cache.cpp` 的 3 项测试，覆盖首次估计前禁止发布、缓存重时间戳和缓存失效。已重新构建 `mini_nav_core`、`mini_nav_nodes`、`mini_nav_bringup`；`colcon test-result --verbose` 为 30 项测试、0 错误、0 失败、0 跳过。
 - 已通过 Gazebo teleop 移动 Waffle 并在 RViz 观察验收；自研 AMCL 在低速、未频繁触发粒子滤波更新时的显示已保持连续，本次卡顿问题通过。
+
+### 静态规划代价地图（2026-09-28）
+
+- 在当前代码提交基线 `ff6e4d2` 后，参考已下载的 Jazzy Nav2 `InflationLayer` 和 Smac 2D 代价公式，实现 ROS 无关的障碍膨胀与软代价 A*。
+- 默认以 0.24 m 机器人半径加 0.05 m 安全余量形成禁行区，至 0.55 m 处形成渐变代价；原始 `/map` 不变，发布独立 `/mini_nav/planning_costmap` 供 RViz 查看。
+- 两套定位加 A* 的 launch 加载 `planning_costmap.yaml`；三包构建和两套 launch 的 `--show-args` 已通过。
+- 本次未运行单元测试或 Gazebo 运动验收；车体余量与实际通道宽度仍需结合仿真调整。
 
 ### M1：自研定位核心（2026-08-27）
 

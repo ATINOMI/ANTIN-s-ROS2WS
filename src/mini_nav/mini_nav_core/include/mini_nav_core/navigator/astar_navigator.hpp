@@ -13,7 +13,7 @@ namespace mini_nav_core
     struct OpenNode
     {
         unsigned int index;
-        unsigned int f_score;
+        double f_score;
     };
 
     struct CompareOpenNode
@@ -28,6 +28,9 @@ namespace mini_nav_core
     class AStarPlanner
     {
     public:
+        /// 软代价相对于一步自由栅格距离的权重，必须为有限非负数。
+        explicit AStarPlanner(double cost_travel_multiplier = 2.0);
+
     /**
      * @brief  使用 A* 算法在代价地图上规划从起点到终点的路径。
      * 
@@ -42,6 +45,7 @@ namespace mini_nav_core
             const MapLocation & goal) const;
 
     private:
+        double cost_travel_multiplier_;
     /**
      * @brief 获取指定栅格在一维数组中的下标。
      * 
@@ -63,5 +67,6 @@ namespace mini_nav_core
     };
 
 /* Local constants ---------------------------------------------------------*/
+    constexpr unsigned char kInscribedInflatedObstacle = 253;
     constexpr unsigned char kLethalObstacle = 254;
 }

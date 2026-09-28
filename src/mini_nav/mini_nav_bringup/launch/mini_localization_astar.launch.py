@@ -101,6 +101,7 @@ def generate_launch_description():
             name="costmap_publisher",
             output="screen",
             parameters=[
+                os.path.join(bringup_share, "config", "planning_costmap.yaml"),
                 {
                     "use_sim_time": use_sim_time,
                     "map_topic": "/map",

@@ -18,6 +18,7 @@
 
 #include "mini_nav_core/navigator/astar_navigator.hpp"
 #include "mini_nav_core/map/costmap_2d.hpp"
+#include "mini_nav_core/map/inflation_layer.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_nodes
@@ -71,6 +72,8 @@ namespace mini_nav_nodes
             const unsigned char default_value_;
             const unsigned int publish_period_ms_;
             bool add_demo_obstacles_;
+            mini_nav_core::InflationParameters inflation_parameters_;
+            double cost_travel_multiplier_;
 
             /* Cost constants ----------------------------------------------------*/
 
@@ -83,10 +86,14 @@ namespace mini_nav_nodes
 
             /// ROS 无关的地图数据模型；将来由传感器回调或地图加载器更新。 
             std::unique_ptr<mini_nav_core::Costmap2D> costmap_;
+            /// 原始地图生成的膨胀规划图；不会写回定位所用的 /map。
+            std::unique_ptr<mini_nav_core::Costmap2D> planning_costmap_;
             /// map_server 发布的静态地图输入。
             rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
             /// /mini_nav/map 的发布器。
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
+            /// /mini_nav/planning_costmap 的发布器，供 RViz 核对安全区。
+            rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr planning_costmap_publisher_;
             /// /mini_nav/global_path 的 A* 路径发布器。
             rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
             /// 缓存的 A* 路径；由定时器持续发布，保证 RViz 后启动也能显示。

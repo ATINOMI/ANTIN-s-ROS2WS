@@ -1,0 +1,10 @@
+costmap_publisher:
+  ros__parameters:
+    planning:
+      # Waffle 底盘碰撞盒最远角点约 0.238 m，取 0.24 m 并另加 0.05 m 安全余量。
+      robot_radius: 0.24
+      safety_margin: 0.05
+      # 0.29 m 内禁行，至 0.55 m 之间用软代价引导路径离开墙边。
+      inflation_radius: 0.55
+      cost_scaling_factor: 5.0
+      cost_travel_multiplier: 2.0

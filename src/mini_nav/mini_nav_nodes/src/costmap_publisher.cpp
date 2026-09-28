@@ -26,6 +26,8 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
                                   default_value_(declareByteParameter("map.default_value", default_value)),
                                   publish_period_ms_(
                                     declarePositiveIntParameter("publish_period_ms", publish_period_ms)),
+                                  cost_travel_multiplier_(
+                                    declare_parameter<double>("planning.cost_travel_multiplier", 2.0)),
                                   map_topic_(declare_parameter<std::string>("map_topic", "/map")),
                                   map_file_(declare_parameter<std::string>("map_file", "")),
                                   frame_id_(declare_parameter<std::string>("frame_id", "map"))
@@ -36,6 +38,21 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     }
     if (frame_id_.empty()) {
       throw std::invalid_argument("frame_id must not be empty");
+    }
+    inflation_parameters_.robot_radius =
+      declarePositiveDoubleParameter("planning.robot_radius", 0.24);
+    inflation_parameters_.safety_margin =
+      declare_parameter<double>("planning.safety_margin", 0.05);
+    inflation_parameters_.inflation_radius =
+      declarePositiveDoubleParameter("planning.inflation_radius", 0.55);
+    inflation_parameters_.cost_scaling_factor =
+      declarePositiveDoubleParameter("planning.cost_scaling_factor", 5.0);
+    if (!std::isfinite(inflation_parameters_.safety_margin) ||
+        inflation_parameters_.safety_margin < 0.0 ||
+        inflation_parameters_.inflation_radius <
+          inflation_parameters_.robot_radius + inflation_parameters_.safety_margin ||
+        !std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) {
+      throw std::invalid_argument("Invalid planning safety margin, inflation radius, or traversal multiplier");
     }
 
     // mini_nav_core 保持 ROS 无关；ROS 消息的转换只在本节点中完成。    
@@ -59,6 +76,8 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     }
     // 发布 /mini_nav/map，供 RViz 显示；发布 /mini_nav/global_path，供 RViz 显示 A* 路径。
     map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/mini_nav/map", map_qos);
+    planning_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+      "/mini_nav/planning_costmap", map_qos);
     path_publisher_ = create_publisher<nav_msgs::msg::Path>("/mini_nav/global_path", map_qos);
     axes_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
       "/mini_nav/map_axes", map_qos);
@@ -125,8 +144,8 @@ unsigned int mini_nav_nodes::CostmapPublisherNode::declarePositiveIntParameter(c
 double mini_nav_nodes::CostmapPublisherNode::declarePositiveDoubleParameter(const std::string & name, double default_value)
 {
     const auto value = declare_parameter<double>(name, default_value);
-    if (value <= 0.0) {
-        throw std::invalid_argument(name + " must be greater than zero");
+    if (!std::isfinite(value) || value <= 0.0) {
+        throw std::invalid_argument(name + " must be finite and greater than zero");
     }
     return value;
 }
@@ -225,14 +244,22 @@ void mini_nav_nodes::CostmapPublisherNode::loadMapMessage(
             }
         }
 
+        // 在提交新地图前完成膨胀，确保 A* 总能使用与原始地图对应的规划图。
+        auto new_planning_costmap = std::make_unique<mini_nav_core::Costmap2D>(
+          mini_nav_core::InflateCostmap(*new_costmap, inflation_parameters_));
+
         // 替换旧地图。std::move()是 C++11 引入的右值引用转换，将 new_costmap 的所有权转移给 costmap_。
         costmap_ = std::move(new_costmap);
+        planning_costmap_ = std::move(new_planning_costmap);
         map_received_ = true;
         // 清空起点和终点，因为地图已经改变。
         start_cell_.reset();
         goal_cell_.reset();
         // 清空全局路径。
         global_path_ = nav_msgs::msg::Path();
+        global_path_.header.stamp = now();
+        global_path_.header.frame_id = frame_id_;
+        path_publisher_->publish(global_path_);
 
         // 发布地图,路径,坐标轴
         publishMap(); // 发布地图
@@ -540,12 +567,17 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
         return false;
     }
 
-    // 创建一个 A* 路径规划器对象，并使用 costmap_、start 和 goal 进行路径规划。
-    mini_nav_core::AStarPlanner planner;
-    const std::vector<mini_nav_core::MapLocation> grid_path = planner.Plan(*costmap_, start, goal);
+    // A* 在膨胀规划图上搜索；原始图仍用于定位和地图显示。
+    mini_nav_core::AStarPlanner planner(cost_travel_multiplier_);
+    const std::vector<mini_nav_core::MapLocation> grid_path =
+      planner.Plan(*planning_costmap_, start, goal);
 
     if (grid_path.empty()) {
-        RCLCPP_WARN(get_logger(), "A* could not find a path from (%u, %u) to (%u, %u)",
+        global_path_ = nav_msgs::msg::Path();
+        global_path_.header.stamp = now();
+        global_path_.header.frame_id = frame_id_;
+        path_publisher_->publish(global_path_);
+        RCLCPP_WARN(get_logger(), "A* could not find a safe path from (%u, %u) to (%u, %u)",
                     start.x, start.y, goal.x, goal.y);
         return false;
     }
@@ -681,6 +713,17 @@ void mini_nav_nodes::CostmapPublisherNode::publishMap()
 
     // QoS 在创建 publisher 时已固定；这里只负责发送新消息。
     map_publisher_->publish(message);
+    auto planning_message = message;
+    for (unsigned int my = 0; my < planning_message.info.height; ++my) {
+      for (unsigned int mx = 0; mx < planning_message.info.width; ++mx) {
+        const auto cost = planning_costmap_->GetCost(mx, my);
+        const auto index = static_cast<std::size_t>(my) * planning_message.info.width + mx;
+        planning_message.data[index] = cost == kUnknownCost ? -1 :
+          static_cast<int8_t>(cost >= 253 ? 100 :
+            static_cast<unsigned int>(cost) * 99U / 252U);
+      }
+    }
+    planning_costmap_publisher_->publish(planning_message);
     if (!global_path_.poses.empty()) {
         global_path_.header.stamp = message.header.stamp;
         for (auto & pose : global_path_.poses) {

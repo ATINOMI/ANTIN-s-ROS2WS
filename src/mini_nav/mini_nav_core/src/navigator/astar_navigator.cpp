@@ -1,10 +1,20 @@
 /* Includes ----------------------------------------------------------------*/
 #include "mini_nav_core/navigator/astar_navigator.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <queue>
+#include <stdexcept>
 
 using namespace mini_nav_core;
+
+AStarPlanner::AStarPlanner(double cost_travel_multiplier)
+  : cost_travel_multiplier_(cost_travel_multiplier)
+{
+  if (!std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) {
+    throw std::invalid_argument("cost_travel_multiplier must be finite and nonnegative");
+  }
+}
 
 /* Functions Definition --------------------------------------------------------------*/
 
@@ -28,8 +38,8 @@ std::vector<MapLocation> AStarPlanner::Plan(
   // 检查起点和终点是否在地图范围内，且不在障碍物上
   if (start.x >= size_x || start.y >= size_y ||
       goal.x  >= size_x || goal.y  >= size_y ||
-      costmap.GetCost(start.x, start.y) >= kLethalObstacle ||
-      costmap.GetCost(goal.x, goal.y)   >= kLethalObstacle)
+      costmap.GetCost(start.x, start.y) >= kInscribedInflatedObstacle ||
+      costmap.GetCost(goal.x, goal.y)   >= kInscribedInflatedObstacle)
   {
     return {};
   }
@@ -43,13 +53,14 @@ std::vector<MapLocation> AStarPlanner::Plan(
   const unsigned int cell_count  = size_x * size_y;
   const unsigned int start_index = GetIndex(start.x, start.y, size_x);
   const unsigned int goal_index  = GetIndex(goal.x, goal.y, size_x);
-  const unsigned int infinity    = std::numeric_limits<unsigned int>::max();
+  const unsigned int invalid_parent = std::numeric_limits<unsigned int>::max();
+  const double infinity = std::numeric_limits<double>::infinity();
 
   //这个数组用于存储从起点到每个节点的实际代价（g 值），初始值为无穷大。
-  std::vector<unsigned int> g_score(cell_count, infinity);
+  std::vector<double> g_score(cell_count, infinity);
 
   //这个数组用于存储每个节点的父节点索引，以便在找到路径后进行回溯。
-  std::vector<unsigned int> parent(cell_count, infinity);
+  std::vector<unsigned int> parent(cell_count, invalid_parent);
 
   //这个优先队列用于存储待访问的节点，按照 f 值排序。
   std::priority_queue<OpenNode, 
@@ -58,7 +69,7 @@ std::vector<MapLocation> AStarPlanner::Plan(
 
   // 初始化起点的 g 值为 0，并将其加入 open_list。
   g_score[start_index] = 0;
-  open_list.push({start_index, ManhattanDistance(start, goal)});
+  open_list.push({start_index, static_cast<double>(ManhattanDistance(start, goal))});
 
   constexpr int directions[4][2] = {
     { 0,  1},  // Up
@@ -98,7 +109,8 @@ std::vector<MapLocation> AStarPlanner::Plan(
                 next_y < 0 || next_y >= static_cast<int>(size_y)) continue;
 
             // 检查邻居节点是否是障碍物
-            if (costmap.GetCost(next_x, next_y) >= kLethalObstacle) continue;
+            const auto cell_cost = costmap.GetCost(next_x, next_y);
+            if (cell_cost >= kInscribedInflatedObstacle) continue;
 
             // 将邻居节点的坐标转换为无符号整数
             const unsigned int mx = static_cast<unsigned int>(next_x);
@@ -106,7 +118,9 @@ std::vector<MapLocation> AStarPlanner::Plan(
 
             // 计算邻居节点的索引和从起点到邻居节点的 g 值
             const unsigned int next_index = GetIndex(mx, my, size_x);
-            const unsigned int tentative_g_score = g_score[current.index] + 1;
+            const double step_cost = 1.0 + cost_travel_multiplier_ *
+                static_cast<double>(cell_cost) / 252.0;
+            const double tentative_g_score = g_score[current.index] + step_cost;
 
             // 如果新的 g 值不小于邻居节点当前的 g 值，则跳过
             if (tentative_g_score >= g_score[next_index]) continue;
