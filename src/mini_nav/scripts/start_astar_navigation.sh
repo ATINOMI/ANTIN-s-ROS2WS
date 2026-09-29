@@ -38,7 +38,8 @@ if [[ "${existing_publishers:-0}" != "0" ]]; then
   exit 1
 fi
 
-setsid ros2 run mini_nav_nodes costmap_publisher_node --ros-args -p "map_file:=${map_yaml}" &
+setsid ros2 run mini_nav_nodes costmap_publisher_node --ros-args \
+  -p "map_file:=${map_yaml}" -p planning.use_initial_pose_as_start:=true &
 node_pid=$!
 rviz_runtime_config=""
 

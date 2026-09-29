@@ -59,6 +59,16 @@ struct Snapshot
   double stamp{0.0};
   std::vector<loc::Particle> particles;
   std::optional<loc::PoseEstimate> estimate;
+  std::optional<loc::ResampleTrace> resample;
+};
+
+struct Session
+{
+  std::size_t id{0};
+  double initial_stamp{0.0};
+  loc::Pose2D initial_pose;
+  nav_msgs::msg::OccupancyGrid map;
+  std::vector<Snapshot> frames;
 };
 
 class PfDebugNode final : public rclcpp::Node
@@ -79,6 +89,7 @@ public:
     max_range_override_ = declare_parameter<double>("laser_max_range", 100.0);
     min_range_override_ = declare_parameter<double>("laser_min_range", -1.0);
     max_updates_ = declare_parameter<int>("max_updates", 15);
+    max_sessions_ = declare_parameter<int>("max_sessions", 5);
     output_file_ = declare_parameter<std::string>(
       "output_file", "/tmp/mini_nav_pf_debug.html");
     const auto model_type = declare_parameter<std::string>(
@@ -106,7 +117,8 @@ public:
 
     if (global_frame_.empty() || odom_frame_.empty() || base_frame_.empty() ||
       map_topic_.empty() || scan_topic_.empty() || output_file_.empty() ||
-      max_updates_ <= 0 || max_updates_ > 100 || max_beams <= 0 ||
+      max_updates_ <= 0 || max_updates_ > 100 || max_sessions_ <= 0 ||
+      max_sessions_ > 20 || max_beams <= 0 ||
       min_particles <= 0 || max_particles < min_particles || resample_interval <= 0 ||
       !std::isfinite(update_min_d_) || update_min_d_ < 0.0 ||
       !std::isfinite(update_min_a_) || update_min_a_ < 0.0)
@@ -204,7 +216,6 @@ private:
       map_message_ = *message;
       have_initial_pose_ = false;
       have_odom_pose_ = false;
-      frames_.clear();
       updates_ = 0;
       resample_count_ = 0;
       WriteHtml();
@@ -247,7 +258,12 @@ private:
       have_odom_pose_ = false;
       updates_ = 0;
       resample_count_ = 0;
-      frames_.clear();
+      sessions_.push_back(Session{
+        next_session_id_++, rclcpp::Time(message->header.stamp).seconds(),
+        pose, map_message_, {}});
+      if (sessions_.size() > static_cast<std::size_t>(max_sessions_)) {
+        sessions_.erase(sessions_.begin());
+      }
       Capture("initialize", 0, rclcpp::Time(message->header.stamp), filter_->Estimate());
       WriteHtml();
       RCLCPP_INFO(get_logger(), "Initial particle cloud captured (%zu particles): %s",
@@ -329,11 +345,12 @@ private:
       Capture("normalize", update, stamp);
       ++resample_count_;
       if (resample_count_ % resample_interval_ == 0U) {
-        if (!filter_->Resample(*map_)) {
+        loc::ResampleTrace trace;
+        if (!filter_->Resample(*map_, &trace)) {
           RCLCPP_WARN(get_logger(), "Particle resampling failed");
           return;
         }
-        Capture("resample", update, stamp);
+        Capture("resample", update, stamp, std::nullopt, &trace);
       } else {
         Capture("hold", update, stamp);
       }
@@ -356,84 +373,126 @@ private:
 
   void Capture(
     const std::string & stage, std::size_t update, const rclcpp::Time & stamp,
-    std::optional<loc::PoseEstimate> estimate = std::nullopt)
+    std::optional<loc::PoseEstimate> estimate = std::nullopt,
+    const loc::ResampleTrace * trace = nullptr)
   {
-    frames_.push_back(Snapshot{
-      stage, update, stamp.seconds(), filter_->GetParticles(), estimate});
+    sessions_.back().frames.push_back(Snapshot{
+      stage, update, stamp.seconds(), filter_->GetParticles(), estimate,
+      trace ? std::optional<loc::ResampleTrace>(*trace) : std::nullopt});
   }
 
   std::string Serialize() const
   {
     std::ostringstream out;
-    out << std::setprecision(12);
-    out << "{\"map\":{\"width\":" << map_message_.info.width
-        << ",\"height\":" << map_message_.info.height << ",\"resolution\":";
-    WriteNumber(out, map_message_.info.resolution);
-    out << ",\"origin\":[";
-    WriteNumber(out, map_message_.info.origin.position.x);
-    out << ',';
-    WriteNumber(out, map_message_.info.origin.position.y);
-    out << "],\"data\":[";
-    for (std::size_t i = 0; i < map_message_.data.size(); ++i) {
-      if (i != 0U) {out << ',';}
-      out << static_cast<int>(map_message_.data[i]);
-    }
-    out << "]},\"max_updates\":" << max_updates_ << ",\"frames\":[";
-    for (std::size_t i = 0; i < frames_.size(); ++i) {
-      const auto & frame = frames_[i];
-      if (i != 0U) {out << ',';}
-      out << "{\"stage\":\"" << frame.stage << "\",\"update\":" << frame.update
-          << ",\"stamp\":";
-      WriteNumber(out, frame.stamp);
-      out << ",\"particles\":[";
-      double min_weight = std::numeric_limits<double>::infinity();
-      double max_weight = 0.0;
-      for (std::size_t j = 0; j < frame.particles.size(); ++j) {
-        const auto & particle = frame.particles[j];
-        if (j != 0U) {out << ',';}
-        out << '[';
-        WriteNumber(out, particle.pose.x); out << ',';
-        WriteNumber(out, particle.pose.y); out << ',';
-        WriteNumber(out, particle.pose.yaw); out << ',';
-        WriteNumber(out, particle.weight); out << ']';
-        if (std::isfinite(particle.weight) && particle.weight >= 0.0) {
-          min_weight = std::min(min_weight, particle.weight);
-          max_weight = std::max(max_weight, particle.weight);
-        }
+    out << std::setprecision(std::numeric_limits<double>::max_digits10);
+    out << "{\"version\":2,\"sessions\":[";
+    for (std::size_t session_index = 0; session_index < sessions_.size(); ++session_index) {
+      const auto & session = sessions_[session_index];
+      const auto & session_map = session.map;
+      if (session_index != 0U) {out << ',';}
+      out << "{\"id\":" << session.id << ",\"initial_stamp\":";
+      WriteNumber(out, session.initial_stamp);
+      out << ",\"initial\":[";
+      WriteNumber(out, session.initial_pose.x); out << ',';
+      WriteNumber(out, session.initial_pose.y); out << ',';
+      WriteNumber(out, session.initial_pose.yaw);
+      out << "],\"map\":{\"width\":" << session_map.info.width
+          << ",\"height\":" << session_map.info.height << ",\"resolution\":";
+      WriteNumber(out, session_map.info.resolution);
+      out << ",\"origin\":[";
+      WriteNumber(out, session_map.info.origin.position.x);
+      out << ',';
+      WriteNumber(out, session_map.info.origin.position.y);
+      out << "],\"data\":[";
+      for (std::size_t i = 0; i < session_map.data.size(); ++i) {
+        if (i != 0U) {out << ',';}
+        out << static_cast<int>(session_map.data[i]);
       }
-      double scaled_sum = 0.0;
-      double scaled_square_sum = 0.0;
-      if (max_weight > 0.0) {
-        for (const auto & particle : frame.particles) {
+      out << "]},\"max_updates\":" << max_updates_ << ",\"frames\":[";
+      for (std::size_t i = 0; i < session.frames.size(); ++i) {
+        const auto & frame = session.frames[i];
+        if (i != 0U) {out << ',';}
+        out << "{\"stage\":\"" << frame.stage << "\",\"update\":" << frame.update
+            << ",\"stamp\":";
+        WriteNumber(out, frame.stamp);
+        out << ",\"particles\":[";
+        double min_weight = std::numeric_limits<double>::infinity();
+        double max_weight = 0.0;
+        for (std::size_t j = 0; j < frame.particles.size(); ++j) {
+          const auto & particle = frame.particles[j];
+          if (j != 0U) {out << ',';}
+          out << '[';
+          WriteNumber(out, particle.pose.x); out << ',';
+          WriteNumber(out, particle.pose.y); out << ',';
+          WriteNumber(out, particle.pose.yaw); out << ',';
+          WriteNumber(out, particle.weight); out << ']';
           if (std::isfinite(particle.weight) && particle.weight >= 0.0) {
-            const double scaled = particle.weight / max_weight;
-            scaled_sum += scaled;
-            scaled_square_sum += scaled * scaled;
+            min_weight = std::min(min_weight, particle.weight);
+            max_weight = std::max(max_weight, particle.weight);
           }
         }
+        double scaled_sum = 0.0;
+        double scaled_square_sum = 0.0;
+        if (max_weight > 0.0) {
+          for (const auto & particle : frame.particles) {
+            if (std::isfinite(particle.weight) && particle.weight >= 0.0) {
+              const double scaled = particle.weight / max_weight;
+              scaled_sum += scaled;
+              scaled_square_sum += scaled * scaled;
+            }
+          }
+        }
+        out << "],\"ess\":";
+        WriteNumber(out, scaled_square_sum > 0.0 ?
+          scaled_sum * scaled_sum / scaled_square_sum : 0.0);
+        out << ",\"weight_min\":";
+        WriteNumber(out, std::isfinite(min_weight) ? min_weight : 0.0);
+        out << ",\"weight_max\":";
+        WriteNumber(out, max_weight);
+        out << ",\"estimate\":";
+        if (frame.estimate && frame.estimate->valid) {
+          const auto & estimate = *frame.estimate;
+          out << '[';
+          WriteNumber(out, estimate.pose.x); out << ',';
+          WriteNumber(out, estimate.pose.y); out << ',';
+          WriteNumber(out, estimate.pose.yaw); out << ',';
+          WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(0, 0)))); out << ',';
+          WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(1, 1)))); out << ',';
+          WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(2, 2))));
+          out << ']';
+        } else {
+          out << "null";
+        }
+        out << ",\"resample\":";
+        if (frame.resample) {
+          out << "{\"offset\":";
+          WriteNumber(out, frame.resample->offset);
+          out << ",\"weights\":[";
+          for (std::size_t j = 0; j < frame.resample->source_weights.size(); ++j) {
+            if (j != 0U) {out << ',';}
+            WriteNumber(out, frame.resample->source_weights[j]);
+          }
+          out << "],\"draws\":[";
+          for (std::size_t j = 0; j < frame.resample->draws.size(); ++j) {
+            const auto & draw = frame.resample->draws[j];
+            if (j != 0U) {out << ',';}
+            out << '[';
+            WriteNumber(out, draw.sample);
+            out << ',';
+            if (draw.recovery) {
+              out << "null";
+            } else {
+              out << draw.source_index;
+            }
+            out << ']';
+          }
+          out << "]}";
+        } else {
+          out << "null";
+        }
+        out << '}';
       }
-      out << "],\"ess\":";
-      WriteNumber(out, scaled_square_sum > 0.0 ?
-        scaled_sum * scaled_sum / scaled_square_sum : 0.0);
-      out << ",\"weight_min\":";
-      WriteNumber(out, std::isfinite(min_weight) ? min_weight : 0.0);
-      out << ",\"weight_max\":";
-      WriteNumber(out, max_weight);
-      out << ",\"estimate\":";
-      if (frame.estimate && frame.estimate->valid) {
-        const auto & estimate = *frame.estimate;
-        out << '[';
-        WriteNumber(out, estimate.pose.x); out << ',';
-        WriteNumber(out, estimate.pose.y); out << ',';
-        WriteNumber(out, estimate.pose.yaw); out << ',';
-        WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(0, 0)))); out << ',';
-        WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(1, 1)))); out << ',';
-        WriteNumber(out, std::sqrt(std::max(0.0, estimate.covariance.At(2, 2))));
-        out << ']';
-      } else {
-        out << "null";
-      }
-      out << '}';
+      out << "]}";
     }
     out << "]}";
     return out.str();
@@ -477,6 +536,8 @@ private:
   double max_range_override_{100.0};
   double min_range_override_{-1.0};
   int max_updates_{15};
+  int max_sessions_{5};
+  std::size_t next_session_id_{1};
   std::size_t updates_{0};
   std::size_t resample_count_{0};
   std::size_t resample_interval_{1};
@@ -484,7 +545,7 @@ private:
   nav_msgs::msg::OccupancyGrid map_message_;
   std::unique_ptr<loc::LocalizationMap> map_;
   std::unique_ptr<loc::ParticleFilter> filter_;
-  std::vector<Snapshot> frames_;
+  std::vector<Session> sessions_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;

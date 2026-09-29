@@ -10,7 +10,9 @@ find_package(ament_cmake REQUIRED)
 add_library(${PROJECT_NAME}
   src/map/costmap_2d.cpp
   src/map/inflation_layer.cpp
+  src/map/rolling_obstacle_grid.cpp
   src/navigator/astar_navigator.cpp
+  src/navigator/path_postprocessor.cpp
   src/localization/localization_map.cpp
   src/localization/differential_motion_model.cpp
   src/localization/likelihood_field_model.cpp
@@ -47,6 +49,11 @@ if(BUILD_TESTING)
   ament_add_gtest(test_astar_planner test/test_astar_planner.cpp)
   if(TARGET test_astar_planner)
     target_link_libraries(test_astar_planner ${PROJECT_NAME})
+  endif()
+
+  ament_add_gtest(test_rolling_obstacle_grid test/test_rolling_obstacle_grid.cpp)
+  if(TARGET test_rolling_obstacle_grid)
+    target_link_libraries(test_rolling_obstacle_grid ${PROJECT_NAME})
   endif()
 
   ament_add_gtest(test_particle_filter test/test_particle_filter.cpp)

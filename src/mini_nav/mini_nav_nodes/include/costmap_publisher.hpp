@@ -11,12 +11,16 @@
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 #include "visualization_msgs/msg/marker_array.hpp"
 
 #include "mini_nav_core/navigator/astar_navigator.hpp"
+#include "mini_nav_core/navigator/path_postprocessor.hpp"
 #include "mini_nav_core/map/costmap_2d.hpp"
 #include "mini_nav_core/map/inflation_layer.hpp"
 
@@ -50,15 +54,11 @@ namespace mini_nav_nodes
              */
             mini_nav_core::Costmap2D & GetCostmap();
 
-            /**
-             *  对当前地图执行 A*，并发布标准 Path 消息供 RViz 显示。
-             *  start 起点栅格坐标。
-             *  goal 终点栅格坐标。
-             *  找到可行路径时返回 true。
-             */
+            /** 对指定栅格执行 A*，可选保留终点朝向，并发布 RViz Path。 */
             bool PlanAndPublish(
               const mini_nav_core::MapLocation & start,
-              const mini_nav_core::MapLocation & goal);
+              const mini_nav_core::MapLocation & goal,
+              const std::optional<geometry_msgs::msg::Quaternion> & goal_orientation = std::nullopt);
 
 
         /* Private members ------------------------------------------------------*/
@@ -88,26 +88,29 @@ namespace mini_nav_nodes
             std::unique_ptr<mini_nav_core::Costmap2D> costmap_;
             /// 原始地图生成的膨胀规划图；不会写回定位所用的 /map。
             std::unique_ptr<mini_nav_core::Costmap2D> planning_costmap_;
+            /// 根据 map -> base_footprint 等 TF 获取当前车位，不从 /initialpose 缓存起点。
+            std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+            std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
             /// map_server 发布的静态地图输入。
             rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
             /// /mini_nav/map 的发布器。
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
             /// /mini_nav/planning_costmap 的发布器，供 RViz 核对安全区。
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr planning_costmap_publisher_;
-            /// /mini_nav/global_path 的 A* 路径发布器。
+            /// /mini_nav/raw_path 的原始八邻域 A* 路径发布器。
+            rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr raw_path_publisher_;
+            /// /mini_nav/global_path 的最终路径发布器。
             rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
-            /// 缓存的 A* 路径；由定时器持续发布，保证 RViz 后启动也能显示。
+            /// 缓存的原始路径，与最终路径一起清除和重新发布。
+            nav_msgs::msg::Path raw_path_;
+            /// 缓存的最终路径；由定时器持续发布，保证 RViz 后启动也能显示。
             nav_msgs::msg::Path global_path_;
             /// /mini_nav/map_axes 的 RViz 坐标轴标记发布器。
             rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr axes_publisher_;
-            /// RViz 2D Pose Estimate 发送的起点订阅器。
+            /// 定位入口中使旧路径失效；独立 A* 演示中可作为手选起点。
             rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_subscription_;
             /// RViz 2D Goal Pose 发送的终点订阅器。
             rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_subscription_;
-            /// 最近一次从 RViz 接收并成功转换的起点栅格。
-            std::optional<mini_nav_core::MapLocation> start_cell_;
-            /// 最近一次从 RViz 接收并成功转换的终点栅格。
-            std::optional<mini_nav_core::MapLocation> goal_cell_;
             /// 周期发布定时器，避免在回调中阻塞等待。
             rclcpp::TimerBase::SharedPtr timer_;
             /// 输入地图的话题名称，默认为 map_server 的 /map。
@@ -116,6 +119,20 @@ namespace mini_nav_nodes
             const std::string map_file_;
             /// 发布消息使用的坐标系名称，默认是 map。
             const std::string frame_id_;
+            /// 实时起点使用的机器人基座坐标系。
+            const std::string base_frame_id_;
+            /// 定位节点发布的里程计坐标系，用于辨别初始位姿后的新定位结果。
+            const std::string odom_frame_id_;
+            /// 最后一次有效机器人 TF 可以距离当前时刻的最大秒数。
+            const double max_pose_age_;
+            /// 独立 A* 演示显式开启的手选起点模式；定位入口保持关闭。
+            const bool use_initial_pose_as_start_;
+            /// 收到 /initialpose 时的 map -> odom 时间戳；下一次规划须等待更新。
+            std::optional<rclcpp::Time> localization_reset_tf_stamp_;
+            /// 仅供无机器人 TF 的独立 A* 演示使用。
+            std::optional<mini_nav_core::MapLocation> demo_start_cell_;
+            std::optional<mini_nav_core::MapLocation> demo_goal_cell_;
+            std::optional<geometry_msgs::msg::Quaternion> demo_goal_orientation_;
             /// 只有收到并成功转换地图后才允许规划和发布。
             bool map_received_ = false;
 
@@ -175,7 +192,9 @@ namespace mini_nav_nodes
             void initialPoseCallback(
               const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message);
             void goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr message);
-            void planIfReady();
+            bool lookupCurrentCell(mini_nav_core::MapLocation & cell, double timeout_seconds);
+            void waitForNewLocalizationTf();
+            void clearPath();
 
 
     };

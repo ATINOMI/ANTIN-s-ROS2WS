@@ -6,6 +6,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -17,6 +18,7 @@ def generate_launch_description():
     x_pose = LaunchConfiguration("x_pose")
     y_pose = LaunchConfiguration("y_pose")
     autostart = LaunchConfiguration("autostart")
+    inflate_around_unknown = LaunchConfiguration("inflate_around_unknown")
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -42,6 +44,11 @@ def generate_launch_description():
             "autostart",
             default_value="true",
             description="Automatically configure and activate localization nodes.",
+        ),
+        DeclareLaunchArgument(
+            "inflate_around_unknown",
+            default_value="false",
+            description="Add a hard safety band around unknown cells in both costmaps.",
         ),
         DeclareLaunchArgument(
             "x_pose",
@@ -106,7 +113,25 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                     "map_topic": "/map",
                     "map_file": "",
+                    "planning.inflate_around_unknown": ParameterValue(
+                        inflate_around_unknown, value_type=bool
+                    ),
                 }
+            ],
+        ),
+        Node(
+            package="mini_nav_nodes",
+            executable="local_costmap_node",
+            name="local_costmap",
+            output="screen",
+            parameters=[
+                os.path.join(bringup_share, "config", "local_costmap.yaml"),
+                {
+                    "use_sim_time": use_sim_time,
+                    "local_costmap.inflate_around_unknown": ParameterValue(
+                        inflate_around_unknown, value_type=bool
+                    ),
+                },
             ],
         ),
         Node(

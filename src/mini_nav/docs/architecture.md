@@ -173,7 +173,7 @@ LaserScan + 激光 TF ───► LaserModel::ApplyMeasurementLikelihood
 ### 2.2 `mini_nav_nodes`：ROS 适配模块
 
 - `costmap_publisher.hpp` 声明节点的 ROS 参数、发布器、订阅器和内部地图状态。
-- `costmap_publisher.cpp` 是主要实现：接收 `/map` 或读取 `map_file`，转换成 `Costmap2D`，接收 `/initialpose` 与 `/goal_pose`，调用 `AStarPlanner`，发布 `/mini_nav/map` 和 `/mini_nav/global_path`。
+- `costmap_publisher.cpp` 是主要实现：接收 `/map` 或读取 `map_file`，转换成原始图与膨胀规划图；收到 `/goal_pose` 时从 `map -> base_footprint` TF 取得当前起点，调用 `AStarPlanner`，发布 `/mini_nav/map`、`/mini_nav/planning_costmap` 和 `/mini_nav/global_path`。收到 `/initialpose` 时清除旧路径，等待定位 TF 更新。
 - `amcl_node.cpp` 负责 `AmclNode` 的生命周期、消息、TF、服务和结果发布；`main.cpp` 只负责初始化 ROS、构造对应节点和 spin。
 - 该包不负责 Gazebo、AMCL 或 RViz 启动；这些属于 `mini_nav_bringup`。
 
@@ -341,9 +341,9 @@ mini_nav_bringup  ───────►  mini_nav_nodes  ──────�
 
 /map ─────────────────────────────►┌────────────────────┐
                                    │ CostmapPublisher  │
-/initialpose ─────────────────────►│ Node               │
+/initialpose ──清除旧路径──────────►│ Node               │◄── map -> base_footprint TF
 /goal_pose ───────────────────────►└─────────┬──────────┘
-                                             │ Costmap2D
+                                             │ 膨胀规划图
                                              ▼
                                       ┌───────────────┐
                                       │ AStarPlanner  │
@@ -360,12 +360,9 @@ mini_nav_bringup  ───────►  mini_nav_nodes  ──────�
 ```
 
 
-`/initialpose` 同时被 AMCL 和 `CostmapPublisherNode` 接收：
+`/initialpose` 为 AMCL 提供定位初始猜测；`CostmapPublisherNode` 收到它时清除旧路径，并等待新的 `map -> odom` TF。每次收到 `/goal_pose`，A* 节点查询当时的 `map -> base_footprint` TF 作为起点。TF 缺失、过期或起终点落在规划安全区时不发布非空路径。路径跟踪模块仍需独立实现。
 
-- 对 AMCL 来说，它是定位初始猜测。
-- 对 A* 节点来说，它是规划起点。
-
-这是当前学习阶段的有意复用，但也意味着 A* 还没有从实时 AMCL 位姿自动取起点。下一阶段路径跟踪模块应通过 TF 或 AMCL 位姿获取机器人当前状态，而不是依赖用户最后一次点击的起点。
+不启动仿真和定位的 `start_astar_navigation.sh` 显式设置 `planning.use_initial_pose_as_start:=true`，保留 RViz 手选起终点的独立算法演示；两套定位入口使用默认的 TF 起点。
 
 ## 5. ROS 接口契约
 
@@ -373,8 +370,8 @@ mini_nav_bringup  ───────►  mini_nav_nodes  ──────�
 |---|---|---|---|---|
 | `/map` | Nav2 map_server | 官方或自研 AMCL、`CostmapPublisherNode` | `nav_msgs/msg/OccupancyGrid` | 静态地图；可靠、Transient Local QoS |
 | `/mini_nav/map` | `CostmapPublisherNode` | RViz | `nav_msgs/msg/OccupancyGrid` | 自研模块使用的地图可视化 |
-| `/initialpose` | RViz | AMCL、`CostmapPublisherNode` | `geometry_msgs/msg/PoseWithCovarianceStamped` | AMCL 初始位姿和 A* 起点 |
-| `/goal_pose` | RViz `SetGoal` | `CostmapPublisherNode` | `geometry_msgs/msg/PoseStamped` | A* 终点 |
+| `/initialpose` | RViz | AMCL、`CostmapPublisherNode` | `geometry_msgs/msg/PoseWithCovarianceStamped` | AMCL 初始位姿；规划节点清除旧路径并等待新定位 TF |
+| `/goal_pose` | RViz `SetGoal` | `CostmapPublisherNode` | `geometry_msgs/msg/PoseStamped` | A* 终点与终点朝向；规划起点取目标到来时的机器人 TF |
 | `/mini_nav/global_path` | `CostmapPublisherNode` | RViz | `nav_msgs/msg/Path` | 自研 A* 输出的全局路径 |
 | `/mini_nav/map_axes` | `CostmapPublisherNode` | RViz | `visualization_msgs/msg/MarkerArray` | 地图原点和坐标轴可视化 |
 | `/scan` | Gazebo bridge | AMCL、RViz | `sensor_msgs/msg/LaserScan` | 激光观测 |
@@ -633,4 +630,3 @@ mini_localization_astar.launch.py
 2. AMCL 的激光输入使用 sensor-data QoS，并用 TF MessageFilter 等待目标时间的 TF；所以“`/scan` 有数据”不等于“AMCL 已经能够使用这些数据”。[Jazzy 激光 MessageFilter](https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_amcl/src/amcl_node.cpp#L1424-L1442)
 3. `map` 的 `header.frame_id` 应与 AMCL 的 `global_frame_id` 一致。Jazzy 源码会对此发出警告；当前项目两者都应为 `map`。[Jazzy 地图处理](https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_amcl/src/amcl_node.cpp#L1311-L1346)
 4. `base_frame_id` 必须与实际 TF 树一致。项目当前使用 `base_footprint`，而不是默认值也常见的 `base_link`；这个选择来自 Waffle 的实际 TF 配置。[项目 AMCL 配置](../mini_nav_bringup/config/amcl_waffle.yaml)
-

@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-09-28
+最后更新：2026-09-29
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -24,7 +24,7 @@
 - `mini_nav_nodes`
   - 从 map_server 的 `/map` 接收 `nav_msgs/msg/OccupancyGrid`，转换为 `Costmap2D`。
   - 通过 `map_file` 参数直接加载标准 trinary YAML/PGM 地图，并发布 `/mini_nav/map`。
-  - 通过 RViz 的 `/initialpose` 和 `/goal_pose` 接收起点、终点。
+  - 收到 RViz `/goal_pose` 时，从机器人当前 `map -> base_footprint` TF 获取规划起点；`/initialpose` 使旧路径失效。
   - 将 A* 结果发布为 `/mini_nav/global_path`。
   - 独立发布 `/mini_nav/planning_costmap`，不改变原始地图和 AMCL 输入。
   - `AmclNode` 生命周期节点及 `/amcl_pose`、`/particle_cloud`、`map -> odom` 适配。
@@ -85,9 +85,17 @@
 ### 静态规划代价地图（2026-09-28）
 
 - 在当前代码提交基线 `ff6e4d2` 后，参考已下载的 Jazzy Nav2 `InflationLayer` 和 Smac 2D 代价公式，实现 ROS 无关的障碍膨胀与软代价 A*。
-- 默认以 0.24 m 机器人半径加 0.05 m 安全余量形成禁行区，至 0.55 m 处形成渐变代价；原始 `/map` 不变，发布独立 `/mini_nav/planning_costmap` 供 RViz 查看。
+- 按 Waffle 碰撞盒最远角点约 0.238 m，默认取 0.24 m 机器人半径加 0.05 m 安全余量形成禁行区；确定障碍至 0.45 m 处形成渐变代价，未知格周围的硬安全带由 `inflate_around_unknown` 控制；原始 `/map` 不变，发布独立 `/mini_nav/planning_costmap` 供 RViz 查看。
 - 两套定位加 A* 的 launch 加载 `planning_costmap.yaml`；三包构建和两套 launch 的 `--show-args` 已通过。
 - 本次未运行单元测试或 Gazebo 运动验收；车体余量与实际通道宽度仍需结合仿真调整。
+
+### 从机器人当前位置安全规划（2026-09-29）
+
+- 新目标到来时从 `map -> base_footprint` TF 取当前起点，在膨胀规划图上执行 A*；路径中间点沿路径方向，末点保留目标朝向。
+- 初始位姿重设后清除旧路径，等待新的 `map -> odom`；地图更新、TF 过期或无效、起终点位于硬安全区及无路时清除旧路径。
+- `planning.max_pose_age` 默认 1.0 s；`base_frame_id`、`odom_frame_id` 可按 TF 树配置。
+- 无机器人 TF 的独立 A* 演示显式启用手选起点参数；两套定位入口保持默认 TF 起点。
+- 节点及 bringup 包已构建通过；尚未做 Gazebo 移动车辆后的路径、安全间距验收，也未运行本次改动的测试。
 
 ### M1：自研定位核心（2026-08-27）
 

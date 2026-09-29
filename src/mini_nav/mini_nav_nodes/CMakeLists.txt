@@ -12,6 +12,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -32,6 +33,18 @@ add_executable(mini_nav_amcl_node
   src/amcl_node.cpp
 )
 
+add_executable(local_costmap_node
+  src/main.cpp
+  src/local_costmap_node.cpp
+)
+target_compile_definitions(local_costmap_node PRIVATE MINI_NAV_BUILD_LOCAL_COSTMAP=1)
+target_compile_features(local_costmap_node PUBLIC cxx_std_17)
+target_include_directories(local_costmap_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ament_target_dependencies(local_costmap_node
+  geometry_msgs nav_msgs rclcpp sensor_msgs std_msgs tf2 tf2_geometry_msgs tf2_ros
+)
+target_link_libraries(local_costmap_node mini_nav_core::mini_nav_core)
+
 target_compile_definitions(mini_nav_amcl_node PRIVATE MINI_NAV_BUILD_AMCL=1)
 
 target_compile_features(costmap_publisher_node PUBLIC cxx_std_17)
@@ -42,6 +55,8 @@ ament_target_dependencies(costmap_publisher_node
   nav_msgs
   geometry_msgs
   rclcpp
+  tf2
+  tf2_ros
   visualization_msgs
 )
 target_link_libraries(costmap_publisher_node mini_nav_core::mini_nav_core)
@@ -71,6 +86,10 @@ install(TARGETS costmap_publisher_node
 )
 
 install(TARGETS mini_nav_amcl_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS local_costmap_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -54,6 +54,22 @@ struct ParticleFilterOptions
   double recovery_alpha_slow{0.0};
 };
 
+/** 一次重采样中按输出顺序记录的真实抽样决策。 */
+struct ResampleDraw
+{
+  double sample{0.0};
+  std::size_t source_index{0};
+  bool recovery{false};
+};
+
+/** 仅供诊断使用；不改变正常定位的重采样路径。 */
+struct ResampleTrace
+{
+  std::vector<double> source_weights;
+  double offset{0.0};
+  std::vector<ResampleDraw> draws;
+};
+
 /**
  * @class ParticleFilter
  * @brief 维护并更新二维机器人候选位姿的带权粒子集合。
@@ -171,6 +187,8 @@ public:
    * @throws std::runtime_error 当需要随机位姿而地图没有已知自由栅格时抛出。
    */
   bool Resample(const LocalizationMap & map);
+  /** 重采样并记录实际使用的累计权重区间与输出来源。 */
+  bool Resample(const LocalizationMap & map, ResampleTrace * trace);
   /**
    * @brief 计算当前粒子集的加权均值位姿及协方差。
    * @return 初始化状态和总权重有效时返回 valid 估计；否则返回默认 invalid 估计。
@@ -197,7 +215,7 @@ private:
   static double NormalQuantile(double probability);
   /** @brief 根据 KLD 公式计算目标粒子数。@return 限制在配置上下界内的粒子数。 */
   std::size_t GetTargetParticleCount() const;
-  bool ResampleImpl(const LocalizationMap * map);
+  bool ResampleImpl(const LocalizationMap * map, ResampleTrace * trace);
 
   std::vector<Particle> particles_;
   std::unique_ptr<MotionModel> motion_model_;

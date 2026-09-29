@@ -401,16 +401,24 @@ bool ParticleFilter::NormalizeWeights()
  */
 bool ParticleFilter::Resample()
 {
-  return ResampleImpl(nullptr);
+  return ResampleImpl(nullptr, nullptr);
 }
 
 bool ParticleFilter::Resample(const LocalizationMap & map)
 {
-  return ResampleImpl(&map);
+  return ResampleImpl(&map, nullptr);
 }
 
-bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
+bool ParticleFilter::Resample(const LocalizationMap & map, ResampleTrace * trace)
 {
+  return ResampleImpl(&map, trace);
+}
+
+bool ParticleFilter::ResampleImpl(const LocalizationMap * map, ResampleTrace * trace)
+{
+  if (trace != nullptr) {
+    *trace = {};
+  }
   // 检查滤波器是否已初始化，粒子集合是否为空，以及权重是否已归一化。如果任一条件不满足，则返回 false。
   if (!initialized_ || particles_.empty() || !NormalizeWeights()) 
   {
@@ -436,6 +444,14 @@ bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
 
   // 创建一个新的粒子数组，大小就是 KLD 算出来的目标粒子数
   std::vector<Particle> resampled(target_count);
+  ResampleTrace recorded;
+  if (trace != nullptr) {
+    recorded.source_weights.reserve(particles_.size());
+    for (const auto & particle : particles_) {
+      recorded.source_weights.push_back(particle.weight);
+    }
+    recorded.draws.reserve(target_count);
+  }
 
   // 使用均匀分布生成一个随机偏移量，确保系统重采样的起点是随机的，从而降低重复抽样的方差。
   std::uniform_real_distribution<double> offset_distribution(
@@ -445,6 +461,9 @@ bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
    * 独立抽样，这会降低重复抽样的方差；改为独立抽样会使定位结果更易抖动。
    */
   const double offset = offset_distribution(generator_);
+  if (trace != nullptr) {
+    recorded.offset = offset;
+  }
   std::uniform_real_distribution<double> recovery_distribution(0.0, 1.0);
   std::uniform_real_distribution<double> yaw_distribution(-kPi, kPi);
   std::size_t source_index = 0;
@@ -463,6 +482,10 @@ bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
       }
       map->GetCellCenter(cell, resampled[index].pose.x, resampled[index].pose.y);
       resampled[index].pose.yaw = yaw_distribution(generator_);
+      if (trace != nullptr) {
+        recorded.draws.push_back({
+          std::numeric_limits<double>::quiet_NaN(), 0U, true});
+      }
     } else {
       const double sample = offset + static_cast<double>(index) / target_count;
       while (sample > cumulative && source_index + 1U < particles_.size()) {
@@ -470,6 +493,9 @@ bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
         cumulative += particles_[source_index].weight;
       }
       resampled[index].pose = particles_[source_index].pose;
+      if (trace != nullptr) {
+        recorded.draws.push_back({sample, source_index, false});
+      }
     }
     resampled[index].weight = 1.0 / static_cast<double>(target_count);
   }
@@ -480,6 +506,9 @@ bool ParticleFilter::ResampleImpl(const LocalizationMap * map)
   if (random_probability > 0.0) {
     fast_mean_weight_ = 0.0;
     slow_mean_weight_ = 0.0;
+  }
+  if (trace != nullptr) {
+    *trace = std::move(recorded);
   }
   return true;
 }

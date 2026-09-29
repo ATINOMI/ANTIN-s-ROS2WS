@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>mini_nav · 粒子滤波诊断</title>
+  <title>mini_nav · 粒子滤波过程诊断</title>
   <style>
     :root { color-scheme: light; font-family: Inter, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
@@ -12,28 +12,38 @@
     header .eyebrow { color: #70d6ce; font-size: 12px; letter-spacing: .16em; font-weight: 700; }
     header h1 { margin: 7px 0 4px; font-size: 25px; font-weight: 750; }
     header p { margin: 0; color: #bcc8d7; font-size: 13px; line-height: 1.6; }
-    main { max-width: 1540px; margin: 0 auto; padding: 20px; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+    main { max-width: 1560px; margin: 0 auto; padding: 20px; }
     .card { background: #fff; border: 1px solid #dbe2ea; border-radius: 12px; box-shadow: 0 2px 12px #1722350b; }
+    .data-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 13px 17px; margin-bottom: 16px; }
+    .data-bar strong { font-size: 13px; margin-right: 4px; }
+    .data-bar select { min-width: min(460px, 100%); max-width: 100%; }
+    .data-bar .hint { color: #718196; font-size: 11px; flex: 1 1 220px; }
+    .file-button { display: inline-flex; align-items: center; height: 34px; padding: 0 12px; border: 1px solid #ccd7e1; border-radius: 7px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .file-button input { display: none; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+    .left-column, .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     .map-card { overflow: hidden; }
-    .section-head { padding: 15px 19px; border-bottom: 1px solid #e6ebf0; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .section-head { padding: 14px 18px; border-bottom: 1px solid #e6ebf0; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .section-head strong { font-size: 15px; }
     .section-head span { color: #65758a; font-size: 12px; }
     .map-wrap { position: relative; padding: 12px; background: #f8fafc; }
-    #map { display: block; width: 100%; height: min(64vw, 670px); min-height: 430px; border-radius: 6px; background: #e8edf2; cursor: crosshair; }
-    #hover { position: absolute; left: 22px; bottom: 22px; max-width: calc(100% - 44px); padding: 8px 11px; background: #172235eb; color: white; border-radius: 6px; font-size: 12px; pointer-events: none; display: none; }
-    .legend { display: flex; flex-wrap: wrap; gap: 13px; padding: 12px 18px 15px; border-top: 1px solid #e6ebf0; font-size: 12px; color: #4c5b6e; }
+    #map { display: block; width: 100%; height: min(59vw, 650px); min-height: 410px; border-radius: 6px; background: #e8edf2; cursor: crosshair; }
+    #hover { position: absolute; left: 22px; bottom: 22px; max-width: calc(100% - 44px); padding: 8px 11px; background: #172235ed; color: white; border-radius: 6px; font-size: 12px; pointer-events: none; display: none; }
+    .legend { display: flex; flex-wrap: wrap; gap: 13px; padding: 11px 18px 14px; border-top: 1px solid #e6ebf0; font-size: 12px; color: #4c5b6e; }
     .legend i { display: inline-block; width: 11px; height: 11px; margin-right: 5px; border-radius: 50%; vertical-align: -1px; }
-    .side { display: flex; flex-direction: column; gap: 16px; }
+    .cdf-card { overflow: hidden; }
+    .cdf-body { padding: 10px 16px 14px; }
+    #cdf { width: 100%; height: 160px; display: block; }
+    #cdf-detail { color: #53677b; font-size: 12px; line-height: 1.5; min-height: 20px; font-variant-numeric: tabular-nums; }
     .stage { padding: 18px; }
-    .stage .tag { display: inline-block; background: #e2f6f3; color: #06756b; border-radius: 5px; padding: 4px 8px; font-size: 11px; font-weight: 750; letter-spacing: .06em; }
+    .stage .tag { display: inline-block; background: #e2f6f3; color: #06756b; border-radius: 5px; padding: 4px 8px; font-size: 11px; font-weight: 750; letter-spacing: .04em; }
     .stage h2 { margin: 13px 0 6px; font-size: 23px; }
     .stage p { margin: 0; color: #56677a; line-height: 1.6; font-size: 13px; }
+    .stage .progress { margin-top: 13px; color: #087d76; font-weight: 750; font-size: 13px; font-variant-numeric: tabular-nums; }
     .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #e9edf2; overflow: hidden; }
     .metric { background: #fff; padding: 15px 18px; }
     .metric small { display: block; color: #718196; font-size: 11px; margin-bottom: 5px; }
     .metric b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
-    .metric b em { color: #76869a; font-size: 11px; font-style: normal; font-weight: 500; }
     .detail { padding: 15px 18px; }
     .detail h3 { margin: 0 0 10px; font-size: 13px; }
     .detail dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }
@@ -45,45 +55,60 @@
     .timeline-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .timeline-top strong { font-size: 14px; }
     .timeline-top span { font-size: 12px; color: #728196; font-variant-numeric: tabular-nums; }
-    input[type=range] { width: 100%; margin: 18px 0 14px; accent-color: #078c80; }
-    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .range-label { display: flex; justify-content: space-between; font-size: 11px; color: #718196; margin-top: 8px; }
+    input[type=range] { width: 100%; margin: 8px 0 5px; accent-color: #078c80; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
     button, select { border: 1px solid #ccd7e1; background: #fff; color: #172235; border-radius: 7px; height: 34px; padding: 0 12px; font: inherit; font-size: 12px; cursor: pointer; }
     button.primary { background: #078c80; border-color: #078c80; color: white; font-weight: 650; }
     button:disabled { opacity: .45; cursor: default; }
-    .frame-labels { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 14px; max-height: 80px; overflow: auto; }
-    .frame-labels button { height: 25px; padding: 0 7px; font-size: 10px; border-color: #e1e7ed; }
+    .frame-labels { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 14px; max-height: 90px; overflow: auto; }
+    .frame-labels button { height: 26px; padding: 0 7px; font-size: 10px; border-color: #e1e7ed; }
     .frame-labels button.active { background: #172235; border-color: #172235; color: white; }
-    .note { margin-top: 14px; color: #66778c; font-size: 12px; line-height: 1.6; }
+    .note { margin: 14px 1px 0; color: #66778c; font-size: 12px; line-height: 1.6; }
     @media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } .side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 650px) { main { padding: 10px; } header { padding: 18px; } .side { display: flex; } #map { height: 430px; min-height: 0; } }
+    @media (max-width: 650px) { main { padding: 10px; } header { padding: 18px; } .side { display: flex; } #map { height: 430px; min-height: 0; } .data-bar select { min-width: 100%; } }
   </style>
 </head>
 <body>
   <header>
     <div class="eyebrow">MINI_NAV / PARTICLE FILTER TRACE</div>
     <h1>粒子滤波过程诊断</h1>
-    <p>逐帧查看粒子初始化、运动预测、激光打分、归一化、重采样与位姿估计。每一帧都是实际记录的离散状态，没有插值。</p>
+    <p>按实际数组顺序播放撒粒子、观测打分和重采样；累计权重区间与抽样来源来自调试滤波器的真实记录。</p>
   </header>
   <main>
+    <section class="card data-bar">
+      <strong>数据记录</strong>
+      <select id="dataset" aria-label="选择调试记录"></select>
+      <label class="file-button">导入多份 JSON / HTML<input id="import" type="file" accept=".json,.html,application/json,text/html" multiple></label>
+      <button id="export" type="button">导出当前 JSON</button>
+      <span id="dataset-hint" class="hint">等待调试记录</span>
+    </section>
     <div class="layout">
-      <section class="card map-card">
-        <div class="section-head"><strong>地图与粒子分布</strong><span id="map-info">等待地图</span></div>
-        <div class="map-wrap"><canvas id="map"></canvas><div id="hover"></div></div>
-        <div class="legend">
-          <span><i style="background:#2b3342"></i>障碍</span>
-          <span><i style="background:#a9b6c5"></i>未知</span>
-          <span><i style="background:#a4b4c6"></i>低权重</span>
-          <span><i style="background:#079ba5"></i>中权重</span>
-          <span><i style="background:#e4a528"></i>高权重</span>
-          <span><i style="background:#d9364e"></i>最高权重</span>
-          <span><i style="background:#7a3ee7"></i>位姿均值／估计</span>
-        </div>
-      </section>
+      <div class="left-column">
+        <section class="card map-card">
+          <div class="section-head"><strong>地图与粒子分布</strong><span id="map-info">等待地图</span></div>
+          <div class="map-wrap"><canvas id="map"></canvas><div id="hover"></div></div>
+          <div class="legend">
+            <span><i style="background:#2b3342"></i>障碍</span>
+            <span><i style="background:#a9b6c5"></i>未知</span>
+            <span><i style="background:#a4b4c6"></i>未打分 / 低权重</span>
+            <span><i style="background:#079ba5"></i>中权重 / 抽中</span>
+            <span><i style="background:#e4a528"></i>高权重</span>
+            <span><i style="background:#d9364e"></i>最高权重 / 剔除</span>
+            <span><i style="background:#7a3ee7"></i>位姿估计</span>
+          </div>
+        </section>
+        <section class="card cdf-card">
+          <div class="section-head"><strong>累计权重区间与系统重采样</strong><span id="cdf-summary">等待重采样</span></div>
+          <div class="cdf-body"><canvas id="cdf"></canvas><div id="cdf-detail">选中重采样阶段后可查看每个真实抽样点。</div></div>
+        </section>
+      </div>
       <aside class="side">
         <section class="card stage">
           <span class="tag" id="stage-tag">等待数据</span>
           <h2 id="stage-name">尚无粒子帧</h2>
           <p id="stage-description">启动诊断节点，等待地图，然后在 RViz 中设置初始位姿。</p>
+          <div class="progress" id="stage-progress">—</div>
         </section>
         <section class="card metrics">
           <div class="metric"><small>粒子数量</small><b id="particle-count">—</b></div>
@@ -104,71 +129,141 @@
         <section class="card detail">
           <h3>相对权重分布</h3>
           <canvas id="histogram"></canvas>
-          <p class="hist-note">横轴为权重相对本帧最大值的对数刻度；越靠右，权重越高。</p>
+          <p class="hist-note">横轴为相对本帧最大权重的对数刻度；右侧权重更高。</p>
         </section>
       </aside>
     </div>
     <section class="card timeline">
-      <div class="timeline-top"><strong>逐帧回放</strong><span id="frame-position">0 / 0</span></div>
-      <input id="seek" type="range" min="0" max="0" value="0" disabled>
+      <div class="timeline-top"><strong>阶段与粒子动画</strong><span id="frame-position">0 / 0</span></div>
+      <div class="range-label"><span>阶段</span><span id="stage-count">—</span></div>
+      <input id="seek" type="range" min="0" max="0" value="0" disabled aria-label="选择阶段">
+      <div class="range-label"><span>本阶段进度</span><span id="phase-position">0%</span></div>
+      <input id="phase-seek" type="range" min="0" max="1000" value="0" disabled aria-label="调整阶段动画进度">
       <div class="controls">
-        <button id="previous" type="button">上一帧</button>
+        <button id="previous" type="button">上一阶段</button>
         <button id="play" class="primary" type="button">播放</button>
-        <button id="next" type="button">下一帧</button>
-        <select id="speed" aria-label="播放速度"><option value="1200">慢速</option><option value="700" selected>正常</option><option value="350">快速</option></select>
-        <button id="reload" type="button">载入新记录</button>
+        <button id="next" type="button">下一阶段</button>
+        <select id="speed" aria-label="动画倍速">
+          <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+          <option value="1">1×</option><option value="2" selected>2×</option>
+          <option value="4">4×</option><option value="8">8×</option><option value="16">16×</option>
+        </select>
+        <button id="reload" type="button">刷新生成文件</button>
       </div>
       <div class="frame-labels" id="frame-labels"></div>
     </section>
-    <p class="note">这是使用相同定位核心和参数运行的独立诊断滤波器；回调时序可能使它与主 AMCL 的单个粒子不同。这里显示的是每轮位姿估计与离散程度，当前主程序没有独立的收敛确认步骤。</p>
+    <p class="note">这是独立诊断滤波器的真实采集数据，不是主 AMCL 的私有粒子。最终标记表示该轮位姿估计，并不表示已通过独立收敛判定。旧记录没有抽样轨迹时会显示缺失提示，不会推测抽中来源。</p>
   </main>
   <script>
-    const data = __MINI_NAV_DEBUG_DATA__;
-    const frames = data.frames || [];
-    const map = data.map;
+    const embeddedData = __MINI_NAV_DEBUG_DATA__;
+    const stageInfo = {
+      initialize: ['撒粒子', '依照初始化时的实际数组顺序，让等权重粒子逐个出现。'],
+      motion: ['运动预测', '查看运动模型推进后的粒子位置。'],
+      score: ['观测打分', '激光模型按粒子数组顺序逐个打分；已打分的粒子依权重着色。'],
+      normalize: ['权重归一化', '观测权重归一化后形成累计概率区间。'],
+      resample: ['重采样', '抽样点依实际执行顺序落入累计权重区间；未被抽中的来源逐渐淡出。'],
+      hold: ['保持粒子', '本轮没有达到重采样间隔。'],
+      estimate: ['位姿估计', '收拢标定环，显示该轮加权均值和朝向；不代表收敛确认。'],
+      invalid_weights: ['权重异常', '本轮观测权重无法归一化。']
+    };
     const mapCanvas = document.getElementById('map');
+    const cdfCanvas = document.getElementById('cdf');
     const histCanvas = document.getElementById('histogram');
     const seek = document.getElementById('seek');
+    const phaseSeek = document.getElementById('phase-seek');
     const hover = document.getElementById('hover');
-    const stageInfo = {
-      initialize: ['撒粒子', '按初始位姿和协方差生成等权重粒子；紫色标记是初始分布的均值。'],
-      motion: ['运动预测', '根据两次里程计之间的位移和转角推进粒子；权重保持不变。'],
-      score: ['观测打分', '激光观测似然乘入每个粒子的原始权重；颜色表示本帧相对权重。'],
-      normalize: ['权重归一化', '把观测后的权重归一化到总和为 1；ESS 表示有效粒子数量。'],
-      resample: ['重采样', '按权重抽取新的等权重粒子；粒子数可能受 KLD 自适应策略影响。'],
-      hold: ['保持粒子', '本轮未达到重采样间隔，保留归一化后的粒子。'],
-      estimate: ['位姿估计', '由本轮粒子计算加权均值和协方差；这里没有额外的收敛判定。'],
-      invalid_weights: ['权重异常', '观测权重无法归一化，本轮没有有效估计。']
-    };
-    let current = Math.max(0, frames.length - 1);
-    let playing = null;
+    const datasetSelect = document.getElementById('dataset');
+    const datasets = [];
+    let selectedDataset = 0;
+    let currentFrame = 0;
+    let phase = 0;
+    let playing = false;
+    let lastTick = null;
+    let holdRemaining = 0;
     let geometry = null;
+    let mapCache = null;
+    let drawnParticles = [];
 
     function text(id, value) { document.getElementById(id).textContent = value; }
     function number(value, digits = 2) { return Number.isFinite(value) ? value.toFixed(digits) : '—'; }
-    function weight(value) {
-      if (!Number.isFinite(value)) return '—';
-      return value === 0 ? '0' : value.toExponential(3);
+    function weight(value) { return Number.isFinite(value) ? (value === 0 ? '0' : value.toExponential(3)) : '—'; }
+    function active() { return datasets[selectedDataset] || null; }
+    function frames() { return active()?.frames || []; }
+    function frame() { return frames()[currentFrame] || null; }
+    function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+
+    // 新格式包含多个初始位姿会话；旧版单会话 HTML 仍可导入并播放已有帧。
+    function appendBundle(bundle, label) {
+      const sessions = Array.isArray(bundle?.sessions) ? bundle.sessions :
+        (bundle?.map && Array.isArray(bundle?.frames) ? [bundle] : []);
+      let added = 0;
+      for (const session of sessions) {
+        if (!session?.map || !Array.isArray(session.frames)) continue;
+        const id = session.id ?? (added + 1);
+        const pose = Array.isArray(session.initial) ? session.initial : null;
+        const position = pose ? ` · (${number(pose[0], 2)}, ${number(pose[1], 2)}) m` : '';
+        datasets.push({ ...session, label: `${label} · 第 ${id} 组${position}` });
+        added++;
+      }
+      return added;
     }
-    function sizeCanvas(canvas) {
+
+    function updateDatasetOptions() {
+      datasetSelect.replaceChildren();
+      datasets.forEach((session, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = session.label;
+        datasetSelect.appendChild(option);
+      });
+      datasetSelect.disabled = datasets.length === 0;
+      datasetSelect.value = String(selectedDataset);
+      document.getElementById('export').disabled = datasets.length === 0;
+      const session = active();
+      text('dataset-hint', session ? `${datasets.length} 组记录 · ${session.frames.length} 个阶段` : '等待初始位姿或导入文件');
+    }
+
+    function selectDataset(index) {
+      pause();
+      selectedDataset = clamp(index, 0, Math.max(0, datasets.length - 1));
+      currentFrame = 0;
+      phase = 0;
+      holdRemaining = 0;
+      mapCache = null;
+      rebuildFrameButtons();
+      updateDatasetOptions();
+      render();
+    }
+
+    function canvasContext(canvas) {
       const dpr = window.devicePixelRatio || 1;
       const box = canvas.getBoundingClientRect();
-      canvas.width = Math.max(1, Math.round(box.width * dpr));
-      canvas.height = Math.max(1, Math.round(box.height * dpr));
-      const context = canvas.getContext('2d');
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return [context, box.width, box.height];
+      const pixelWidth = Math.max(1, Math.round(box.width * dpr));
+      const pixelHeight = Math.max(1, Math.round(box.height * dpr));
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+        if (canvas === mapCanvas) mapCache = null;
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return [ctx, box.width, box.height, dpr];
     }
-    function worldToPixel(x, y) {
+
+    function worldToPixel(x, y, map) {
       const gx = (x - map.origin[0]) / map.resolution;
       const gy = (y - map.origin[1]) / map.resolution;
       return [geometry.left + gx * geometry.cell, geometry.top + (map.height - gy) * geometry.cell];
     }
-    function drawMap(frame) {
-      const [ctx, width, height] = sizeCanvas(mapCanvas);
+
+    function makeMapCache(map, width, height, dpr) {
+      const base = document.createElement('canvas');
+      base.width = Math.round(width * dpr);
+      base.height = Math.round(height * dpr);
+      const ctx = base.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#f8fafc';
       ctx.fillRect(0, 0, width, height);
-      if (!map || !map.width || !map.height) return;
       const cell = Math.min((width - 30) / map.width, (height - 30) / map.height);
       const left = (width - map.width * cell) / 2;
       const top = (height - map.height * cell) / 2;
@@ -180,59 +275,245 @@
           const value = map.data[y * map.width + x];
           if (value === 0) continue;
           ctx.fillStyle = value < 0 ? '#a9b6c5' : '#2b3342';
-          ctx.fillRect(left + x * cell, top + (map.height - y - 1) * cell, Math.ceil(cell), Math.ceil(cell));
+          ctx.fillRect(left + x * cell, top + (map.height - y - 1) * cell,
+            Math.ceil(cell), Math.ceil(cell));
         }
       }
       ctx.strokeStyle = '#8292a5';
       ctx.lineWidth = 1;
       ctx.strokeRect(left + .5, top + .5, map.width * cell, map.height * cell);
-      if (!frame) return;
-      const particles = frame.particles;
-      const maxWeight = frame.weight_max || 0;
-      const uniform = frame.stage === 'initialize' || frame.stage === 'motion' || frame.stage === 'resample';
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
-        const [px, py] = worldToPixel(p[0], p[1]);
-        if (px < 0 || py < 0 || px > width || py > height) continue;
-        const ratio = maxWeight > 0 ? (p[3] || 0) / maxWeight : 0;
-        ctx.fillStyle = uniform ? '#078c9a' : ratio < .01 ? '#a4b4c6' : ratio < .1 ? '#079ba5' : ratio < .5 ? '#e4a528' : '#d9364e';
-        ctx.beginPath();
-        ctx.arc(px, py, uniform ? 2.2 : (ratio >= .5 ? 3.1 : 2.2), 0, Math.PI * 2);
-        ctx.fill();
-        if (i % 12 === 0 && Number.isFinite(p[2])) {
-          ctx.strokeStyle = ctx.fillStyle;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(px + 7 * Math.cos(p[2]), py - 7 * Math.sin(p[2]));
-          ctx.stroke();
+      mapCache = {map, width, height, dpr, canvas: base};
+    }
+
+    function relativeColor(value, maximum) {
+      const ratio = maximum > 0 ? Math.max(0, value || 0) / maximum : 0;
+      return ratio < .01 ? '#a4b4c6' : ratio < .1 ? '#079ba5' : ratio < .5 ? '#e4a528' : '#d9364e';
+    }
+
+    function drawParticle(ctx, map, p, index, color, radius = 2.4, opacity = 1, heading = false, cross = false) {
+      if (!Number.isFinite(p?.[0]) || !Number.isFinite(p?.[1])) return;
+      const [x, y] = worldToPixel(p[0], p[1], map);
+      if (x < 0 || y < 0 || x > mapCanvas.clientWidth || y > mapCanvas.clientHeight) return;
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, Math.max(.2, radius), 0, Math.PI * 2); ctx.fill();
+      if (cross) {
+        ctx.strokeStyle = '#c74755'; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(x - 3, y - 3); ctx.lineTo(x + 3, y + 3);
+        ctx.moveTo(x + 3, y - 3); ctx.lineTo(x - 3, y + 3); ctx.stroke();
+      } else if (heading && index % 12 === 0 && Number.isFinite(p[2])) {
+        ctx.strokeStyle = color; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        ctx.lineTo(x + 7 * Math.cos(p[2]), y - 7 * Math.sin(p[2])); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      drawnParticles.push({p, index, x, y});
+    }
+
+    function sortedIndices(particles, weights = null) {
+      const result = Array.from({length: particles.length}, (_, i) => i);
+      result.sort((a, b) => ((weights ? weights[a] : particles[a]?.[3]) || 0) -
+        ((weights ? weights[b] : particles[b]?.[3]) || 0) || a - b);
+      return result;
+    }
+
+    function drawEstimate(ctx, map, estimate, progress) {
+      if (!estimate || progress <= 0) return;
+      const [x, y] = worldToPixel(estimate[0], estimate[1], map);
+      const t = clamp(progress, 0, 1);
+      const spreadX = Math.max(4, (estimate[3] || 0) / map.resolution * geometry.cell);
+      const spreadY = Math.max(4, (estimate[4] || 0) / map.resolution * geometry.cell);
+      ctx.strokeStyle = `rgba(122, 62, 231, ${.12 + .38 * t})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(x, y, spreadX * t, spreadY * t, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(x, y, 25 - 17 * t, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#7a3ee7'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, 25 - 17 * t, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#7a3ee7';
+      ctx.beginPath(); ctx.arc(x, y, 3 + 2 * t, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x, y);
+      ctx.lineTo(x + 18 * t * Math.cos(estimate[2]), y - 18 * t * Math.sin(estimate[2])); ctx.stroke();
+    }
+
+    function resampleState(trace, progress) {
+      const count = trace?.draws?.length || 0;
+      const amount = progress * count;
+      const completed = progress >= 1 ? count : Math.floor(amount);
+      const hits = Array(trace?.weights?.length || 0).fill(0);
+      let cursor = -1;
+      for (let i = 0; i < completed; i++) {
+        const source = trace.draws[i][1];
+        if (Number.isInteger(source) && source >= 0 && source < hits.length) {
+          hits[source]++;
+          cursor = Math.max(cursor, source);
         }
       }
-      if (frame.estimate) {
-        const e = frame.estimate;
-        const [px, py] = worldToPixel(e[0], e[1]);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 5;
-        ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.stroke();
-        ctx.strokeStyle = '#7a3ee7';
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(px, py);
-        ctx.lineTo(px + 17 * Math.cos(e[2]), py - 17 * Math.sin(e[2])); ctx.stroke();
+      const removed = hits.reduce((sum, value, index) =>
+        sum + (value === 0 && (progress >= 1 || index < cursor) ? 1 : 0), 0);
+      return {completed, fraction: amount - completed, hits, cursor, removed};
+    }
+
+    function drawMap() {
+      const [ctx, width, height, dpr] = canvasContext(mapCanvas);
+      const session = active();
+      const map = session?.map;
+      drawnParticles = [];
+      if (!map?.width || !map?.height || !Array.isArray(map.data)) {
+        ctx.fillStyle = '#e8edf2'; ctx.fillRect(0, 0, width, height);
+        geometry = null;
+        return;
+      }
+      if (!mapCache || mapCache.map !== map || mapCache.width !== width ||
+          mapCache.height !== height || mapCache.dpr !== dpr) {
+        makeMapCache(map, width, height, dpr);
+      }
+      ctx.drawImage(mapCache.canvas, 0, 0, width, height);
+      const item = frame();
+      if (!item) return;
+      const particles = item.particles || [];
+      const maxWeight = item.weight_max || 0;
+      if (item.stage === 'initialize') {
+        const amount = phase * particles.length;
+        const completed = phase >= 1 ? particles.length : Math.floor(amount);
+        for (let i = 0; i < completed; i++) {
+          drawParticle(ctx, map, particles[i], i, '#078c9a', 2.4, 1, true);
+        }
+        if (completed < particles.length && amount > completed) {
+          drawParticle(ctx, map, particles[completed], completed, '#078c9a',
+            4.5 * (amount - completed), 1, true);
+        }
+        if (item.estimate) drawEstimate(ctx, map, item.estimate, Math.max(0, (phase - .86) / .14));
+      } else if (item.stage === 'score') {
+        // 灰色底层始终先画；已打分粒子按权重升序画，高权重即使先打分也在上层。
+        for (let i = 0; i < particles.length; i++) {
+          drawParticle(ctx, map, particles[i], i, '#a4b4c6', 1.8, .42);
+        }
+        const amount = phase * particles.length;
+        const completed = phase >= 1 ? particles.length : Math.floor(amount);
+        const colored = Array.from({length: completed}, (_, i) => i);
+        if (completed < particles.length && amount > completed) colored.push(completed);
+        colored.sort((a, b) => (particles[a]?.[3] || 0) - (particles[b]?.[3] || 0) || a - b);
+        for (const i of colored) {
+          drawParticle(ctx, map, particles[i], i,
+            relativeColor(particles[i][3], maxWeight),
+            i === completed ? 4.7 * (amount - completed) : 2.3, 1, true);
+        }
+      } else if (item.stage === 'resample' && item.resample?.draws) {
+        const input = frames()[currentFrame - 1]?.particles || [];
+        const trace = item.resample;
+        const state = resampleState(trace, phase);
+        const sourceMax = Math.max(...trace.weights, 0);
+        for (const i of sortedIndices(input, trace.weights)) {
+          const eliminated = state.hits[i] === 0 && (phase >= 1 || i < state.cursor);
+          const chosen = state.hits[i] > 0;
+          drawParticle(ctx, map, input[i], i, eliminated ? '#d9364e' :
+            (chosen ? '#079ba5' : relativeColor(trace.weights[i], sourceMax)),
+            chosen ? 2.8 : 2.1, eliminated ? .22 : .66, false, eliminated);
+        }
+        for (let i = 0; i < state.completed; i++) {
+          drawParticle(ctx, map, particles[i], i, '#078c9a', 3.1, 1, true);
+        }
+        if (state.completed < particles.length && state.fraction > 0) {
+          drawParticle(ctx, map, particles[state.completed], state.completed,
+            '#078c9a', 5.4 * state.fraction, 1, true);
+        }
+      } else {
+        const uniform = item.stage === 'resample';
+        for (const i of sortedIndices(particles)) {
+          const color = uniform ? '#078c9a' : relativeColor(particles[i][3], maxWeight);
+          drawParticle(ctx, map, particles[i], i, color, 2.4, 1, true);
+        }
+        if (item.estimate) drawEstimate(ctx, map, item.estimate,
+          item.stage === 'estimate' ? phase : 1);
       }
     }
-    function drawHistogram(frame) {
-      const [ctx, width, height] = sizeCanvas(histCanvas);
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = '#f2f5f8';
-      ctx.fillRect(0, 0, width, height);
-      if (!frame || !frame.particles.length) return;
+
+    function drawCdf() {
+      const [ctx, width, height] = canvasContext(cdfCanvas);
+      ctx.fillStyle = '#f7f9fb'; ctx.fillRect(0, 0, width, height);
+      const item = frame();
+      const trace = item?.stage === 'resample' ? item.resample : null;
+      if (!trace?.draws?.length || !trace?.weights?.length) {
+        ctx.fillStyle = '#728196'; ctx.font = '12px sans-serif';
+        ctx.fillText(item?.stage === 'resample' ?
+          '旧记录没有真实抽样轨迹，请重新采集后查看区间和来源。' :
+          '切换到重采样阶段，这里显示按来源粒子顺序排列的累计概率区间。', 12, 34);
+        text('cdf-summary', '等待重采样');
+        text('cdf-detail', item?.stage === 'resample' ?
+          '当前记录只保存了重采样后的粒子，无法准确推断抽中来源。' :
+          '区间宽度等于粒子的归一化权重；竖线表示实际抽样点。');
+        return;
+      }
+      const state = resampleState(trace, phase);
+      const weights = trace.weights.map(value => Number.isFinite(value) && value > 0 ? value : 0);
+      const total = weights.reduce((sum, value) => sum + value, 0) || 1;
+      const bounds = [0];
+      for (const value of weights) bounds.push(bounds[bounds.length - 1] + value / total);
+      const left = 14, span = Math.max(1, width - 28), top = 29, bandHeight = 44;
+      ctx.fillStyle = '#e4eaf0'; ctx.fillRect(left, top, span, bandHeight);
+      const peak = Math.max(...weights, 0);
+      for (let i = 0; i < weights.length; i++) {
+        const x0 = left + bounds[i] * span;
+        const x1 = left + bounds[i + 1] * span;
+        if (x1 <= x0) continue;
+        const eliminated = state.hits[i] === 0 && (phase >= 1 || i < state.cursor);
+        ctx.fillStyle = eliminated ? '#d9a8ae' : state.hits[i] ? '#079ba5' :
+          relativeColor(weights[i], peak);
+        ctx.fillRect(x0, top, Math.max(.5, x1 - x0), bandHeight);
+      }
+      ctx.fillStyle = '#485b70'; ctx.font = '11px sans-serif';
+      ctx.fillText('0', left, 20); ctx.fillText('1', left + span - 5, 20);
+      ctx.fillText('完整累计区间 [0, 1]', left, 91);
+      for (let i = 0; i < state.completed; i++) {
+        const sample = trace.draws[i][0];
+        if (!Number.isFinite(sample)) continue;
+        const x = left + sample * span;
+        ctx.strokeStyle = 'rgba(23, 34, 53, .25)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, top - 5); ctx.lineTo(x, top + bandHeight + 5); ctx.stroke();
+      }
+      const activeIndex = clamp(state.completed, 0, trace.draws.length - 1);
+      const draw = trace.draws[activeIndex];
+      const source = draw?.[1];
+      if (Number.isInteger(source) && source >= 0 && source < weights.length) {
+        const start = bounds[source], end = bounds[source + 1];
+        const x = left + draw[0] * span;
+        ctx.strokeStyle = '#172235'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x, top - 10); ctx.lineTo(x, top + bandHeight + 9); ctx.stroke();
+        ctx.strokeStyle = '#172235'; ctx.lineWidth = 2;
+        ctx.strokeRect(left + start * span, top - 2, Math.max(2, (end - start) * span), bandHeight + 4);
+        const zoomMin = Math.max(0, start - Math.max(end - start, .002));
+        const zoomMax = Math.min(1, end + Math.max(end - start, .002));
+        const zoomTop = 112, zoomHeight = 21;
+        ctx.fillStyle = '#e4eaf0'; ctx.fillRect(left, zoomTop, span, zoomHeight);
+        for (let i = 0; i < weights.length; i++) {
+          const lo = Math.max(bounds[i], zoomMin), hi = Math.min(bounds[i + 1], zoomMax);
+          if (hi <= lo) continue;
+          ctx.fillStyle = i === source ? '#079ba5' : '#bdcbd8';
+          ctx.fillRect(left + (lo - zoomMin) / (zoomMax - zoomMin) * span, zoomTop,
+            Math.max(.5, (hi - lo) / (zoomMax - zoomMin) * span), zoomHeight);
+        }
+        ctx.fillStyle = '#485b70'; ctx.fillText('当前区间放大', left, 151);
+        text('cdf-detail', `第 ${activeIndex + 1} 次抽样：u = ${number(draw[0], 6)}，命中来源粒子 #${source + 1}，区间 [${number(start, 6)}, ${number(end, 6)})，宽度 ${weight(weights[source])}`);
+      } else {
+        text('cdf-detail', `第 ${activeIndex + 1} 次为恢复注入：从地图自由区域另取位姿，没有累计区间来源。`);
+      }
+      text('cdf-summary', `已抽 ${state.completed} / ${trace.draws.length} · 剔除 ${state.removed}`);
+    }
+
+    function drawHistogram() {
+      const [ctx, width, height] = canvasContext(histCanvas);
+      ctx.fillStyle = '#f2f5f8'; ctx.fillRect(0, 0, width, height);
+      const item = frame();
+      if (!item?.particles?.length) return;
+      const particles = item.particles;
+      const limit = item.stage === 'initialize' || item.stage === 'score' || item.stage === 'resample' ?
+        Math.floor(phase * particles.length) : particles.length;
       const bins = Array(24).fill(0);
-      const maxWeight = frame.weight_max || 0;
-      for (const p of frame.particles) {
-        const fraction = maxWeight > 0 ? Math.max(1e-8, (p[3] || 0) / maxWeight) : 1e-8;
-        const index = Math.max(0, Math.min(23, Math.floor((Math.log10(fraction) + 8) * 3)));
+      const maximum = item.weight_max || 0;
+      for (let i = 0; i < limit; i++) {
+        const fraction = maximum > 0 ? Math.max(1e-8, (particles[i][3] || 0) / maximum) : 1e-8;
+        const index = clamp(Math.floor((Math.log10(fraction) + 8) * 3), 0, 23);
         bins[index]++;
       }
       const peak = Math.max(...bins, 1);
@@ -242,89 +523,218 @@
         const barHeight = (height - 20) * count / peak;
         ctx.fillRect(i * bar + 1, height - 12 - barHeight, Math.max(1, bar - 2), barHeight);
       });
-      ctx.fillStyle = '#6f8092';
-      ctx.font = '11px sans-serif';
-      ctx.fillText('较低', 6, height - 2);
-      ctx.fillText('较高', width - 29, height - 2);
+      ctx.fillStyle = '#6f8092'; ctx.font = '11px sans-serif';
+      ctx.fillText('较低', 6, height - 2); ctx.fillText('较高', width - 29, height - 2);
     }
+
+    function stageProgress(item) {
+      if (!item) return '—';
+      const count = item.particles?.length || 0;
+      if (item.stage === 'initialize') return `已生成 ${Math.floor(phase * count)} / ${count}`;
+      if (item.stage === 'score') return `已打分 ${Math.floor(phase * count)} / ${count} · 按数组顺序`;
+      if (item.stage === 'resample' && item.resample?.draws) {
+        const state = resampleState(item.resample, phase);
+        return `已抽中 ${state.completed} / ${item.resample.draws.length} · 已剔除 ${state.removed}`;
+      }
+      if (item.stage === 'estimate') return `标定位姿 ${Math.round(phase * 100)}%`;
+      return `阶段进度 ${Math.round(phase * 100)}%`;
+    }
+
     function render() {
-      const frame = frames[current];
-      text('map-info', map && map.width ? `${map.width} × ${map.height} · ${number(map.resolution, 3)} m/格` : '等待地图');
-      text('frame-position', frames.length ? `${current + 1} / ${frames.length}` : '0 / 0');
-      seek.disabled = !frames.length;
-      seek.max = Math.max(0, frames.length - 1);
-      seek.value = current;
-      document.getElementById('previous').disabled = !frames.length || current === 0;
-      document.getElementById('next').disabled = !frames.length || current === frames.length - 1;
-      document.getElementById('play').disabled = frames.length < 2;
-      if (!frame) { drawMap(null); drawHistogram(null); return; }
-      const info = stageInfo[frame.stage] || [frame.stage, ''];
-      text('stage-tag', frame.update ? `第 ${frame.update} 轮 / ${frame.stage}` : '初始位姿');
+      const session = active();
+      const list = frames();
+      const item = frame();
+      const map = session?.map;
+      text('map-info', map?.width ? `${map.width} × ${map.height} · ${number(map.resolution, 3)} m/格` : '等待地图');
+      text('frame-position', list.length ? `${currentFrame + 1} / ${list.length}` : '0 / 0');
+      text('stage-count', list.length ? `${list.length} 个阶段` : '—');
+      text('phase-position', `${Math.round(phase * 100)}%`);
+      seek.disabled = !list.length;
+      seek.max = Math.max(0, list.length - 1);
+      seek.value = currentFrame;
+      phaseSeek.disabled = !item;
+      phaseSeek.value = Math.round(phase * 1000);
+      document.getElementById('previous').disabled = !list.length || currentFrame === 0;
+      document.getElementById('next').disabled = !list.length || currentFrame === list.length - 1;
+      document.getElementById('play').disabled = !list.length;
+      if (!item) {
+        text('stage-tag', '等待数据'); text('stage-name', '尚无粒子帧');
+        text('stage-description', '等待诊断节点采集，或导入多份 JSON / HTML 记录。');
+        text('stage-progress', '—');
+        drawMap(); drawCdf(); drawHistogram();
+        return;
+      }
+      const info = stageInfo[item.stage] || [item.stage, ''];
+      text('stage-tag', item.update ? `第 ${item.update} 轮 / ${item.stage}` : '初始位姿');
       text('stage-name', info[0]);
       text('stage-description', info[1]);
-      text('particle-count', frame.particles.length.toLocaleString());
-      text('ess', `${number(frame.ess, 0)} / ${frame.particles.length}`);
-      text('spread', frame.estimate ? `${number(Math.hypot(frame.estimate[3], frame.estimate[4]), 3)} m` : '—');
-      text('update-count', `${frame.update} / ${data.max_updates}`);
-      text('estimate-xy', frame.estimate ? `${number(frame.estimate[0], 3)} / ${number(frame.estimate[1], 3)} m` : '—');
-      text('estimate-yaw', frame.estimate ? `${number(frame.estimate[2] * 180 / Math.PI, 1)}°` : '—');
-      text('weight-min', weight(frame.weight_min));
-      text('weight-max', weight(frame.weight_max));
-      text('stamp', `${number(frame.stamp, 3)} s`);
-      drawMap(frame);
-      drawHistogram(frame);
+      text('stage-progress', stageProgress(item));
+      text('particle-count', item.particles.length.toLocaleString());
+      text('ess', `${number(item.ess, 0)} / ${item.particles.length}`);
+      text('spread', item.estimate ? `${number(Math.hypot(item.estimate[3], item.estimate[4]), 3)} m` : '—');
+      text('update-count', `${item.update} / ${session.max_updates ?? '—'}`);
+      text('estimate-xy', item.estimate ? `${number(item.estimate[0], 3)} / ${number(item.estimate[1], 3)} m` : '—');
+      text('estimate-yaw', item.estimate ? `${number(item.estimate[2] * 180 / Math.PI, 1)}°` : '—');
+      text('weight-min', weight(item.weight_min));
+      text('weight-max', weight(item.weight_max));
+      text('stamp', `${number(item.stamp, 3)} s`);
+      drawMap(); drawCdf(); drawHistogram();
       document.querySelectorAll('#frame-labels button').forEach((button, index) => {
-        button.classList.toggle('active', index === current);
+        button.classList.toggle('active', index === currentFrame);
       });
     }
-    function goTo(index) { current = Math.max(0, Math.min(frames.length - 1, index)); render(); }
-    function stop() { if (playing) clearInterval(playing); playing = null; text('play', '播放'); }
-    document.getElementById('previous').onclick = () => { stop(); goTo(current - 1); };
-    document.getElementById('next').onclick = () => { stop(); goTo(current + 1); };
-    document.getElementById('play').onclick = () => {
-      if (playing) { stop(); return; }
-      if (current >= frames.length - 1) goTo(0);
+
+    function rebuildFrameButtons() {
+      const container = document.getElementById('frame-labels');
+      container.replaceChildren();
+      frames().forEach((item, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = `${item.update || '初'} · ${(stageInfo[item.stage] || [item.stage])[0]}`;
+        button.onclick = () => { pause(); currentFrame = index; phase = 0; holdRemaining = 0; render(); };
+        container.appendChild(button);
+      });
+    }
+
+    function pause() {
+      playing = false;
+      lastTick = null;
+      text('play', '播放');
+    }
+
+    function stageDuration(item) {
+      const count = item.particles?.length || 0;
+      if (item.stage === 'initialize') return Math.max(1200, count * 22);
+      if (item.stage === 'score') return Math.max(1200, count * 24);
+      if (item.stage === 'resample') return Math.max(1200, (item.resample?.draws?.length || count) * 28);
+      if (item.stage === 'estimate') return 1800;
+      return 1200;
+    }
+
+    function tick(timestamp) {
+      if (!playing) return;
+      if (lastTick === null) lastTick = timestamp;
+      const delta = Math.min(100, timestamp - lastTick) * Number(document.getElementById('speed').value);
+      lastTick = timestamp;
+      const item = frame();
+      if (!item) { pause(); return; }
+      if (holdRemaining > 0) {
+        holdRemaining -= delta;
+        if (holdRemaining <= 0) {
+          if (currentFrame + 1 < frames().length) {
+            currentFrame++;
+            phase = 0;
+            holdRemaining = 0;
+          } else {
+            phase = 1;
+            pause();
+          }
+        }
+      } else {
+        phase += delta / stageDuration(item);
+        if (phase >= 1) {
+          phase = 1;
+          holdRemaining = 650;
+        }
+      }
+      render();
+      if (playing) requestAnimationFrame(tick);
+    }
+
+    function togglePlay() {
+      if (playing) { pause(); return; }
+      if (!frames().length) return;
+      if (currentFrame === frames().length - 1 && phase >= 1) {
+        currentFrame = 0; phase = 0;
+      } else if (phase >= 1 && currentFrame + 1 < frames().length) {
+        currentFrame++; phase = 0;
+      }
+      holdRemaining = 0;
+      playing = true;
+      lastTick = null;
       text('play', '暂停');
-      playing = setInterval(() => {
-        if (current >= frames.length - 1) { stop(); return; }
-        goTo(current + 1);
-      }, Number(document.getElementById('speed').value));
+      requestAnimationFrame(tick);
+    }
+
+    function parseImported(raw) {
+      const source = raw.trim();
+      if (source.startsWith('{')) return JSON.parse(source);
+      const match = source.match(/\bconst\s+(?:embeddedData|data)\s*=\s*(\{[^\r\n]*\})\s*;/);
+      if (!match) throw new Error('没有找到嵌入式粒子数据');
+      return JSON.parse(match[1]);
+    }
+
+    datasetSelect.onchange = () => selectDataset(Number(datasetSelect.value));
+    document.getElementById('import').onchange = async event => {
+      const files = [...event.target.files];
+      const firstNew = datasets.length;
+      let added = 0;
+      const failures = [];
+      for (const file of files) {
+        try {
+          const bundle = parseImported(await file.text());
+          const count = appendBundle(bundle, file.name);
+          if (!count) throw new Error('没有有效会话');
+          added += count;
+        } catch (error) {
+          failures.push(`${file.name}: ${error.message}`);
+        }
+      }
+      if (added) selectDataset(firstNew);
+      text('dataset-hint', `${datasets.length} 组记录 · 新增 ${added}` +
+        (failures.length ? ` · 失败：${failures.join('；')}` : ''));
+      event.target.value = '';
     };
-    document.getElementById('speed').onchange = () => {
-      if (playing) { stop(); document.getElementById('play').click(); }
+    document.getElementById('export').onclick = () => {
+      const session = active();
+      if (!session) return;
+      const {label, ...record} = session;
+      const blob = new Blob([JSON.stringify({version: 2, sessions: [record]})], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `mini_nav_pf_debug_${session.id ?? selectedDataset + 1}.json`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
+    document.getElementById('previous').onclick = () => {
+      pause(); currentFrame = Math.max(0, currentFrame - 1); phase = 0; holdRemaining = 0; render();
+    };
+    document.getElementById('next').onclick = () => {
+      pause(); currentFrame = Math.min(frames().length - 1, currentFrame + 1); phase = 0; holdRemaining = 0; render();
+    };
+    document.getElementById('play').onclick = togglePlay;
     document.getElementById('reload').onclick = () => location.reload();
-    seek.oninput = () => { stop(); goTo(Number(seek.value)); };
+    seek.oninput = () => { pause(); currentFrame = Number(seek.value); phase = 0; holdRemaining = 0; render(); };
+    phaseSeek.oninput = () => { pause(); phase = Number(phaseSeek.value) / 1000; holdRemaining = 0; render(); };
     document.addEventListener('keydown', event => {
-      if (event.key === 'ArrowLeft') { stop(); goTo(current - 1); }
-      if (event.key === 'ArrowRight') { stop(); goTo(current + 1); }
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+      if (event.key === 'ArrowLeft') { pause(); currentFrame = Math.max(0, currentFrame - 1); phase = 0; holdRemaining = 0; render(); }
+      if (event.key === 'ArrowRight') { pause(); currentFrame = Math.min(frames().length - 1, currentFrame + 1); phase = 0; holdRemaining = 0; render(); }
+      if (event.key === ' ') { event.preventDefault(); togglePlay(); }
     });
     mapCanvas.addEventListener('mousemove', event => {
-      const frame = frames[current];
-      if (!frame || !geometry) { hover.style.display = 'none'; return; }
+      if (!geometry) { hover.style.display = 'none'; return; }
       const box = mapCanvas.getBoundingClientRect();
-      const mx = event.clientX - box.left;
-      const my = event.clientY - box.top;
-      let nearest = null;
-      let minSquare = 144;
-      for (const p of frame.particles) {
-        const [px, py] = worldToPixel(p[0], p[1]);
-        const square = (px - mx) ** 2 + (py - my) ** 2;
-        if (square < minSquare) { minSquare = square; nearest = p; }
+      const x = event.clientX - box.left;
+      const y = event.clientY - box.top;
+      let selected = null;
+      for (let i = drawnParticles.length - 1; i >= 0; i--) {
+        const particle = drawnParticles[i];
+        if ((particle.x - x) ** 2 + (particle.y - y) ** 2 <= 64) {
+          selected = particle; break;
+        }
       }
-      hover.style.display = nearest ? 'block' : 'none';
-      if (nearest) hover.textContent = `粒子 x ${number(nearest[0], 3)} m · y ${number(nearest[1], 3)} m · yaw ${number(nearest[2] * 180 / Math.PI, 1)}° · 权重 ${weight(nearest[3])}`;
+      hover.style.display = selected ? 'block' : 'none';
+      if (selected) {
+        const p = selected.p;
+        hover.textContent = `粒子 #${selected.index + 1} · x ${number(p[0], 3)} m · y ${number(p[1], 3)} m · yaw ${number(p[2] * 180 / Math.PI, 1)}° · 权重 ${weight(p[3])}`;
+      }
     });
     mapCanvas.addEventListener('mouseleave', () => { hover.style.display = 'none'; });
-    frames.forEach((frame, index) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = `${frame.update || '初'} · ${(stageInfo[frame.stage] || [frame.stage])[0]}`;
-      button.onclick = () => { stop(); goTo(index); };
-      document.getElementById('frame-labels').appendChild(button);
-    });
-    window.addEventListener('resize', render);
-    render();
+    window.addEventListener('resize', () => { mapCache = null; render(); });
+    appendBundle(embeddedData, '当前采集');
+    selectDataset(Math.max(0, datasets.length - 1));
   </script>
 </body>
 </html>

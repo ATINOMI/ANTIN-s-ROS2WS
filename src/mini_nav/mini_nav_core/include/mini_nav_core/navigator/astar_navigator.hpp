@@ -44,8 +44,24 @@ namespace mini_nav_core
             const MapLocation & start,      
             const MapLocation & goal) const;
 
+        /** 在规划图上搜索，并用原图逐边检查圆形车体的连续扫掠。 */
+        std::vector<MapLocation> Plan(
+            const Costmap2D & planning,
+            const Costmap2D & source,
+            double clearance_radius,
+            const MapLocation & start,
+            const MapLocation & goal,
+            bool include_unknown_clearance = true) const;
+
     private:
         double cost_travel_multiplier_;
+        std::vector<MapLocation> PlanImpl(
+            const Costmap2D & planning,
+            const Costmap2D * source,
+            double clearance_radius,
+            const MapLocation & start,
+            const MapLocation & goal,
+            bool include_unknown_clearance) const;
     /**
      * @brief 获取指定栅格在一维数组中的下标。
      * 
@@ -57,13 +73,13 @@ namespace mini_nav_core
         unsigned int GetIndex(unsigned int mx, unsigned int my, unsigned int size_x) const;
 
     /**
-     * @brief  计算曼哈顿距离，用于 A* 的启发式函数。
+     * @brief 计算允许八邻域移动时的八方向距离启发式。
      * 
      * @param from 
      * @param to 
-     * @return * unsigned int 
+     * @return 不超过自由空间最短路径代价的距离（格）。
      */
-        unsigned int ManhattanDistance(const MapLocation & start, const MapLocation & goal) const;
+        double OctileDistance(const MapLocation & start, const MapLocation & goal) const;
     };
 
 /* Local constants ---------------------------------------------------------*/

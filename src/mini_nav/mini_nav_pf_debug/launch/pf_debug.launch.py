@@ -37,6 +37,9 @@ def start_debug_node(context):
         "max_updates": ParameterValue(
             LaunchConfiguration("max_updates"), value_type=int
         ),
+        "max_sessions": ParameterValue(
+            LaunchConfiguration("max_sessions"), value_type=int
+        ),
     })
     return [Node(
         package="mini_nav_pf_debug",
@@ -57,5 +60,6 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("output_file", default_value="/tmp/mini_nav_pf_debug.html"),
         DeclareLaunchArgument("max_updates", default_value="15"),
+        DeclareLaunchArgument("max_sessions", default_value="5"),
         OpaqueFunction(function=start_debug_node),
     ])

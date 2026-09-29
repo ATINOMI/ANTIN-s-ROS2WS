@@ -1,5 +1,6 @@
 /* Includes ----------------------------------------------------------------*/
 #include "costmap_publisher.hpp"
+#include "mini_nav_nodes/costmap_display.hpp"
 
 #include <cctype>
 #include <cmath>
@@ -8,6 +9,8 @@
 #include <functional>
 #include <sstream>
 #include <vector>
+
+#include "tf2/exceptions.h"
 
 /* Node construction -------------------------------------------------------*/
 mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x, 
@@ -30,7 +33,12 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
                                     declare_parameter<double>("planning.cost_travel_multiplier", 2.0)),
                                   map_topic_(declare_parameter<std::string>("map_topic", "/map")),
                                   map_file_(declare_parameter<std::string>("map_file", "")),
-                                  frame_id_(declare_parameter<std::string>("frame_id", "map"))
+                                  frame_id_(declare_parameter<std::string>("frame_id", "map")),
+                                  base_frame_id_(declare_parameter<std::string>("base_frame_id", "base_footprint")),
+                                  odom_frame_id_(declare_parameter<std::string>("odom_frame_id", "odom")),
+                                  max_pose_age_(declarePositiveDoubleParameter("planning.max_pose_age", 1.0)),
+                                  use_initial_pose_as_start_(
+                                    declare_parameter<bool>("planning.use_initial_pose_as_start", false))
 
   {
     if (map_topic_.empty()) {
@@ -39,14 +47,22 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     if (frame_id_.empty()) {
       throw std::invalid_argument("frame_id must not be empty");
     }
+    if (base_frame_id_.empty() || base_frame_id_ == frame_id_) {
+      throw std::invalid_argument("base_frame_id must be nonempty and differ from frame_id");
+    }
+    if (odom_frame_id_.empty() || odom_frame_id_ == frame_id_ || odom_frame_id_ == base_frame_id_) {
+      throw std::invalid_argument("odom_frame_id must differ from frame_id and base_frame_id");
+    }
     inflation_parameters_.robot_radius =
       declarePositiveDoubleParameter("planning.robot_radius", 0.24);
     inflation_parameters_.safety_margin =
       declare_parameter<double>("planning.safety_margin", 0.05);
     inflation_parameters_.inflation_radius =
-      declarePositiveDoubleParameter("planning.inflation_radius", 0.55);
+      declarePositiveDoubleParameter("planning.inflation_radius", 0.45);
     inflation_parameters_.cost_scaling_factor =
-      declarePositiveDoubleParameter("planning.cost_scaling_factor", 5.0);
+      declarePositiveDoubleParameter("planning.cost_scaling_factor", 10.0);
+    inflation_parameters_.inflate_around_unknown =
+      declare_parameter<bool>("planning.inflate_around_unknown", false);
     if (!std::isfinite(inflation_parameters_.safety_margin) ||
         inflation_parameters_.safety_margin < 0.0 ||
         inflation_parameters_.inflation_radius <
@@ -60,6 +76,9 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
                                                           resolution_,
                                                           origin_x_, origin_y_, 
                                                           default_value_);
+    // TF 监听器使用独立线程接收变换，目标回调中短暂等待 TF 不会阻塞其更新。
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
                                                           
     // 地图属于“后加入的订阅者也应立即获得”的静态数据：
     // KeepLast(1) 只保存最新一张图，reliable 保证可靠传输，
@@ -78,11 +97,12 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/mini_nav/map", map_qos);
     planning_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/mini_nav/planning_costmap", map_qos);
+    raw_path_publisher_ = create_publisher<nav_msgs::msg::Path>("/mini_nav/raw_path", map_qos);
     path_publisher_ = create_publisher<nav_msgs::msg::Path>("/mini_nav/global_path", map_qos);
     axes_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
       "/mini_nav/map_axes", map_qos);
 
-    // 订阅 /initialpose，监听起点
+    // 定位入口中 /initialpose 使旧路径失效；独立演示可显式启用手选起点。
     initial_pose_subscription_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/initialpose", rclcpp::QoS(10),
       [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message) {
@@ -252,14 +272,14 @@ void mini_nav_nodes::CostmapPublisherNode::loadMapMessage(
         costmap_ = std::move(new_costmap);
         planning_costmap_ = std::move(new_planning_costmap);
         map_received_ = true;
-        // 清空起点和终点，因为地图已经改变。
-        start_cell_.reset();
-        goal_cell_.reset();
-        // 清空全局路径。
-        global_path_ = nav_msgs::msg::Path();
-        global_path_.header.stamp = now();
-        global_path_.header.frame_id = frame_id_;
-        path_publisher_->publish(global_path_);
+        // 地图变化后，旧路径的碰撞判断不再可信。
+        demo_start_cell_.reset();
+        demo_goal_cell_.reset();
+        demo_goal_orientation_.reset();
+        clearPath();
+        if (!use_initial_pose_as_start_) {
+            waitForNewLocalizationTf();
+        }
 
         // 发布地图,路径,坐标轴
         publishMap(); // 发布地图
@@ -559,86 +579,153 @@ mini_nav_core::Costmap2D & mini_nav_nodes::CostmapPublisherNode::GetCostmap()
 /* Path planning and publication ------------------------------------------*/
 bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
   const mini_nav_core::MapLocation & start,
-  const mini_nav_core::MapLocation & goal)
+  const mini_nav_core::MapLocation & goal,
+  const std::optional<geometry_msgs::msg::Quaternion> & goal_orientation)
 {
     // 检查是否已经接收到有效的地图，如果没有则无法进行路径规划。
-    if (!map_received_) {
+    if (!map_received_ || !planning_costmap_) {
+        clearPath();
         RCLCPP_WARN(get_logger(), "Cannot plan before a valid map is received");
         return false;
+    }
+
+    geometry_msgs::msg::Quaternion terminal_orientation;
+    terminal_orientation.w = 1.0;
+    if (goal_orientation.has_value()) {
+        const auto & q = *goal_orientation;
+        const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
+        if (!std::isfinite(norm) || norm <= 1.0e-6) {
+            clearPath();
+            RCLCPP_WARN(get_logger(), "Ignoring goal with invalid orientation");
+            return false;
+        }
+        terminal_orientation.x = q.x / norm;
+        terminal_orientation.y = q.y / norm;
+        terminal_orientation.z = q.z / norm;
+        terminal_orientation.w = q.w / norm;
     }
 
     // A* 在膨胀规划图上搜索；原始图仍用于定位和地图显示。
     mini_nav_core::AStarPlanner planner(cost_travel_multiplier_);
     const std::vector<mini_nav_core::MapLocation> grid_path =
-      planner.Plan(*planning_costmap_, start, goal);
+      planner.Plan(*planning_costmap_, *costmap_,
+                   inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
+                   start, goal, inflation_parameters_.inflate_around_unknown);
 
     if (grid_path.empty()) {
-        global_path_ = nav_msgs::msg::Path();
-        global_path_.header.stamp = now();
-        global_path_.header.frame_id = frame_id_;
-        path_publisher_->publish(global_path_);
+        clearPath();
         RCLCPP_WARN(get_logger(), "A* could not find a safe path from (%u, %u) to (%u, %u)",
                     start.x, start.y, goal.x, goal.y);
         return false;
     }
 
-    // 将栅格路径转换为 ROS Path 消息，并发布到 /mini_nav/global_path 话题。
-    global_path_ = nav_msgs::msg::Path();
-    global_path_.header.stamp = now();
-    global_path_.header.frame_id = frame_id_;
-
-    for (const auto & cell : grid_path) {
-        geometry_msgs::msg::PoseStamped pose;
-        pose.header = global_path_.header;
-        costmap_->MapToWorld(cell.x, cell.y, pose.pose.position.x, pose.pose.position.y);
-        // 将路径抬高到地图平面上方，避免 RViz 深度测试将线遮住。
-        pose.pose.position.z = 0.05;
-        pose.pose.orientation.w = 1.0;
-        global_path_.poses.push_back(pose);
+    // 核心层检查捷径穿越格、连续车体扫掠和积分软代价；失败则保留原始安全路径。
+    const auto final_points = mini_nav_core::SimplifyAndSmoothPath(
+      *costmap_, *planning_costmap_, grid_path,
+      inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
+      cost_travel_multiplier_, inflation_parameters_.inflate_around_unknown);
+    if (final_points.empty()) {
+        clearPath();
+        RCLCPP_WARN(get_logger(), "A* path failed continuous body-clearance validation");
+        return false;
     }
+    std::vector<mini_nav_core::PathPoint> raw_points;
+    raw_points.reserve(grid_path.size());
+    for (const auto & cell : grid_path) {
+        mini_nav_core::PathPoint point{};
+        costmap_->MapToWorld(cell.x, cell.y, point.x, point.y);
+        raw_points.push_back(point);
+    }
+    const auto stamp = now();
+    const auto make_path = [&](const std::vector<mini_nav_core::PathPoint> & points, double height) {
+        nav_msgs::msg::Path path;
+        path.header.stamp = stamp;
+        path.header.frame_id = frame_id_;
+        for (std::size_t index = 0; index < points.size(); ++index) {
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header = path.header;
+            pose.pose.position.x = points[index].x;
+            pose.pose.position.y = points[index].y;
+            // 两条线略微错开高度，避免 RViz 深度测试遮住比较结果。
+            pose.pose.position.z = height;
+            if (index + 1 < points.size()) {
+                const double yaw = std::atan2(
+                  points[index + 1].y - points[index].y,
+                  points[index + 1].x - points[index].x);
+                pose.pose.orientation.z = std::sin(yaw * 0.5);
+                pose.pose.orientation.w = std::cos(yaw * 0.5);
+            } else if (goal_orientation.has_value()) {
+                pose.pose.orientation = terminal_orientation;
+            } else if (!path.poses.empty()) {
+                pose.pose.orientation = path.poses.back().pose.orientation;
+            } else {
+                pose.pose.orientation.w = 1.0;
+            }
+            path.poses.push_back(pose);
+        }
+        return path;
+    };
+    raw_path_ = make_path(raw_points, 0.06);
+    global_path_ = make_path(final_points, 0.09);
 
-    // 发布路径消息到 /mini_nav/global_path 话题。
+    raw_path_publisher_->publish(raw_path_);
     path_publisher_->publish(global_path_);
-    RCLCPP_INFO(get_logger(), "A* published %zu poses on /mini_nav/global_path", global_path_.poses.size());
+    RCLCPP_INFO(get_logger(), "A* published %zu raw and %zu final poses",
+                raw_path_.poses.size(), global_path_.poses.size());
     return true;
 }
 
 /* RViz interactive planning ---------------------------------------------*/
-// 订阅 /initialpose 话题，接收 RViz 中设置的起点。
+// 定位入口用 /initialpose 使旧路径失效；独立演示保留无 TF 的选点交互。
 void mini_nav_nodes::CostmapPublisherNode::initialPoseCallback(
   const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message)
 {
-    // 检查是否已经接收到有效的地图，如果没有则无法设置起点。
-    if (!map_received_) {
-        RCLCPP_WARN(get_logger(), "Ignoring start pose until a valid map is received");
+    clearPath();
+    if (use_initial_pose_as_start_) {
+        demo_start_cell_.reset();
+        if (!map_received_ || message->header.frame_id != frame_id_) {
+            RCLCPP_WARN(get_logger(), "Ignoring demo start before a map or in the wrong frame");
+            return;
+        }
+        unsigned int mx = 0;
+        unsigned int my = 0;
+        if (!costmap_->WorldToMap(message->pose.pose.position.x, message->pose.pose.position.y, mx, my) ||
+            planning_costmap_->GetCost(mx, my) >= mini_nav_core::kInscribedInflatedObstacle) {
+            RCLCPP_WARN(get_logger(), "Demo start is outside the safe planning area");
+            return;
+        }
+        demo_start_cell_ = mini_nav_core::MapLocation{mx, my};
+        if (demo_goal_cell_) {
+            PlanAndPublish(*demo_start_cell_, *demo_goal_cell_, demo_goal_orientation_);
+        }
         return;
     }
-    // 检查消息的 frame_id 是否与期望的 frame_id 一致，如果不一致则忽略该消息。
-    if (message->header.frame_id != frame_id_) {
-        RCLCPP_WARN(
-          get_logger(), "Ignoring start pose in frame '%s'; expected '%s'",
-          message->header.frame_id.c_str(), frame_id_.c_str());
-        return;
-    }
+    // 旧 map -> odom 在 TF 缓存中会继续存在；下一次规划须等定位节点发布新结果。
+    waitForNewLocalizationTf();
+    RCLCPP_INFO(get_logger(), "Localization reset requested; waiting for a new map-to-odom TF");
+}
 
-    // 将世界坐标转换为地图坐标，如果转换失败则说明起点在地图外部。
-    unsigned int mx = 0;
-    unsigned int my = 0;
-    if (!costmap_->WorldToMap(message->pose.pose.position.x, message->pose.pose.position.y, mx, my)) {
-        RCLCPP_WARN(get_logger(), "Selected start is outside the map");
-        return;
+void mini_nav_nodes::CostmapPublisherNode::waitForNewLocalizationTf()
+{
+    try {
+        const auto transform = tf_buffer_->lookupTransform(
+          frame_id_, odom_frame_id_, rclcpp::Time(0, 0, get_clock()->get_clock_type()));
+        localization_reset_tf_stamp_ = rclcpp::Time(
+          transform.header.stamp, get_clock()->get_clock_type());
+    } catch (const tf2::TransformException &) {
+        localization_reset_tf_stamp_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
     }
-
-    // 将起点设置为地图坐标，并调用 planIfReady() 尝试进行路径规划。
-    start_cell_ = mini_nav_core::MapLocation{mx, my};
-    RCLCPP_INFO(get_logger(), "RViz start set to cell (%u, %u)", mx, my);
-    planIfReady();
 }
 
 // 订阅 /goal_pose 话题，接收 RViz 中设置的终点。
 void mini_nav_nodes::CostmapPublisherNode::goalPoseCallback(
   const geometry_msgs::msg::PoseStamped::SharedPtr message)
 {
+    clearPath();
+    if (use_initial_pose_as_start_) {
+        demo_goal_cell_.reset();
+        demo_goal_orientation_.reset();
+    }
     if (!map_received_) {
         RCLCPP_WARN(get_logger(), "Ignoring goal pose until a valid map is received");
         return;
@@ -656,23 +743,86 @@ void mini_nav_nodes::CostmapPublisherNode::goalPoseCallback(
         RCLCPP_WARN(get_logger(), "Selected goal is outside the map");
         return;
     }
-
-    goal_cell_ = mini_nav_core::MapLocation{mx, my};
-    RCLCPP_INFO(get_logger(), "RViz goal set to cell (%u, %u)", mx, my);
-    planIfReady();
-}
-
-// 如果起点和终点都已经设置，则调用 PlanAndPublish() 进行路径规划。
-void mini_nav_nodes::CostmapPublisherNode::planIfReady()
-{
-    // 检查起点和终点是否都已经设置，如果没有则提示用户在 RViz 中选择另一个点。
-    if (!start_cell_.has_value() || !goal_cell_.has_value()) {
-        RCLCPP_INFO(get_logger(), "Select the other point in RViz to start A* planning");
+    if (planning_costmap_->GetCost(mx, my) >= mini_nav_core::kInscribedInflatedObstacle) {
+        RCLCPP_WARN(get_logger(), "Selected goal cell (%u, %u) is inside the planning safety zone", mx, my);
         return;
     }
 
-    // 调用 PlanAndPublish() 进行路径规划，并发布路径消息。
-    PlanAndPublish(*start_cell_, *goal_cell_);
+    if (use_initial_pose_as_start_) {
+        demo_goal_cell_ = mini_nav_core::MapLocation{mx, my};
+        demo_goal_orientation_ = message->pose.orientation;
+        if (demo_start_cell_) {
+            PlanAndPublish(*demo_start_cell_, *demo_goal_cell_, demo_goal_orientation_);
+        } else {
+            RCLCPP_INFO(get_logger(), "Select a demo start pose in RViz to plan");
+        }
+        return;
+    }
+
+    mini_nav_core::MapLocation start{0, 0};
+    if (!lookupCurrentCell(start, 0.1)) {
+        return;
+    }
+    RCLCPP_INFO(get_logger(), "Planning from current cell (%u, %u) to goal (%u, %u)",
+      start.x, start.y, mx, my);
+    PlanAndPublish(start, {mx, my}, message->pose.orientation);
+}
+
+bool mini_nav_nodes::CostmapPublisherNode::lookupCurrentCell(
+  mini_nav_core::MapLocation & cell, double timeout_seconds)
+{
+    try {
+        if (localization_reset_tf_stamp_.has_value()) {
+            const auto localization_tf = tf_buffer_->lookupTransform(
+              frame_id_, odom_frame_id_, rclcpp::Time(0, 0, get_clock()->get_clock_type()));
+            const rclcpp::Time localization_stamp(
+              localization_tf.header.stamp, get_clock()->get_clock_type());
+            if (localization_stamp <= *localization_reset_tf_stamp_) {
+                RCLCPP_WARN(get_logger(), "Waiting for localization TF after a map or initial pose update");
+                return false;
+            }
+            localization_reset_tf_stamp_.reset();
+        }
+        const auto transform = tf_buffer_->lookupTransform(
+          frame_id_, base_frame_id_,
+          rclcpp::Time(0, 0, get_clock()->get_clock_type()),
+          rclcpp::Duration::from_seconds(timeout_seconds));
+        const rclcpp::Time stamp(transform.header.stamp, get_clock()->get_clock_type());
+        const double age = (now() - stamp).seconds();
+        if (!std::isfinite(age) || std::abs(age) > max_pose_age_) {
+            RCLCPP_WARN(get_logger(), "Robot TF is stale or has an invalid timestamp (age %.3f s)", age);
+            return false;
+        }
+        const double x = transform.transform.translation.x;
+        const double y = transform.transform.translation.y;
+        unsigned int mx = 0;
+        unsigned int my = 0;
+        if (!std::isfinite(x) || !std::isfinite(y) || !costmap_->WorldToMap(x, y, mx, my)) {
+            RCLCPP_WARN(get_logger(), "Current robot position is outside the map or invalid");
+            return false;
+        }
+        if (planning_costmap_->GetCost(mx, my) >= mini_nav_core::kInscribedInflatedObstacle) {
+            RCLCPP_WARN(get_logger(), "Current robot cell (%u, %u) is inside the planning safety zone", mx, my);
+            return false;
+        }
+        cell = {mx, my};
+        return true;
+    } catch (const tf2::TransformException & exception) {
+        RCLCPP_WARN(get_logger(), "Cannot use current robot TF: %s", exception.what());
+        return false;
+    }
+}
+
+void mini_nav_nodes::CostmapPublisherNode::clearPath()
+{
+    raw_path_ = nav_msgs::msg::Path();
+    raw_path_.header.stamp = now();
+    raw_path_.header.frame_id = frame_id_;
+    global_path_ = nav_msgs::msg::Path();
+    global_path_.header.stamp = raw_path_.header.stamp;
+    global_path_.header.frame_id = frame_id_;
+    raw_path_publisher_->publish(raw_path_);
+    path_publisher_->publish(global_path_);
 }
 
 /* Map publication ---------------------------------------------------------*/
@@ -718,17 +868,26 @@ void mini_nav_nodes::CostmapPublisherNode::publishMap()
       for (unsigned int mx = 0; mx < planning_message.info.width; ++mx) {
         const auto cost = planning_costmap_->GetCost(mx, my);
         const auto index = static_cast<std::size_t>(my) * planning_message.info.width + mx;
-        planning_message.data[index] = cost == kUnknownCost ? -1 :
-          static_cast<int8_t>(cost >= 253 ? 100 :
-            static_cast<unsigned int>(cost) * 99U / 252U);
+        planning_message.data[index] = mini_nav_nodes::CostToOccupancyValue(cost);
       }
     }
     planning_costmap_publisher_->publish(planning_message);
     if (!global_path_.poses.empty()) {
+        mini_nav_core::MapLocation current{0, 0};
+        if (!use_initial_pose_as_start_ && !lookupCurrentCell(current, 0.0)) {
+            clearPath();
+            publishCoordinateAxes();
+            return;
+        }
         global_path_.header.stamp = message.header.stamp;
         for (auto & pose : global_path_.poses) {
             pose.header = global_path_.header;
         }
+        raw_path_.header.stamp = message.header.stamp;
+        for (auto & pose : raw_path_.poses) {
+            pose.header = raw_path_.header;
+        }
+        raw_path_publisher_->publish(raw_path_);
         path_publisher_->publish(global_path_);
     }
     publishCoordinateAxes();    

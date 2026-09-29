@@ -1,10 +1,15 @@
 costmap_publisher:
   ros__parameters:
     planning:
-      # Waffle 底盘碰撞盒最远角点约 0.238 m，取 0.24 m 并另加 0.05 m 安全余量。
+      # Gazebo Waffle SDF 最远碰撞角点 0.237 m，URDF 为 0.238 m；向上取 0.24 m。
       robot_radius: 0.24
       safety_margin: 0.05
-      # 0.29 m 内禁行，至 0.55 m 之间用软代价引导路径离开墙边。
-      inflation_radius: 0.55
-      cost_scaling_factor: 5.0
+      # 障碍、未知格与地图外侧都留 0.29 m 硬安全距离；
+      # 只有确定障碍在 0.29 到 0.45 m 间生成衰减软代价。
+      inflation_radius: 0.45
+      cost_scaling_factor: 10.0
+      # 未知格始终禁行；开启后只额外传播 0.29 m 硬安全区。
+      inflate_around_unknown: false
       cost_travel_multiplier: 2.0
+      # 超过该秒数的机器人 TF 不可作为规划起点。
+      max_pose_age: 1.0
