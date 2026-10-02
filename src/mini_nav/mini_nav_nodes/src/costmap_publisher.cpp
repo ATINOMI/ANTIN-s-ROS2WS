@@ -1,9 +1,17 @@
+/**
+ * @file costmap_publisher.cpp
+ * @brief 静态地图与扫描融合、自研规划 Action 和 RViz 输出。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 /* Includes ----------------------------------------------------------------*/
 #include "costmap_publisher.hpp"
 #include "mini_nav_nodes/costmap_display.hpp"
 
 #include <cctype>
 #include <cmath>
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2/utils.h"
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -13,6 +21,21 @@
 #include "tf2/exceptions.h"
 
 /* Node construction -------------------------------------------------------*/
+/**
+ * @brief 建立地图输入、规划 Action 与路径及地图可视化发布。
+ *
+ * map_file 非空直接加载 YAML/PGM，否则订阅地图。主导航入口关闭话题目标，
+ * 由任务节点统一持有目标身份；核心算法不依赖 ROS。
+ *
+ * @param size_x 未收到地图前的默认 x 格数。
+ * @param size_y 默认 y 格数。
+ * @param resolution 默认格边长，米。
+ * @param origin_x 默认原点 x，米。
+ * @param origin_y 默认原点 y，米。
+ * @param default_value 默认代价，0..255。
+ * @param publish_period_ms 地图及已有路径重新发布的周期，毫秒。
+ * @throws std::invalid_argument 参数或地图几何非法；地图文件不可读时抛出 std::runtime_error。
+ */
 mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x, 
                                  int size_y, 
                                  double resolution, 
@@ -31,6 +54,8 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
                                     declarePositiveIntParameter("publish_period_ms", publish_period_ms)),
                                   cost_travel_multiplier_(
                                     declare_parameter<double>("planning.cost_travel_multiplier", 2.0)),
+                                  goal_tolerance_(
+                                    declare_parameter<double>("planning.goal_tolerance", 0.5)),
                                   map_topic_(declare_parameter<std::string>("map_topic", "/map")),
                                   map_file_(declare_parameter<std::string>("map_file", "")),
                                   frame_id_(declare_parameter<std::string>("frame_id", "map")),
@@ -56,7 +81,7 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     inflation_parameters_.robot_radius =
       declarePositiveDoubleParameter("planning.robot_radius", 0.24);
     inflation_parameters_.safety_margin =
-      declare_parameter<double>("planning.safety_margin", 0.05);
+      declare_parameter<double>("planning.safety_margin", 0.02);
     inflation_parameters_.inflation_radius =
       declarePositiveDoubleParameter("planning.inflation_radius", 0.45);
     inflation_parameters_.cost_scaling_factor =
@@ -69,6 +94,10 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
           inflation_parameters_.robot_radius + inflation_parameters_.safety_margin ||
         !std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) {
       throw std::invalid_argument("Invalid planning safety margin, inflation radius, or traversal multiplier");
+    }
+
+    if (!std::isfinite(goal_tolerance_) || goal_tolerance_ < 0.0) {
+      throw std::invalid_argument("planning.goal_tolerance must be finite and nonnegative");
     }
 
     // mini_nav_core 保持 ROS 无关；ROS 消息的转换只在本节点中完成。    
@@ -109,11 +138,33 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
         initialPoseCallback(message);
       });
     // 订阅 /goal_pose，监听目标点
+    if (declare_parameter<bool>("enable_topic_goals", true)) {
     goal_pose_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/goal_pose", rclcpp::QoS(10),
       [this](const geometry_msgs::msg::PoseStamped::SharedPtr message) {
         goalPoseCallback(message);
       });
+    }
+    fuse_local_obstacles_ = declare_parameter<bool>("fuse_local_obstacles", false);
+    obstacle_max_range_ = declarePositiveDoubleParameter("planning.obstacle_max_range", 2.5);
+    scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
+      declare_parameter<std::string>("scan_topic", "/scan"), rclcpp::SensorDataQoS(),
+      [this](sensor_msgs::msg::LaserScan::ConstSharedPtr message) {
+        latest_scan_ = message; scan_received_ = std::chrono::steady_clock::now();
+      });
+    local_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      "/mini_nav/local_costmap", rclcpp::QoS(1).reliable(),
+      [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr message) {
+        local_obstacles_ = message;
+        local_received_ = std::chrono::steady_clock::now();
+      });
+    plan_server_ = rclcpp_action::create_server<ComputePath>(this, "/compute_path_to_pose",
+      [](const rclcpp_action::GoalUUID &, std::shared_ptr<const ComputePath::Goal>) {
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+      },
+      [](std::shared_ptr<rclcpp_action::ServerGoalHandle<ComputePath>>) {
+        return rclcpp_action::CancelResponse::ACCEPT;
+      }, [this](auto handle) { computePath(handle); });
 
     // 将来 costmap_ 接入传感器更新后，这个定时器无需改变。
     timer_ = create_wall_timer(
@@ -138,11 +189,12 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
 
 /* Parameter validation ----------------------------------------------------*/
 /**
- * @brief  声明一个正整数参数，如果参数值小于等于0则抛出异常。
- * 
- * @param name  参数名
- * @param default_value  默认值
- * @return unsigned int 
+ * @brief 声明一个必须大于零的整数参数。
+ *
+ * @param name ROS 参数名。
+ * @param default_value 参数未覆盖时采用的默认值。
+ * @return 校验后的 unsigned int 参数值。
+ * @throws std::invalid_argument 参数不大于零。
  */
 unsigned int mini_nav_nodes::CostmapPublisherNode::declarePositiveIntParameter(const std::string & name, int default_value)
 {
@@ -154,13 +206,13 @@ unsigned int mini_nav_nodes::CostmapPublisherNode::declarePositiveIntParameter(c
 }
 
 /**
- * @brief  声明一个正浮点数参数，如果参数值小于等于0则抛出异常。
- * 
- * @param name  参数名
- * @param default_value  默认值
- * @return double 
+ * @brief 声明一个有限正浮点参数。
+ *
+ * @param name ROS 参数名。
+ * @param default_value 参数未覆盖时采用的默认值。
+ * @return 校验后的浮点参数值。
+ * @throws std::invalid_argument 参数非有限或不大于零。
  */
-
 double mini_nav_nodes::CostmapPublisherNode::declarePositiveDoubleParameter(const std::string & name, double default_value)
 {
     const auto value = declare_parameter<double>(name, default_value);
@@ -171,13 +223,13 @@ double mini_nav_nodes::CostmapPublisherNode::declarePositiveDoubleParameter(cons
 }
 
 /**
- * @brief  声明一个字节参数，如果参数值不在[0, 255]则抛出异常。
- * 
- * @param name 
- * @param default_value 
- * @return unsigned char 
+ * @brief 声明一个范围为 0..255 的代价参数。
+ *
+ * @param name ROS 参数名。
+ * @param default_value 参数未覆盖时采用的默认值。
+ * @return 转换为 unsigned char 的值。
+ * @throws std::invalid_argument 参数超出字节范围。
  */
-
 unsigned char mini_nav_nodes::CostmapPublisherNode::declareByteParameter(const std::string & name, int default_value)
 {
     const auto value = declare_parameter<int>(name, default_value);
@@ -190,9 +242,9 @@ unsigned char mini_nav_nodes::CostmapPublisherNode::declareByteParameter(const s
 /* Map input ----------------------------------------------------------------*/
 
 /**
- * @brief  订阅 /map 话题，接收 map_server 发布的 OccupancyGrid 消息。
- * 
- * @param message 
+ * @brief 把地图话题输入交给统一校验和转换入口。
+ *
+ * @param message map_server 占据图。
  */
 void mini_nav_nodes::CostmapPublisherNode::mapCallback(
   const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message)
@@ -201,9 +253,12 @@ void mini_nav_nodes::CostmapPublisherNode::mapCallback(
 }
 
 /**
- * @brief  加载地图消息到 costmap_ 中。
- * 
- * @param message  地图消息
+ * @brief 校验地图帧、尺寸和原点旋转，构建原始图与膨胀图后替换缓存。
+ *
+ * 旧路径及演示选点随地图替换清除；TF 起点模式等待新的定位变换。
+ * 转换失败记录日志，不把未完成构建的地图提交给规划器。
+ *
+ * @param message 占据图：0 空闲、负值未知、正值障碍。
  */
 void mini_nav_nodes::CostmapPublisherNode::loadMapMessage(
   const nav_msgs::msg::OccupancyGrid & message)
@@ -296,10 +351,12 @@ void mini_nav_nodes::CostmapPublisherNode::loadMapMessage(
 }
 
 /**
- * @brief  从 YAML 文件加载地图。
- *         该函数解析 YAML 文件，读取图像文件，
- *         并将图像转换为 Costmap2D。
- * @param yaml_file  YAML 文件路径
+ * @brief 解析 trinary 地图 YAML 与 P2/P5 PGM，并转为占据图。
+ *
+ * 图像行方向翻转为地图 y 递增方向；仅支持无原点旋转的 trinary 模式。
+ *
+ * @param yaml_file 地图元数据路径；相对图像路径以 YAML 所在目录解析。
+ * @throws std::runtime_error 文件不可读、元数据或图像格式不支持；数字解析可能抛出标准转换异常。
  */
 void mini_nav_nodes::CostmapPublisherNode::loadMapFromYaml(const std::string & yaml_file)
 {
@@ -571,12 +628,28 @@ void mini_nav_nodes::CostmapPublisherNode::loadMapFromYaml(const std::string & y
 }
 
 /* Costmap access -----------------------------------------------------------*/
+/**
+ * @brief 获取节点维护的原始代价图。
+ *
+ * 直接写入不会自动同步膨胀图；调用方须维持规划图与原图一致。
+ * @return 可修改的内部地图引用。
+ */
 mini_nav_core::Costmap2D & mini_nav_nodes::CostmapPublisherNode::GetCostmap()
 {
     return *costmap_;
 }
 
 /* Path planning and publication ------------------------------------------*/
+/**
+ * @brief 调用 A* 与安全后处理，并发布原始和最终路径。
+ *
+ * 中间点朝向沿路径方向；最终路径末点可与原目标不同。
+ *
+ * @param start 起点栅格。
+ * @param goal 原目标栅格；不可达时允许容差替代。
+ * @param goal_orientation 可选目标朝向，须为有效四元数；保留到实际末点。
+ * @return 成功产生并发布路径为 true；地图、目标或安全检查失败清空旧路径并返回 false。
+ */
 bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
   const mini_nav_core::MapLocation & start,
   const mini_nav_core::MapLocation & goal,
@@ -605,12 +678,17 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
         terminal_orientation.w = q.w / norm;
     }
 
+    if (!rebuildPlanningMap()) {
+        clearPath();
+        return false;
+    }
+    const auto & obstacle_map = fused_costmap_ ? *fused_costmap_ : *costmap_;
     // A* 在膨胀规划图上搜索；原始图仍用于定位和地图显示。
     mini_nav_core::AStarPlanner planner(cost_travel_multiplier_);
     const std::vector<mini_nav_core::MapLocation> grid_path =
-      planner.Plan(*planning_costmap_, *costmap_,
+      planner.Plan(*planning_costmap_, obstacle_map,
                    inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
-                   start, goal, inflation_parameters_.inflate_around_unknown);
+                   start, goal, inflation_parameters_.inflate_around_unknown, goal_tolerance_);
 
     if (grid_path.empty()) {
         clearPath();
@@ -619,9 +697,19 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
         return false;
     }
 
+    const auto & selected_goal = grid_path.back();
+    if (selected_goal.x != goal.x || selected_goal.y != goal.y) {
+        const double offset = std::hypot(
+          static_cast<double>(selected_goal.x) - goal.x,
+          static_cast<double>(selected_goal.y) - goal.y) * costmap_->GetResolution();
+        RCLCPP_INFO(get_logger(),
+          "Goal (%u, %u) unreachable; using nearest reachable cell (%u, %u), offset %.3f m",
+          goal.x, goal.y, selected_goal.x, selected_goal.y, offset);
+    }
+
     // 核心层检查捷径穿越格、连续车体扫掠和积分软代价；失败则保留原始安全路径。
     const auto final_points = mini_nav_core::SimplifyAndSmoothPath(
-      *costmap_, *planning_costmap_, grid_path,
+      obstacle_map, *planning_costmap_, grid_path,
       inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
       cost_travel_multiplier_, inflation_parameters_.inflate_around_unknown);
     if (final_points.empty()) {
@@ -677,6 +765,11 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
 
 /* RViz interactive planning ---------------------------------------------*/
 // 定位入口用 /initialpose 使旧路径失效；独立演示保留无 TF 的选点交互。
+/**
+ * @brief 收到重定位请求时清除旧路径；演示模式改为更新手选起点。
+ *
+ * @param message 全局坐标系初始位姿消息。
+ */
 void mini_nav_nodes::CostmapPublisherNode::initialPoseCallback(
   const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message)
 {
@@ -705,6 +798,11 @@ void mini_nav_nodes::CostmapPublisherNode::initialPoseCallback(
     RCLCPP_INFO(get_logger(), "Localization reset requested; waiting for a new map-to-odom TF");
 }
 
+/**
+ * @brief 保存当前 map→odom 时间戳，要求下次规划等待更新结果。
+ *
+ * 旧 TF 仍可能留在缓存中；记录时间戳屏障避免刚重定位就使用旧起点。
+ */
 void mini_nav_nodes::CostmapPublisherNode::waitForNewLocalizationTf()
 {
     try {
@@ -718,6 +816,13 @@ void mini_nav_nodes::CostmapPublisherNode::waitForNewLocalizationTf()
 }
 
 // 订阅 /goal_pose 话题，接收 RViz 中设置的终点。
+/**
+ * @brief 处理话题目标，从 TF 当前位置或演示手选起点规划。
+ *
+ * 先清空旧路径；越界目标拒绝，硬安全区目标交给容差选点逻辑。
+ *
+ * @param message 与地图帧一致的目标位姿。
+ */
 void mini_nav_nodes::CostmapPublisherNode::goalPoseCallback(
   const geometry_msgs::msg::PoseStamped::SharedPtr message)
 {
@@ -743,10 +848,7 @@ void mini_nav_nodes::CostmapPublisherNode::goalPoseCallback(
         RCLCPP_WARN(get_logger(), "Selected goal is outside the map");
         return;
     }
-    if (planning_costmap_->GetCost(mx, my) >= mini_nav_core::kInscribedInflatedObstacle) {
-        RCLCPP_WARN(get_logger(), "Selected goal cell (%u, %u) is inside the planning safety zone", mx, my);
-        return;
-    }
+    // 目标位于硬安全区时交给规划器，在目标容差内寻找可达安全格。
 
     if (use_initial_pose_as_start_) {
         demo_goal_cell_ = mini_nav_core::MapLocation{mx, my};
@@ -768,6 +870,13 @@ void mini_nav_nodes::CostmapPublisherNode::goalPoseCallback(
     PlanAndPublish(start, {mx, my}, message->pose.orientation);
 }
 
+/**
+ * @brief 检查重定位后的新 TF、机器人位姿年龄与起点硬安全区。
+ *
+ * @param cell 成功时输出当前栅格；失败时不提交输出。
+ * @param timeout_seconds TF 查询允许等待时长，秒。
+ * @return 可用新鲜机器人 TF 落在安全图内时为 true，否则 false。
+ */
 bool mini_nav_nodes::CostmapPublisherNode::lookupCurrentCell(
   mini_nav_core::MapLocation & cell, double timeout_seconds)
 {
@@ -813,6 +922,9 @@ bool mini_nav_nodes::CostmapPublisherNode::lookupCurrentCell(
     }
 }
 
+/**
+ * @brief 清空并发布两条空路径，使订阅者立即撤销旧路径显示或跟踪。
+ */
 void mini_nav_nodes::CostmapPublisherNode::clearPath()
 {
     raw_path_ = nav_msgs::msg::Path();
@@ -828,6 +940,12 @@ void mini_nav_nodes::CostmapPublisherNode::clearPath()
 /* Map publication ---------------------------------------------------------*/
 
 // 将 costmap_ 转换为 OccupancyGrid 消息，并发布到 /mini_nav/map 话题。
+/**
+ * @brief 按行转换并发布原始图、膨胀图与已有路径。
+ *
+ * 原始图 0 为空闲、100 为占据、-1 为未知；膨胀图另用 99 表示硬安全区。
+ * 重发路径会刷新时间戳；TF 起点模式若当前位置不可用则清除路径。
+ */
 void mini_nav_nodes::CostmapPublisherNode::publishMap()
 {
     if (!map_received_) {
@@ -895,6 +1013,11 @@ void mini_nav_nodes::CostmapPublisherNode::publishMap()
 
 /* Coordinate-axis visualization -------------------------------------------*/
 // 在 RViz 中显示地图坐标轴，便于观察地图的方向。
+/**
+ * @brief 发布地图原点以及 +X、+Y 方向的 RViz 标记。
+ *
+ * 箭头和标签按地图宽高缩放，仅用于坐标方向识别。
+ */
 void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
 {
     visualization_msgs::msg::MarkerArray markers;
@@ -971,4 +1094,102 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
     markers.markers.push_back(origin_label);
 
     axes_publisher_->publish(markers);
+}
+
+
+/**
+ * @brief 复制原始图，按扫描时刻 TF 投影激光端点后生成新膨胀图。
+ *
+ * 融合开启时局部图只提供新鲜度前提；实际障碍来自原始扫描端点，
+ * 只在 map 系栅格化一次，避免把 odom 格面积二次投影造成虚假增厚。
+ * 本次副本不保留上次动态障碍，也不修改定位所用静态地图。
+ * @return 所需扫描、局部输入与 TF 有效且重建完成为 true，否则 false。
+ */
+bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
+{
+    fused_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(*costmap_);
+    if (fuse_local_obstacles_) {
+        if (!latest_scan_ || !local_obstacles_ ||
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - scan_received_).count() > 0.8 ||
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - local_received_).count() > 0.8) return false;
+        const auto & scan = *latest_scan_;
+        const double age = (now() - rclcpp::Time(scan.header.stamp, get_clock()->get_clock_type())).seconds();
+        if (!std::isfinite(age) || age < -0.1 || age > 0.8 || scan.ranges.empty() || scan.ranges.size() > 10000 ||
+            !std::isfinite(scan.angle_min) || !std::isfinite(scan.angle_increment) || scan.angle_increment == 0.0 ||
+            !std::isfinite(scan.range_min) || !std::isfinite(scan.range_max) || scan.range_min < 0.0 ||
+            scan.range_max <= scan.range_min || scan.header.frame_id.empty()) return false;
+        try {
+            const auto tf = tf_buffer_->lookupTransform(frame_id_, scan.header.frame_id,
+                rclcpp::Time(scan.header.stamp, get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05));
+            const auto & q = tf.transform.rotation;
+            const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
+            if (!std::isfinite(norm) || std::abs(norm - 1.0) > 1e-3 ||
+                !std::isfinite(tf.transform.translation.x) || !std::isfinite(tf.transform.translation.y)) return false;
+            // Rasterize original laser endpoints once in map coordinates. Re-rasterizing an odom
+            // occupancy cell adds another cell footprint and can falsely engulf the robot during turns.
+            for (std::size_t i = 0; i < scan.ranges.size(); ++i) {
+                const double range = scan.ranges[i];
+                if (!std::isfinite(range) || range < scan.range_min || range >= scan.range_max ||
+                    range > obstacle_max_range_) continue;
+                const double angle = scan.angle_min + i * scan.angle_increment;
+                geometry_msgs::msg::PoseStamped source, target;
+                source.pose.position.x = range * std::cos(angle);
+                source.pose.position.y = range * std::sin(angle);
+                source.pose.orientation.w = 1.0;
+                tf2::doTransform(source, target, tf);
+                unsigned int mx, my;
+                if (fused_costmap_->WorldToMap(target.pose.position.x, target.pose.position.y, mx, my) &&
+                    fused_costmap_->GetCost(mx, my) != kUnknownCost) fused_costmap_->SetCost(mx, my, kLethalObstacle);
+            }
+        } catch (const tf2::TransformException &) { return false; }
+    }
+    planning_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(
+      mini_nav_core::InflateCostmap(*fused_costmap_, inflation_parameters_));
+    return true;
+}
+
+/**
+ * @brief 处理 ComputePathToPose 请求，选择起点并返回规划结果和耗时。
+ *
+ * 仅支持空 planner_id 或 AStar；显式起点仍须在原始地图内并通过安全规划。
+ * 当前实现同步规划，以 succeed/abort 返回；取消回调接受请求但这里未单独检查取消态。
+ *
+ * @param handle 规划 Action 目标句柄。
+ */
+void mini_nav_nodes::CostmapPublisherNode::computePath(
+  const std::shared_ptr<rclcpp_action::ServerGoalHandle<ComputePath>> handle)
+{
+    auto result = std::make_shared<ComputePath::Result>();
+    const auto started = std::chrono::steady_clock::now();
+    const auto goal = handle->get_goal();
+    result->error_code = ComputePath::Result::NO_VALID_PATH;
+    if (!goal->planner_id.empty() && goal->planner_id != "AStar") {
+        result->error_code = ComputePath::Result::INVALID_PLANNER;
+    } else if (!map_received_) {
+        result->error_msg = "map_unavailable";
+    } else if (goal->goal.header.frame_id != frame_id_ ||
+               (goal->use_start && goal->start.header.frame_id != frame_id_)) {
+        result->error_code = ComputePath::Result::TF_ERROR;
+    } else if (!rebuildPlanningMap()) {
+        result->error_msg = "fresh_obstacles_unavailable";
+    } else {
+        // Check the start against current observations, never a cached dynamic obstacle map.
+        mini_nav_core::MapLocation start{}, end{};
+        bool valid_start = false;
+        if (goal->use_start) {
+            valid_start = costmap_->WorldToMap(goal->start.pose.position.x, goal->start.pose.position.y,
+              start.x, start.y);
+        } else { valid_start = lookupCurrentCell(start, 0.0); }
+        if (!valid_start) result->error_code = ComputePath::Result::TF_ERROR;
+        else if (!costmap_->WorldToMap(goal->goal.pose.position.x, goal->goal.pose.position.y, end.x, end.y)) {
+            result->error_code = ComputePath::Result::GOAL_OUTSIDE_MAP;
+        } else if (PlanAndPublish(start, end, goal->goal.pose.orientation)) {
+            result->path = global_path_;
+            result->error_code = ComputePath::Result::NONE;
+        }
+    }
+    result->planning_time = rclcpp::Duration::from_seconds(
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
+    if (result->error_code == ComputePath::Result::NONE) handle->succeed(result);
+    else { if (result->error_msg.empty()) result->error_msg = "No safe path from current pose"; handle->abort(result); }
 }

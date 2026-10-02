@@ -182,18 +182,18 @@ double SampleGaussian(std::mt19937_64 & generator, double variance)
  * alpha 越小：
  *   → 表示越信任里程计   → 对应运动产生的随机噪声越小 → 粒子的预测结果更加集中。
  *
- * @param parameter alpha1：旋转运动对旋转误差的影响。
+ * @param alpha1 旋转运动对旋转误差的影响。
  *
- * @param parameter alpha2：平移运动对旋转误差的影响。
+ * @param alpha2 平移运动对旋转误差的影响。
  *
- * @param parameter alpha3：平移运动对平移误差的影响。
+ * @param alpha3 平移运动对平移误差的影响。
  *
- * @param parameter alpha4：旋转运动对平移误差的影响。
+ * @param alpha4 旋转运动对平移误差的影响。
  *
- * @param parameter alpha5：当前仅为了接口兼容而保留，
+ * @param alpha5 当前仅为了接口兼容而保留，
  * 本 DifferentialMotionModel 的运动计算中并没有实际使用它。
  *
- * @param parameter seed：用于初始化随机数生成器 generator_。
+ * @param seed 用于初始化随机数生成器 generator_。
  *
  * 固定 seed 可以让程序每次产生相同的伪随机数序列，
  * 对单元测试和定位算法调试很有用。

@@ -1,3 +1,7 @@
+"""复用官方 TurtleBot3 Waffle 仿真入口，统一模型和初始位置参数。
+
+资源从 package-share 查找；运行时参数由 launch 声明并解析。
+"""
 #这个模块提供了LaunchDescription类，用于描述ROS 2的启动过程。
 from launch import LaunchDescription
 # 这个模块提供了DeclareLaunchArgument、IncludeLaunchDescription和SetEnvironmentVariable类，用于在启动过程中声明参数、包含其他启动文件和设置环境变量。
@@ -12,6 +16,14 @@ from launch_ros.substitutions import FindPackageShare
 import os
 
 def generate_launch_description():
+    """建立启动描述。
+
+    Returns:
+        LaunchDescription: 节点、包含入口与参数声明组成的启动描述。
+
+    Note:
+        调用只构建动作描述；节点进程由 launch 执行动作时启动。
+    """
 
     # 设置环境变量以指定TurtleBot3模型为Waffle
     os.environ['TURTLEBOT3_MODEL'] = 'waffle'

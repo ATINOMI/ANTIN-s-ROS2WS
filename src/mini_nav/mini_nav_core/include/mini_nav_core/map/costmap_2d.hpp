@@ -1,3 +1,9 @@
+/**
+ * @file costmap_2d.hpp
+ * @brief ROS 无关二维代价图、坐标换算和栅格绘制。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 #pragma once
 
 /* Includes ----------------------------------------------------------------*/
@@ -9,6 +15,9 @@ namespace mini_nav_core
 {
     /* Type definitions --------------------------------------------------------*/
     /// 用于保存地图中一个栅格单元的 x、y 下标。
+    /**
+     * @brief 地图单元的无符号 x、y 下标，不是米制坐标。
+     */
     struct MapLocation
     {
         unsigned int x;
@@ -158,7 +167,9 @@ namespace mini_nav_core
              */
             bool IndexToMap(std::size_t index, MapLocation & location) const;
 
-            /** @brief 获取地图中栅格的总数。 */
+            /** @brief 获取地图中栅格的总数。
+             * @return 地图总格数。
+             */
             std::size_t GetCellCount() const;
 
             /**
@@ -194,13 +205,19 @@ namespace mini_nav_core
             /** @brief 获取 y 方向的栅格数量。 */
             unsigned int GetSizeInCellsY() const;
 
-            /** @brief 获取地图原点的世界 x 坐标，单位为米。 */
+            /** @brief 获取地图原点的世界 x 坐标，单位为米。
+             * @return 地图左下角 x，米。
+             */
             double GetOriginX() const;
 
-            /** @brief 获取地图原点的世界 y 坐标，单位为米。 */
+            /** @brief 获取地图原点的世界 y 坐标，单位为米。
+             * @return 地图左下角 y，米。
+             */
             double GetOriginY() const;
 
-            /** @brief 获取地图分辨率，即每个栅格边长，单位为米。 */
+            /** @brief 获取地图分辨率，即每个栅格边长，单位为米。
+             * @return 每格边长，米。
+             */
             double GetResolution() const;
 
         /* Private members ------------------------------------------------------*/

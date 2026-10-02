@@ -41,6 +41,18 @@ double NormalPdf(double difference, double sigma)
 }
 }  // namespace
 
+/**
+ * @brief 设置命中、短测距、最大量程与随机项的混合激光模型。
+ *
+ * @param z_hit 命中项有限非负权重。
+ * @param z_short 短测距项有限非负权重。
+ * @param z_max 最大量程项有限非负权重。
+ * @param z_rand 随机项有限非负权重；四项和必须为正。
+ * @param sigma_hit 命中项标准差，有限正数，米。
+ * @param lambda_short 短测距指数分布系数，有限正数，1/米。
+ * @param max_beams 期望抽取束数，必须非零。
+ * @throws std::invalid_argument 权重、尺度或束数非法。
+ */
 BeamModel::BeamModel(
   double z_hit,
   double z_short, 
@@ -65,6 +77,17 @@ BeamModel::BeamModel(
 }
 
 /// Apply the scan measurement likelihood to each particle weight.
+/**
+ * @brief 按地图射线预期量程计算混合似然并乘入粒子权重。
+ *
+ * 激光安装位姿先与每个粒子位姿复合；按束数目标降采样并跳过无效读数，
+ * 使用对数域累积避免概率连续相乘下溢。归一化由滤波器完成。
+ *
+ * @param particles 原地更新的候选位姿和权重。
+ * @param scan 量程为米、角度为弧度的观测。
+ * @param map 用于预期量程射线投射的地图。
+ * @param base_to_laser_pose 激光帧在底盘帧中的外参，米/弧度。
+ */
 void BeamModel::ApplyMeasurementLikelihood(
   std::vector<Particle> & particles,
   const LaserScanData & scan,

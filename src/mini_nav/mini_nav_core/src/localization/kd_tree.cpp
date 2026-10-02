@@ -584,3 +584,56 @@ PoseBinIndex::PoseBinKey PoseBinIndex::MakePoseBinKey(const Pose2D & pose) const
 }
 
 }  // namespace mini_nav_core::localization
+
+/**
+ * @brief 按相邻位姿分箱的连通性选择总权重最大的定位主簇。
+ *
+ * 只连通正权重分箱，避免零权重格把分离假设桥接；yaw 邻接在 ±π 处周期连接。
+ *
+ * @param particles 与最近一次 Build 顺序及数量一致的粒子集，权重有限非负。
+ * @return 主簇中的原始粒子索引；用于位姿估计而非全部粒子的跨模式平均。
+ * @throws std::invalid_argument 粒子数量与索引不匹配或权重非法。
+ */
+std::vector<std::size_t> mini_nav_core::localization::PoseBinIndex::GetDominantParticleIndices(
+  const std::vector<Particle> & particles) const
+{
+    if (particles.size() != bin_id_by_particle_index_.size())
+        throw std::invalid_argument("Particles do not match pose bins");
+    std::vector<bool> visited(particle_indices_by_bin_id_.size(), false);
+    std::vector<double> weights(visited.size(), 0.0);
+    for (std::size_t i = 0; i < particles.size(); ++i) {
+        if (!std::isfinite(particles[i].weight) || particles[i].weight < 0.0)
+            throw std::invalid_argument("Particle weight is invalid");
+        weights[bin_id_by_particle_index_[i]] += particles[i].weight;
+    }
+    std::vector<PoseBinKey> keys(visited.size());
+    for (const auto & entry : bin_id_by_key_) keys[entry.second] = entry.first;
+    double best_weight = 0.0;
+    std::vector<std::size_t> best;
+    for (std::size_t seed = 0; seed < keys.size(); ++seed) {
+        if (visited[seed] || weights[seed] <= 0.0) continue;
+        std::vector<std::size_t> queue{seed}, indices;
+        visited[seed] = true;
+        double weight = 0.0;
+        for (std::size_t q = 0; q < queue.size(); ++q) {
+            const auto id = queue[q]; const auto key = keys[id];
+            weight += weights[id];
+            for (const auto i : particle_indices_by_bin_id_[id]) if (particles[i].weight > 0.0) indices.push_back(i);
+            for (int dx = -1; dx <= 1; ++dx) for (int dy = -1; dy <= 1; ++dy) for (int da = -1; da <= 1; ++da) {
+                if ((dx < 0 && key.x_bin == std::numeric_limits<int>::min()) ||
+                    (dx > 0 && key.x_bin == std::numeric_limits<int>::max()) ||
+                    (dy < 0 && key.y_bin == std::numeric_limits<int>::min()) ||
+                    (dy > 0 && key.y_bin == std::numeric_limits<int>::max())) continue;
+                // MakePoseBinKey stores yaw + pi; map a neighbor bin center through its periodic normalization.
+                const int yaw = MakePoseBinKey(Pose2D{0.0, 0.0,
+                    (static_cast<double>(key.yaw_bin) + 0.5 + da) * yaw_bin_size_rad_ - kPi}).yaw_bin;
+                auto it = bin_id_by_key_.find(PoseBinKey{key.x_bin + dx, key.y_bin + dy, yaw});
+                if (it != bin_id_by_key_.end() && !visited[it->second] && weights[it->second] > 0.0) {
+                    visited[it->second] = true; queue.push_back(it->second);
+                }
+            }
+        }
+        if (weight > best_weight) { best_weight = weight; best = std::move(indices); }
+    }
+    return best;
+}

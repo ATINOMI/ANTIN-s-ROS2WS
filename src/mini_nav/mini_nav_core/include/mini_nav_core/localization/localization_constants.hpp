@@ -1,3 +1,9 @@
+/**
+ * @file localization_constants.hpp
+ * @brief 定位核心的数值约定、尺度、默认参数与容差。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 #pragma once
 
 #include <cstddef>

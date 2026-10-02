@@ -7,6 +7,9 @@
  * @author Antinomy
  * @date 2026-09-28
  */
+
+/* Includes -----------------------------------------------------------------------*/
+
 #include "mini_nav_core/map/inflation_layer.hpp"
 
 #include <algorithm>
@@ -19,11 +22,16 @@ namespace mini_nav_core
 {
     namespace
     {
+
+/* Constants ----------------------------------------------------------------------*/
+
         /* 与规划器约定的三个特殊代价值：253 为硬安全区，254 为障碍源，
          * 255 为未知。改变其中任何一个，都必须同步检查 A* 的通行阈值。 */
         constexpr unsigned char kInscribedCost = 253;
         constexpr unsigned char kLethalCost = 254;
         constexpr unsigned char kUnknownCost = 255;
+
+/* Structures ---------------------------------------------------------------------*/
 
         /**
          * @brief 一个障碍源到目标栅格的相对偏移及对应膨胀代价。
@@ -42,6 +50,8 @@ namespace mini_nav_core
         };
     }
 
+/* Functions ----------------------------------------------------------------------*/
+
     /**
      * @brief 复制原图并分别处理障碍软膨胀与未知边界硬安全区。
      * @param source 输入静态地图；254 是软膨胀源，255 可选传播硬安全区。
@@ -58,14 +68,20 @@ namespace mini_nav_core
          * 先验证全部参数，避免非法浮点数进入 floor、指数计算或栅格循环；
          * 膨胀半径小于硬安全半径时，也无法完整表达要求的禁行范围。
          */
+
+        // 硬安全半径 = 机器人外接圆半径 + 安全余量。
         const double hard_radius = parameters.robot_radius + parameters.safety_margin;
-        if (!std::isfinite(parameters.robot_radius) || parameters.robot_radius <= 0.0 ||
-            !std::isfinite(parameters.safety_margin) || parameters.safety_margin < 0.0 ||
+
+        if (!std::isfinite(parameters.robot_radius) || 
+            parameters.robot_radius <= 0.0 ||
+            !std::isfinite(parameters.safety_margin) || 
+            parameters.safety_margin < 0.0 ||
             !std::isfinite(hard_radius) ||
             !std::isfinite(parameters.inflation_radius) ||
             parameters.inflation_radius < hard_radius ||
             !std::isfinite(parameters.cost_scaling_factor) ||
-            parameters.cost_scaling_factor <= 0.0) {
+            parameters.cost_scaling_factor <= 0.0) 
+        {
             throw std::invalid_argument("Invalid inflation radius, safety margin, or scaling factor");
         }
 
@@ -74,22 +90,31 @@ namespace mini_nav_core
          * 单轴偏移最多只需覆盖地图宽/高减一格：再远的目标必定越界。
          */
         Costmap2D result = source;
-        const auto width = static_cast<std::int64_t>(source.GetSizeInCellsX());
+
+        // 获取源地图的尺寸和分辨率。
+        const auto width =  static_cast<std::int64_t>(source.GetSizeInCellsX());
         const auto height = static_cast<std::int64_t>(source.GetSizeInCellsY());
         const double resolution = source.GetResolution();
-        const auto max_dx = static_cast<std::int64_t>(std::min(
-            static_cast<double>(width - 1),
-            std::ceil(parameters.inflation_radius / resolution + 0.5)));
-        const auto max_dy = static_cast<std::int64_t>(std::min(
-            static_cast<double>(height - 1),
-            std::ceil(parameters.inflation_radius / resolution + 0.5)));
 
-        const auto inflationCost = [&](double distance) {
-            if (distance <= hard_radius) {
+        // 计算膨胀半径对应的最大栅格偏移，避免在循环中重复计算。
+        const auto max_dx = static_cast<std::int64_t>(std::min(static_cast<double>(width - 1),
+                                                               std::ceil(parameters.inflation_radius / resolution + 0.5)));
+        const auto max_dy = static_cast<std::int64_t>(std::min(static_cast<double>(height - 1),
+                                                               std::ceil(parameters.inflation_radius / resolution + 0.5)));
+
+        const auto inflationCost = [&](double distance) 
+        {
+
+            // 如果距离小于等于硬安全半径，则返回硬安全区代价 253。
+            if (distance <= hard_radius) 
+            {
                 return kInscribedCost;
             }
-            const double scaled = 252.0 * std::exp(
-                -parameters.cost_scaling_factor * (distance - hard_radius));
+
+            // 计算软膨胀代价，使用指数衰减公式。
+            const double scaled = 252.0 * std::exp(-parameters.cost_scaling_factor * (distance - hard_radius));
+
+            // 确保代价至少为 1，避免在膨胀半径内出现零代价。
             return static_cast<unsigned char>(std::max(1.0, std::floor(scaled)));
         };
 
@@ -101,15 +126,25 @@ namespace mini_nav_core
          * 硬安全区为 253；仅障碍源外圈按 252 * exp(-系数 * (距离 - 硬半径))
          * 衰减，并限制最小值为 1，避免影响半径内因取整而出现零代价。
          */
+        // 计算每个偏移的代价，并存储在 offsets 向量中。
         std::vector<InflationOffset> offsets;
-        for (std::int64_t dy = -max_dy; dy <= max_dy; ++dy) {
-            for (std::int64_t dx = -max_dx; dx <= max_dx; ++dx) {
+
+        for (std::int64_t dy = -max_dy; dy <= max_dy; ++dy) 
+        {
+
+            for (std::int64_t dx = -max_dx; dx <= max_dx; ++dx) 
+            {
+
+                // 计算格子中心到源格方形面积的最短距离，也就是格子中心到源格边界的距离。
                 const double distance = std::hypot(
                     std::max(0.0, std::abs(static_cast<double>(dx)) - 0.5),
                     std::max(0.0, std::abs(static_cast<double>(dy)) - 0.5)) * resolution;
-                if (distance == 0.0 || distance > parameters.inflation_radius) {
+
+                if (distance == 0.0 || distance > parameters.inflation_radius) 
+                {
                     continue;
                 }
+
                 offsets.push_back({dx, dy, inflationCost(distance)});
             }
         }
@@ -118,48 +153,86 @@ namespace mini_nav_core
          * 只从源地图读取障碍和未知格，避免刚写出的代价再次传播。
          * 开启未知膨胀时只传播硬安全区，不制造软代价色带；多个源取最大代价。
          */
-        for (std::int64_t y = 0; y < height; ++y) {
-            for (std::int64_t x = 0; x < width; ++x) {
+        // 遍历源地图的每个栅格，检查是否为障碍或未知格，并应用偏移代价。
+        for (std::int64_t y = 0; y < height; ++y) 
+        {
+
+            for (std::int64_t x = 0; x < width; ++x) 
+            {
+
+                // 获取源地图中当前栅格的代价值。
                 const auto source_cost = source.GetCost(
                     static_cast<unsigned int>(x), static_cast<unsigned int>(y));
+
+                // 只处理障碍源（254）和未知格（255，若允许膨胀）。
                 if (source_cost != kLethalCost &&
-                    !(parameters.inflate_around_unknown && source_cost == kUnknownCost)) {
+                    !(parameters.inflate_around_unknown && source_cost == kUnknownCost)) 
+                {
                     continue;
                 }
-                for (const auto & offset : offsets) {
-                    if (source_cost == kUnknownCost && offset.cost != kInscribedCost) {
+
+                // 遍历所有偏移，应用到当前栅格。
+                for (const auto & offset : offsets) 
+                {
+
+                    // 如果当前栅格是未知格，且偏移的代价不是内切代价，则跳过。
+                    if (source_cost == kUnknownCost && offset.cost != kInscribedCost) 
+                    {
                         continue;
                     }
+
+                    // 计算目标栅格的坐标，并检查是否在地图范围内。
                     const auto nx = x + offset.dx;
                     const auto ny = y + offset.dy;
-                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) 
+                    {
                         continue;
                     }
+
+                    // 获取目标栅格的代价值，并更新为偏移代价的最大值。
                     const auto mx = static_cast<unsigned int>(nx);
                     const auto my = static_cast<unsigned int>(ny);
                     const auto old_cost = result.GetCost(mx, my);
-                    if (old_cost != kUnknownCost && offset.cost > old_cost) {
+
+                    // 只在目标栅格的代价小于偏移代价时更新，确保最大代价传播。
+                    if (old_cost != kUnknownCost && offset.cost > old_cost) 
+                    {
                         result.SetCost(mx, my, offset.cost);
                     }
                 }
             }
         }
 
-        // 地图外侧没有占据信息：边缘到车体中心的距离按连续地图边界计算。
-        // 已知格中心若距任一外边界不足硬半径，则禁止通行。
-        for (std::int64_t y = 0; y < height; ++y) {
-            for (std::int64_t x = 0; x < width; ++x) {
+
+        /*
+         * 处理地图边界的硬安全区，确保机器人在靠近边界时不会碰撞。
+         * 只在边缘距离小于或等于硬半径的栅格上设置内切代价。
+         */
+        for (std::int64_t y = 0; y < height; ++y) 
+        {
+
+            for (std::int64_t x = 0; x < width; ++x) 
+            {
+
                 const auto mx = static_cast<unsigned int>(x);
                 const auto my = static_cast<unsigned int>(y);
-                if (result.GetCost(mx, my) == kUnknownCost) {
+
+                if (result.GetCost(mx, my) == kUnknownCost) 
+                {
                     continue;
                 }
+
+                // 计算当前栅格到地图边界的最短距离，考虑栅格中心到边界的距离。
                 const double edge_distance = std::min({
                     (static_cast<double>(x) + 0.5) * resolution,
                     (static_cast<double>(width - x) - 0.5) * resolution,
                     (static_cast<double>(y) + 0.5) * resolution,
                     (static_cast<double>(height - y) - 0.5) * resolution});
-                if (edge_distance <= hard_radius) {
+
+                // 如果边缘距离小于或等于硬半径，则将目标栅格的代价设置为内切代价和当前代价的最大值。
+                if (edge_distance <= hard_radius) 
+                {
                     result.SetCost(mx, my, std::max(result.GetCost(mx, my), kInscribedCost));
                 }
             }

@@ -294,6 +294,12 @@ bool LocalizationMap::TryGetObstacleDistanceAtWorld(
   return true;
 }
 
+/**
+ * @brief 读取格中心到最近已知障碍物的截断距离。
+ *
+ * @param cell 图内格下标。
+ * @return 障碍距离，米，上限为配置 max_obstacle_distance。
+ */
 double LocalizationMap::GetObstacleDistanceAtCell(const GridCell & cell) const
 {
   if (!IsInBounds(cell)) {

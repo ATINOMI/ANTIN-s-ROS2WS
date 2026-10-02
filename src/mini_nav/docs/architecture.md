@@ -1,5 +1,7 @@
 # mini_nav 架构说明
 
+当前主 launch 的任务链、速度输出关系、Action 接口和故障处理以 [单目标导航任务](navigation_tasks.md) 为准。下方目录说明保留项目演进过程中的模块介绍。
+
 最后更新：2026-08-31
 
 ## 1. 项目定位
@@ -458,7 +460,7 @@ source src/mini_nav/scripts/env_mini_nav.sh
 | 仿真接口 | `ros2 launch mini_nav_bringup waffle_sim.launch.py` | Waffle、Gazebo、传感器和里程计 |
 | RViz 检查 | `ros2 launch mini_nav_bringup sim_check.launch.py` | 只启动 RViz，不伪造定位 TF |
 
-完整入口的地图和参数通过 package-share 查找，默认使用 `mini_nav_bringup/maps/turtlebot3_map.yaml`。如果要测试工作区根目录的另一份地图，应通过 `map:=...` 显式传入。
+完整入口的地图和参数通过 package-share 查找，默认使用 `mini_nav_bringup/maps/tb3_learning.yaml`，其 YAML/PGM 与 `scripts/run_nav2_case.sh` 的第一个 `learning` 案例一致。独立 A* 脚本也使用这份包内地图。原 `turtlebot3_map.yaml/pgm` 保留为备用资源；测试其他地图时可通过 `map:=...` 显式传入。
 
 ## 8. 当前状态与后续接缝
 

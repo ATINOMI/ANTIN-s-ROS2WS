@@ -3,6 +3,8 @@
  * @brief 定义了用于粒子滤波器定位的基本类型，包括 Pose2D、Covariance3、Particle 和 PoseEstimate。
  *
  * 这些类型用于表示机器人在二维平面上的位姿、协方差矩阵、粒子以及位姿估计结果。
+  * @author Antinomy
+ * @date 2026-10-01
  */
 #pragma once
 
@@ -54,6 +56,9 @@ public:
 /* Functions --------------------------------------------------------------*/
 
   // 默认构造函数
+  /**
+   * @brief 构造全部元素为零的 3×3 协方差；状态顺序为 x、y、yaw。
+   */
   Covariance3() = default;
 
   /**
@@ -74,6 +79,16 @@ public:
   }
 
   // Compatibility name retained for existing callers.
+  /**
+   * @brief 按位置和角度方差创建对角矩阵，兼容 DiagonalVariances。
+   *
+   * 此处不校验方差范围；滤波初始化时检查对称半正定性。
+   *
+   * @param x_variance x 方差，m²。
+   * @param y_variance y 方差，m²。
+   * @param yaw_variance 偏航方差，rad²。
+   * @return 其余元素为零的对角协方差。
+   */
   static Covariance3 Diagonal(
     double x_variance, double y_variance, double yaw_variance)
   {
@@ -81,11 +96,12 @@ public:
   }
 
   /**
-   * @brief 返回行列索引对应的协方差值元素本身，用于修改.
-   * 
-   * @param row       行索引
-   * @param column    列索引
-   * @return double& 
+   * @brief 访问并允许修改协方差元素。
+   *
+   * @param row 行号，0..2。
+   * @param column 列号，0..2。
+   * @return 内部元素的可修改引用。
+   * @throws std::out_of_range 行或列越界。
    */
   double & At(std::size_t row, std::size_t column)
   {
@@ -96,11 +112,12 @@ public:
   }
 
   /**
-   * @brief 返回行列索引对应的协方差值元素的常量引用，用于只读访问。
-   * 
-   * @param row       行索引
-   * @param column    列索引
-   * @return double 
+   * @brief 读取协方差元素的数值。
+   *
+   * @param row 行号，0..2。
+   * @param column 列号，0..2。
+   * @return 元素值的副本。
+   * @throws std::out_of_range 行或列越界。
    */
   double At(std::size_t row, std::size_t column) const
   {
@@ -111,6 +128,10 @@ public:
   }
 
   /// Return the row-major 3x3 covariance storage for read-only inspection.
+  /**
+   * @brief 只读访问按行存储的九个协方差元素。
+   * @return 内部数组常引用；索引为 row × 3 + column。
+   */
   const std::array<double, 9> & Values() const { return values_; }
 
   /*Private members --------------------------------------------------------*/
@@ -136,6 +157,8 @@ struct PoseEstimate
   Covariance3 covariance;
   // Sum of particle weights used by this estimate, before normalization.
   double weight{0.0};
+  // Dominant connected hypothesis weight divided by all positive particle weights.
+  double hypothesis_mass{0.0};
 };
 
 /*inline functions----------------------------------------------------------*/

@@ -54,6 +54,12 @@ public:
   void BuildPoseBinIndex(const std::vector<Particle> & particles);
 
   // Compatibility wrapper for existing callers.
+  /**
+   * @brief 通过兼容名称重新构建位姿分箱索引。
+   *
+   * @param particles 粒子集，后续主簇查询须保持相同数量和顺序。
+   * @throws std::invalid_argument 位姿非有限或量化索引超出整数范围。
+   */
   void Build(const std::vector<Particle> & particles) { BuildPoseBinIndex(particles); }
 
   /**
@@ -62,6 +68,17 @@ public:
    * @return std::size_t 被占用的格子的数量
    */
   std::size_t GetOccupiedBinCount() const;
+
+  /**
+   * @brief 按相邻位姿分箱的连通性选择总权重最大的定位主簇。
+   *
+   * 只连通正权重分箱，避免零权重格把分离假设桥接；yaw 邻接在 ±π 处周期连接。
+   *
+   * @param particles 与最近一次 Build 顺序及数量一致的粒子集，权重有限非负。
+   * @return 主簇中的原始粒子索引；用于位姿估计而非全部粒子的跨模式平均。
+   * @throws std::invalid_argument 粒子数量与索引不匹配或权重非法。
+   */
+  std::vector<std::size_t> GetDominantParticleIndices(const std::vector<Particle> & particles) const;
 
 private:
 /* Private Types ------------------------------------------------------------*/
@@ -94,7 +111,7 @@ private:
   /**
    * @brief 哈希函数，用于在哈希表中索引 PoseBinKey。
    *
-   * 该结构体实现了一个自定义的哈希函数，用于将 PoseBinKey 映射到一个唯一的哈希值。
+   * 该结构体实现了一个自定义的哈希函数，用于将 PoseBinKey 映射到哈希值；哈希可能碰撞，相等性由 operator== 判断。
    */
   struct PoseBinKeyHash
   {

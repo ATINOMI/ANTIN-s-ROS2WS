@@ -1,0 +1,31 @@
+path_follower:
+  ros__parameters:
+    map_frame_id: map
+    odom_frame_id: odom
+    base_frame_id: base_footprint
+    path_topic: /mini_nav/global_path
+    static_map_topic: /mini_nav/planning_costmap
+    local_map_topic: /mini_nav/local_costmap
+    local_valid_topic: /mini_nav/local_costmap_valid
+    controller:
+      frequency: 10.0
+      max_linear_speed: 0.15
+      max_angular_speed: 0.55
+      max_linear_acceleration: 0.30
+      max_linear_deceleration: 0.50
+      max_angular_acceleration: 1.0
+      command_reaction_time: 1.0
+      lookahead_distance: 0.35
+      goal_position_tolerance: 0.12
+      goal_yaw_tolerance: 0.15
+      rotate_in_place_angle: 0.35
+      max_path_deviation: 0.40
+      progress_distance: 0.10
+      progress_yaw: 0.30
+      progress_timeout: 10.0
+      max_path_age: 3.0
+      max_static_map_age: 3.0
+      max_local_map_age: 0.8
+      max_tf_age: 1.0
+      max_tf_future: 0.7
+      clock_stall_timeout: 1.0

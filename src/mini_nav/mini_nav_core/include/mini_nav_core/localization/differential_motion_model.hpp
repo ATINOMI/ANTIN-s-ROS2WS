@@ -41,11 +41,11 @@ public:
   /**
    * @brief 构造函数，初始化差分运动模型的噪声参数。
    *
-   * @param alpha1 线速度噪声系数
-   * @param alpha2 角速度噪声系数
-   * @param alpha3 线速度与角速度的交叉噪声系数
-   * @param alpha4 角速度与线速度的交叉噪声系数
-   * @param alpha5 角速度的二次噪声系数
+   * @param alpha1 旋转增量对旋转噪声方差的系数。
+   * @param alpha2 平移增量对旋转噪声方差的系数。
+   * @param alpha3 平移增量对平移噪声方差的系数。
+   * @param alpha4 旋转增量对平移噪声方差的系数。
+   * @param alpha5 全向模型兼容保留；差速运动计算不使用，仍校验有限非负。
    * @param seed 随机数生成器的种子，用于可重复性
    */
   explicit DifferentialMotionModel(
@@ -69,10 +69,10 @@ public:
     const Pose2D & current_odom_pose) override;
 
 private:
-  double alpha1_; // 线速度噪声系数
-  double alpha2_; // 角速度噪声系数
-  double alpha3_; // 线速度与角速度的交叉噪声系数
-  double alpha4_; // 角速度与线速度的交叉噪声系数
+  double alpha1_; // 旋转引起的旋转噪声方差系数。
+  double alpha2_; // 平移引起的旋转噪声方差系数。
+  double alpha3_; // 平移引起的平移噪声方差系数。
+  double alpha4_; // 旋转引起的平移噪声方差系数。
   double alpha5_; // 全向模型兼容保留；当前差速模型运动学不使用该系数
   std::mt19937_64 generator_; // 随机数生成器，用于生成高斯噪声
 };

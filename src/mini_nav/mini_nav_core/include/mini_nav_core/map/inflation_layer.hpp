@@ -25,7 +25,7 @@ namespace mini_nav_core
         /// 机器人在平面上的保守外接圆半径，单位：米。
         double robot_radius = 0.24;
         /// 外接圆之外额外保留的安全距离，单位：米，允许为零。
-        double safety_margin = 0.05;
+        double safety_margin = 0.02;
         /// 障碍代价向外传播的最大半径，单位：米，不得小于硬安全半径。
         double inflation_radius = 0.45;
         /// 软代价的指数衰减系数，单位：1/米；越大则离开安全区后衰减越快。

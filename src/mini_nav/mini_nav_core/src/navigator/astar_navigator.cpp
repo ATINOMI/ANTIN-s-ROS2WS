@@ -1,3 +1,9 @@
+/**
+ * @file astar_navigator.cpp
+ * @brief 八邻域 A*、软代价与安全终点容差规划。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 /* Includes ----------------------------------------------------------------*/
 #include "mini_nav_core/navigator/astar_navigator.hpp"
 #include "mini_nav_core/navigator/path_postprocessor.hpp"
@@ -9,10 +15,16 @@
 
 using namespace mini_nav_core;
 
-AStarPlanner::AStarPlanner(double cost_travel_multiplier)
-  : cost_travel_multiplier_(cost_travel_multiplier)
+/**
+ * @brief 设置 A* 的软代价权重。
+ *
+ * @param cost_travel_multiplier 每步软代价相对于几何距离的权重，有限非负。
+ * @throws std::invalid_argument 权重为负或非有限。
+ */
+AStarPlanner::AStarPlanner(double cost_travel_multiplier) : cost_travel_multiplier_(cost_travel_multiplier)
 {
-  if (!std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) {
+  if (!std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) 
+  {
     throw std::invalid_argument("cost_travel_multiplier must be finite and nonnegative");
   }
 }
@@ -20,70 +32,125 @@ AStarPlanner::AStarPlanner(double cost_travel_multiplier)
 /* Functions Definition --------------------------------------------------------------*/
 
 /**
- * @brief 使用 A* 算法规划路径
- * 
- * @param costmap : 成本地图
- * @param start   : 起点位置
- * @param goal    : 终点位置
- * @return std::vector<MapLocation> : 规划出的路径
+ * @brief 在八邻域代价图上规划路径，并在原目标不可达时搜索容差内终点。
+ *
+ * 优先到达原目标；后备终点只从实际展开的可达格中选，先比较到原目标的欧氏距离，
+ * 同距离再比较累计代价。本重载不执行原始地图上的完整车体扫掠。
+ *
+ * @param costmap 规划代价图，253、254、255 均禁行。
+ * @param start 起点栅格下标。
+ * @param goal 原目标栅格下标，越界仍拒绝。
+ * @param goal_tolerance 原目标不可达时允许的替代终点半径，米；0 禁用。
+ * @return 包含起点和最终终点的栅格序列；起点不安全、目标越界或无路时为空。
+ * @throws std::invalid_argument 目标容差为负或非有限。
  */
 std::vector<MapLocation> AStarPlanner::Plan(
   const Costmap2D & costmap,
   const MapLocation & start,
-  const MapLocation & goal) const
+  const MapLocation & goal,
+  double goal_tolerance) const
 {
-  return PlanImpl(costmap, nullptr, 0.0, start, goal, true);
+  return PlanImpl(costmap, nullptr, 0.0, start, goal, true, goal_tolerance);
 }
 
+/**
+ * @brief 执行八邻域 A*，同时在原图上检查每条边的连续车体扫掠。
+ *
+ * 不允许斜向穿过任一侧禁行格；原目标不可达时仅放宽终点位置，不放宽安全规则。
+ *
+ * @param planning                  膨胀规划图，253 及以上禁行。
+ * @param source                    与规划图几何一致的原始碰撞地图。
+ * @param clearance_radius          车体外接圆加安全余量，有限正数，米。
+ * @param start                     起点栅格下标。
+ * @param goal                      原目标栅格下标，越界仍拒绝。
+ * @param goal_tolerance            原目标不可达时允许的替代终点半径，米；0 禁用。
+ * @param include_unknown_clearance 是否检查车体与未知格的连续余量。
+ * @return 安全栅格路径；无安全可达终点时为空。
+ * @throws std::invalid_argument 地图不匹配、安全半径或容差非法。
+ */
 std::vector<MapLocation> AStarPlanner::Plan(
   const Costmap2D & planning,
   const Costmap2D & source,
   double clearance_radius,
   const MapLocation & start,
   const MapLocation & goal,
-  bool include_unknown_clearance) const
+  bool include_unknown_clearance,
+  double goal_tolerance) const
 {
-  if (!std::isfinite(clearance_radius) || clearance_radius <= 0.0 ||
-      planning.GetSizeInCellsX() != source.GetSizeInCellsX() ||
-      planning.GetSizeInCellsY() != source.GetSizeInCellsY() ||
-      planning.GetResolution() != source.GetResolution() ||
-      planning.GetOriginX() != source.GetOriginX() ||
-      planning.GetOriginY() != source.GetOriginY()) {
+  if (!std::isfinite(clearance_radius) ||                       // 检查安全半径是否为有限数
+      clearance_radius <= 0.0 ||                                // 检查安全半径是否为正数
+      planning.GetSizeInCellsX() != source.GetSizeInCellsX() || // 检查规划图和原图的x尺寸是否匹配
+      planning.GetSizeInCellsY() != source.GetSizeInCellsY() || // 检查规划图和原图的y尺寸是否匹配
+      planning.GetResolution() != source.GetResolution() ||     // 检查规划图和原图的分辨率是否匹配
+      planning.GetOriginX() != source.GetOriginX() ||           // 检查规划图和原图的原点x坐标是否匹配
+      planning.GetOriginY() != source.GetOriginY())             // 检查规划图和原图的原点y坐标是否匹配
+  {
     throw std::invalid_argument("A* continuous clearance needs matching maps and a positive radius");
   }
-  return PlanImpl(planning, &source, clearance_radius, start, goal,
-                  include_unknown_clearance);
+
+  return PlanImpl(planning, 
+                  &source, 
+                  clearance_radius, 
+                  start, 
+                  goal,
+                  include_unknown_clearance, 
+                  goal_tolerance);
 }
 
+/**
+ * @brief 维护最小 f 值队列、累计代价及父索引，搜索后回溯最终路径。
+ *
+ * 步长为 1 或 √2，乘以 (1 + 权重 × 目标格代价 / 252)。
+ * 非负软代价使八方向几何启发式不高估；目标原格优先于容差候选。
+ *
+ * @param costmap                   膨胀规划图，253 及以上禁行。
+ * @param source                    原图指针；nullptr 时跳过连续扫掠。
+ * @param clearance_radius          扫掠半径，米。
+ * @param start                     起点下标。
+ * @param goal                      原目标下标。
+ * @param include_unknown_clearance 未知格余量检查开关。
+ * @param goal_tolerance            替代终点半径，米。
+ * @return 起点至选中终点的路径，无路返回空。
+ * @throws std::invalid_argument 容差非法。
+ */
 std::vector<MapLocation> AStarPlanner::PlanImpl(
   const Costmap2D & costmap,
   const Costmap2D * source,
   double clearance_radius,
   const MapLocation & start,
   const MapLocation & goal,
-  bool include_unknown_clearance) const
+  bool include_unknown_clearance,
+  double goal_tolerance) const
 {
+  // 检查 goal_tolerance 是否为有限非负数
+  if (!std::isfinite(goal_tolerance) || goal_tolerance < 0.0) 
+  {
+    throw std::invalid_argument("goal_tolerance must be finite and nonnegative");
+  }
   // 获取地图尺寸
   const unsigned int size_x = costmap.GetSizeInCellsX();
   const unsigned int size_y = costmap.GetSizeInCellsY();
 
   // 检查起点和终点是否在地图范围内，且不在障碍物上
-  if (start.x >= size_x || start.y >= size_y ||
-      goal.x  >= size_x || goal.y  >= size_y ||
-      costmap.GetCost(start.x, start.y) >= kInscribedInflatedObstacle ||
-      costmap.GetCost(goal.x, goal.y)   >= kInscribedInflatedObstacle)
+  if (start.x >= size_x || start.y >= size_y ||                                                 // 检查起点是否越界
+      goal.x  >= size_x || goal.y  >= size_y ||                                                 // 检查终点是否越界
+      costmap.GetCost(start.x, start.y) >= kInscribedInflatedObstacle ||                        // 检查起点是否在障碍物上
+      (goal_tolerance == 0.0 && costmap.GetCost(goal.x, goal.y) >= kInscribedInflatedObstacle)) // 检查终点是否在障碍物上（仅当 goal_tolerance 为 0 时检查）
   {
     return {};
   }
-  if (source != nullptr) {
-    PathPoint start_point{};
-    PathPoint goal_point{};
-    source->MapToWorld(start.x, start.y, start_point.x, start_point.y);
-    source->MapToWorld(goal.x, goal.y, goal_point.x, goal_point.y);
-    if (!IsCircularSweepClear(*source, start_point, start_point, clearance_radius,
-                              include_unknown_clearance) ||
-        !IsCircularSweepClear(*source, goal_point, goal_point, clearance_radius,
-                              include_unknown_clearance)) {
+
+  if (source != nullptr) 
+  {
+    PathPoint start_point{};  // 起点的世界坐标
+    PathPoint goal_point{};   // 终点的世界坐标
+    source->MapToWorld(start.x, start.y, start_point.x, start_point.y); // 将起点栅格坐标转换为世界坐标
+    source->MapToWorld(goal.x, goal.y, goal_point.x, goal_point.y);     // 将终点栅格坐标转换为世界坐标
+
+    // 检查起点和终点的圆形扫掠是否安全
+    if (!IsCircularSweepClear(*source, start_point, start_point, clearance_radius, include_unknown_clearance) ||
+        (goal_tolerance == 0.0 && !IsCircularSweepClear(*source, goal_point, goal_point, clearance_radius, include_unknown_clearance))) 
+    {
       return {};
     }
   }
@@ -106,10 +173,21 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
   //这个数组用于存储每个节点的父节点索引，以便在找到路径后进行回溯。
   std::vector<unsigned int> parent(cell_count, invalid_parent);
 
+  // 八方向启发式一致，每格只展开一次；后备目标仅从实际到达的安全格中选。
+  // 这个数组用于标记每个节点是否已经被扩展过，初始值为 false。
+  std::vector<bool> expanded(cell_count, false);
+
+  // 这个变量用于存储最终路径的终点索引，初始值为 invalid_parent。
+  unsigned int end_index = invalid_parent;
+
+  // 这个变量用于存储最近的可达安全格的索引，初始值为 invalid_parent。
+  unsigned int nearest_index = invalid_parent;
+
+  // 这个变量用于存储最近的可达安全格的距离，初始值为 infinity。
+  double nearest_distance = infinity;
+
   //这个优先队列用于存储待访问的节点，按照 f 值排序。
-  std::priority_queue<OpenNode, 
-                      std::vector<OpenNode>, 
-                      CompareOpenNode> open_list;
+  std::priority_queue<OpenNode, std::vector<OpenNode>, CompareOpenNode> open_list;
 
   // 初始化起点的 g 值为 0，并将其加入 open_list。
   g_score[start_index] = 0;
@@ -120,10 +198,10 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
     { 1,  0},  // Right
     { 0, -1},  // Down
     {-1,  0},  // Left
-    { 1,  1},
-    { 1, -1},
-    {-1, -1},
-    {-1,  1}
+    { 1,  1},  // Up-Right
+    { 1, -1},  // Down-Right
+    {-1, -1},  // Down-Left
+    {-1,  1}   // Up-Left
   };
 
     /* A* 搜索循环
@@ -140,11 +218,36 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
         const OpenNode current = open_list.top();
         open_list.pop();
     
-        if (current.index == goal_index) break;  // Goal reached
+        // 如果当前节点已经被扩展过，则跳过
+        if (expanded[current.index]) continue;
+
+        // 标记当前节点为已扩展
+        expanded[current.index] = true;
+
+        // 如果当前节点是目标节点，则搜索结束
+        if (current.index == goal_index) 
+        {
+            end_index = goal_index;
+            break;  // Goal reached
+        }
     
         // 计算当前节点的 x 和 y 坐标
         const unsigned int current_x = current.index % size_x;
         const unsigned int current_y = current.index / size_x;
+
+        // 计算当前节点到目标节点的欧氏距离，并检查是否在 goal_tolerance 范围内
+        const double distance = std::hypot( static_cast<double>(current_x) - goal.x,
+                                            static_cast<double>(current_y) - goal.y) * costmap.GetResolution();
+
+        if (goal_tolerance > 0.0 &&           // 启用 goal_tolerance
+            distance <= goal_tolerance &&     // 当前节点在容差范围内
+            (distance < nearest_distance ||   // 当前节点比最近的可达安全格更近
+             (distance == nearest_distance && g_score[current.index] < g_score[nearest_index]))) // 当前节点与最近的可达安全格距离相等,但是代价更小
+        {
+            // 更新最近的可达安全格
+            nearest_index = current.index;
+            nearest_distance = distance;
+        }
     
         for (const auto & direction : directions) // 遍历八个方向
         {
@@ -161,10 +264,12 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
             if (cell_cost >= kInscribedInflatedObstacle) continue;
 
             // 斜向移动会扫过两侧相邻格；任一侧为禁行区时不能穿角。
-            const bool diagonal = direction[0] != 0 && direction[1] != 0;
-            if (diagonal &&
-                (costmap.GetCost(next_x, current_y) >= kInscribedInflatedObstacle ||
-                 costmap.GetCost(current_x, next_y) >= kInscribedInflatedObstacle)) {
+            const bool diagonal = direction[0] != 0 && direction[1] != 0; // 判断是否为斜向移动
+
+            if (diagonal &&  // 是否斜向移动
+                (costmap.GetCost(next_x, current_y) >= kInscribedInflatedObstacle || // 检查水平邻居是否为障碍物
+                 costmap.GetCost(current_x, next_y) >= kInscribedInflatedObstacle))  // 检查垂直邻居是否为障碍物
+            {
                 continue;
             }
 
@@ -174,24 +279,29 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
 
             // 计算邻居节点的索引和从起点到邻居节点的 g 值
             const unsigned int next_index = GetIndex(mx, my, size_x);
+            // 计算步长和步长代价，步长为 1 或 √2
             const double step_length = diagonal ? std::sqrt(2.0) : 1.0;
-            const double step_cost = step_length * (1.0 + cost_travel_multiplier_ *
-                static_cast<double>(cell_cost) / 252.0);
+            // 计算步长代价，考虑软代价权重和邻居节点的代价值
+            const double step_cost = step_length * (1.0 + cost_travel_multiplier_ * static_cast<double>(cell_cost) / 252.0);
             const double tentative_g_score = g_score[current.index] + step_cost;
 
             // 如果新的 g 值不小于邻居节点当前的 g 值，则跳过
             if (tentative_g_score >= g_score[next_index]) continue;
 
             // 直接验证整条相邻中心线的车体圆盘；因此膨胀图无须额外半格余量。
-            if (source != nullptr) {
+            if (source != nullptr) 
+            {
                 PathPoint current_point{};
                 PathPoint next_point{};
                 source->MapToWorld(current_x, current_y, current_point.x, current_point.y);
                 source->MapToWorld(mx, my, next_point.x, next_point.y);
+                
                 if (!IsCircularSweepClear(*source, current_point, next_point, clearance_radius,
-                                          include_unknown_clearance)) {
+                                          include_unknown_clearance)) 
+                {
                     continue;
                 }
+
             }
                 
             // 更新邻居节点的 g 值和父节点，并将其加入 open_list
@@ -204,12 +314,14 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
         }
     }
 
-    if (g_score[goal_index] == infinity) return {};  // No path found
+    // 原目标未到达时须搜索完可达区域，保证选到容差内最近的点。
+    if (end_index == invalid_parent) end_index = nearest_index;
+    if (end_index == invalid_parent) return {};  // No path found
         
     //这里开始路径重建，从目标节点回溯到起点节点，生成最终的路径。
     std::vector<MapLocation> path;
     //使用 current_index 来追踪当前节点的索引，从目标节点开始回溯到起点节点。
-    unsigned int current_index = goal_index;
+    unsigned int current_index = end_index;
     //当 current_index 不等于起点索引时，继续回溯
     while (current_index != start_index) 
     {
@@ -226,12 +338,12 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
 }
 
 /**
- * @brief 计算地图上两个位置之间的索引
- * 
- * @param mx 
- * @param my 
- * @param size_x 
- * @return unsigned int 
+ * @brief 把栅格下标映射到按行存储的一维索引。
+ *
+ * @param mx x 下标。
+ * @param my y 下标。
+ * @param size_x 每行格数。
+ * @return my × size_x + mx；本函数不检查边界。
  */
 unsigned int AStarPlanner::GetIndex(
   unsigned int mx,
@@ -242,12 +354,11 @@ unsigned int AStarPlanner::GetIndex(
 }
 
 /**
- * @brief 计算八方向距离
- *        start 和 goal 之间的距离，作为启发式函数。
- * 
- * @param start : 起点位置
- * @param goal   : 终点位置
- * @return double
+ * @brief 计算八邻域几何启发式，不计软代价。
+ *
+ * @param start 起点下标。
+ * @param goal 目标下标。
+ * @return max(dx,dy) + (√2 - 1) × min(dx,dy)，单位格。
  */
 double AStarPlanner::OctileDistance(
   const MapLocation & start,

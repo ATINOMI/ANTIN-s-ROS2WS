@@ -35,16 +35,17 @@ public:
 /* Public Functions --------------------------------------------------------- */
 
   /**
-   * @brief 构造函数，初始化 Beam Model 的参数。
+   * @brief 设置命中、短测距、最大量程与随机项的混合激光模型。
    *
-   * @param z_hit 命中测距的权重
-   * @param z_short 短距离测距的权重
-   * @param z_max 最大距离测距的权重
-   * @param z_rand 随机噪声的权重
-   * @param sigma_hit 命中测距的标准差
-   * @param lambda_short 短距离测距的指数衰减参数
-   * @param max_beams 最大使用的激光束数量
-   */ 
+   * @param z_hit 命中项有限非负权重。
+   * @param z_short 短测距项有限非负权重。
+   * @param z_max 最大量程项有限非负权重。
+   * @param z_rand 随机项有限非负权重；四项和必须为正。
+   * @param sigma_hit 命中项标准差，有限正数，米。
+   * @param lambda_short 短测距指数分布系数，有限正数，1/米。
+   * @param max_beams 期望抽取束数，必须非零。
+   * @throws std::invalid_argument 权重、尺度或束数非法。
+   */
   BeamModel(
     double z_hit,             
     double z_short,
@@ -55,12 +56,15 @@ public:
     std::size_t max_beams);
 
   /**
-   * @brief 更新粒子权重
+   * @brief 按地图射线预期量程计算混合似然并乘入粒子权重。
    *
-   * @param particles 引用的粒子向量，每个粒子包含位姿和权重
-   * @param scan 激光扫描数据
-   * @param map 地图数据
-   * @param base_to_laser_pose 激光传感器在机器人基座坐标系下的位姿
+   * 激光安装位姿先与每个粒子位姿复合；按束数目标降采样并跳过无效读数，
+   * 使用对数域累积避免概率连续相乘下溢。归一化由滤波器完成。
+   *
+   * @param particles 原地更新的候选位姿和权重。
+   * @param scan 量程为米、角度为弧度的观测。
+   * @param map 用于预期量程射线投射的地图。
+   * @param base_to_laser_pose 激光帧在底盘帧中的外参，米/弧度。
    */
   void ApplyMeasurementLikelihood(
     std::vector<Particle> & particles,

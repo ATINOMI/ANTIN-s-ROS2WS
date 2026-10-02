@@ -6,10 +6,12 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(bondcpp REQUIRED)
 find_package(mini_nav_core REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -45,6 +47,18 @@ ament_target_dependencies(local_costmap_node
 )
 target_link_libraries(local_costmap_node mini_nav_core::mini_nav_core)
 
+add_executable(path_follower_node
+  src/main.cpp
+  src/path_follower_node.cpp
+)
+target_compile_definitions(path_follower_node PRIVATE MINI_NAV_BUILD_PATH_FOLLOWER=1)
+target_compile_features(path_follower_node PUBLIC cxx_std_17)
+target_include_directories(path_follower_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ament_target_dependencies(path_follower_node
+  geometry_msgs nav_msgs nav2_msgs rclcpp rclcpp_action std_msgs tf2 tf2_geometry_msgs tf2_ros
+)
+target_link_libraries(path_follower_node mini_nav_core::mini_nav_core)
+
 target_compile_definitions(mini_nav_amcl_node PRIVATE MINI_NAV_BUILD_AMCL=1)
 
 target_compile_features(costmap_publisher_node PUBLIC cxx_std_17)
@@ -52,10 +66,14 @@ target_include_directories(costmap_publisher_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 ament_target_dependencies(costmap_publisher_node
+  sensor_msgs
   nav_msgs
+  nav2_msgs
   geometry_msgs
+  rclcpp_action
   rclcpp
   tf2
+  tf2_geometry_msgs
   tf2_ros
   visualization_msgs
 )
@@ -65,6 +83,7 @@ target_include_directories(mini_nav_amcl_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 ament_target_dependencies(mini_nav_amcl_node
+  bondcpp
   geometry_msgs
   message_filters
   mini_nav_core
@@ -73,6 +92,7 @@ ament_target_dependencies(mini_nav_amcl_node
   rclcpp
   rclcpp_lifecycle
   sensor_msgs
+  std_msgs
   std_srvs
   tf2
   tf2_geometry_msgs
@@ -93,8 +113,34 @@ install(TARGETS local_costmap_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(TARGETS path_follower_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+foreach(component navigation_manager velocity_guard)
+  string(TOUPPER ${component} component_upper)
+  add_executable(${component}_node src/main.cpp src/${component}_node.cpp)
+  target_compile_definitions(${component}_node PRIVATE MINI_NAV_BUILD_${component_upper}=1)
+  target_compile_features(${component}_node PUBLIC cxx_std_17)
+  target_include_directories(${component}_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  ament_target_dependencies(${component}_node geometry_msgs nav2_msgs rclcpp rclcpp_action std_msgs std_srvs nav_msgs tf2 tf2_geometry_msgs tf2_ros)
+  install(TARGETS ${component}_node DESTINATION lib/${PROJECT_NAME})
+endforeach()
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  add_test(NAME test_navigation_integration COMMAND /usr/bin/python3
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_navigation_integration.py ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(test_navigation_integration PROPERTIES TIMEOUT 160
+    ENVIRONMENT "ROS_DOMAIN_ID=217;RMW_IMPLEMENTATION=rmw_cyclonedds_cpp")
+
+  ament_add_gtest(test_planner_dynamic_obstacles
+    test/test_planner_dynamic_obstacles.cpp src/costmap_publisher.cpp)
+  target_compile_features(test_planner_dynamic_obstacles PUBLIC cxx_std_17)
+  target_include_directories(test_planner_dynamic_obstacles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  ament_target_dependencies(test_planner_dynamic_obstacles geometry_msgs nav_msgs nav2_msgs sensor_msgs
+    rclcpp rclcpp_action tf2 tf2_geometry_msgs tf2_ros visualization_msgs)
+  target_link_libraries(test_planner_dynamic_obstacles mini_nav_core::mini_nav_core)
 
   ament_add_gtest(test_amcl_tf_cache
     test/test_amcl_tf_cache.cpp
@@ -106,6 +152,7 @@ if(BUILD_TESTING)
       ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     ament_target_dependencies(test_amcl_tf_cache
+      bondcpp
       geometry_msgs
       message_filters
       mini_nav_core
@@ -114,6 +161,7 @@ if(BUILD_TESTING)
       rclcpp
       rclcpp_lifecycle
       sensor_msgs
+      std_msgs
       std_srvs
       tf2
       tf2_geometry_msgs

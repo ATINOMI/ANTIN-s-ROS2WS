@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-09-29
+最后更新：2026-09-30
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -12,12 +12,18 @@
 - [官方 AMCL 代码导读](amcl_code_walkthrough.md)：从节点启动、地图和初始位姿，到粒子更新、激光模型和 `map -> odom` 发布的源码承接关系。
 - [规划代价地图](planning_costmap.md)：障碍膨胀、安全余量、A* 代价与 RViz 显示。
 
+## 当前单目标任务版本（2026-09-30）
+
+主入口已接入 `NavigateToPose -> ComputePathToPose -> FollowPath` Action 任务链、取消/抢占、原始激光融合重规划、有限失败期限、AMCL 主簇与定位质量门控、独立命令看门狗、统一任务暂停入口和 RViz 反馈/取消按钮。
+
+使用说明与边界见 [单目标导航任务](navigation_tasks.md)，本轮验证记录见 [实施报告](../logs/26-9-30/navigation_completion_implementation.md)。下方按日期保留以前的完成记录；旧记录中的测试数量和未完成项表示当时状态。
+
 ## 当前已完成
 
 - `mini_nav_core`
   - 二维静态代价地图 `Costmap2D`。
   - 栅格坐标与世界坐标之间的转换。
-  - 四邻域 A* 全局路径规划。
+  - 八邻域 A*、连续车体安全校验、平滑路径和容差内最近可达终点。
   - 静态障碍物膨胀、安全区与软代价 A* 规划。
   - 代价地图与 A* 规划器的单元测试。
   - `localization/` 中的 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`。
@@ -33,6 +39,12 @@
   - 已有 RViz 配置可显示静态地图、全局路径和地图坐标轴。
 
 ## 本次完成记录
+
+### 默认地图切换（2026-09-30）
+
+- 默认地图改为 `scripts/run_nav2_case.sh` 第一个 `learning` 案例使用的 `tb3_learning.yaml/pgm`，原样复制到 `mini_nav_bringup/maps/`；地图为 `112 × 103`、`0.05 m/格`，原点为 `(-0.961, -2.072)`。
+- 自研定位入口、官方定位对照入口与独立 A* 脚本统一使用新地图；两套 launch 继续支持 `map:=...` 覆盖。
+- `mini_nav_bringup` 构建、两套 launch 的 `--show-args`、Python/Bash 语法及源码/安装地图一致性检查通过；该资源包的 `colcon test` 未发现注册测试（0 项）。本轮未启动 Gazebo 或运动节点，新地图上的定位和导航效果尚未验收。
 
 ### 完成日期：2026-08-22
 
@@ -85,7 +97,7 @@
 ### 静态规划代价地图（2026-09-28）
 
 - 在当前代码提交基线 `ff6e4d2` 后，参考已下载的 Jazzy Nav2 `InflationLayer` 和 Smac 2D 代价公式，实现 ROS 无关的障碍膨胀与软代价 A*。
-- 按 Waffle 碰撞盒最远角点约 0.238 m，默认取 0.24 m 机器人半径加 0.05 m 安全余量形成禁行区；确定障碍至 0.45 m 处形成渐变代价，未知格周围的硬安全带由 `inflate_around_unknown` 控制；原始 `/map` 不变，发布独立 `/mini_nav/planning_costmap` 供 RViz 查看。
+- 按 Waffle 碰撞盒最远角点约 0.238 m，默认取 0.24 m 机器人半径加 0.02 m 安全余量形成禁行区；确定障碍至 0.45 m 处形成渐变代价，未知格周围的硬安全带由 `inflate_around_unknown` 控制；原始 `/map` 不变，发布独立 `/mini_nav/planning_costmap` 供 RViz 查看。
 - 两套定位加 A* 的 launch 加载 `planning_costmap.yaml`；三包构建和两套 launch 的 `--show-args` 已通过。
 - 本次未运行单元测试或 Gazebo 运动验收；车体余量与实际通道宽度仍需结合仿真调整。
 
@@ -96,6 +108,14 @@
 - `planning.max_pose_age` 默认 1.0 s；`base_frame_id`、`odom_frame_id` 可按 TF 树配置。
 - 无机器人 TF 的独立 A* 演示显式启用手选起点参数；两套定位入口保持默认 TF 起点。
 - 节点及 bringup 包已构建通过；尚未做 Gazebo 移动车辆后的路径、安全间距验收，也未运行本次改动的测试。
+
+### 生命周期链路与滚动局部图验收（2026-09-29）
+
+- 自研 AMCL 在 activate 时建立与 Nav2 lifecycle_manager 的 bond，在 deactivate、cleanup、shutdown 和 ROS context 预关闭时释放。隔离域中的管理器日志确认 `Server amcl connected with bond`、`Managed nodes are active`；Ctrl+C 后 AMCL 与管理器均正常退出。
+- 修复滚动图整格边界的浮点截断误差，保留“累计位移满一格才滚动”的规则；新增正反方向边界回归测试。运行 `colcon build --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup` 和对应三包 `colcon test`，汇总为 86 项测试、0 错误、0 失败。
+- 在隔离的 Gazebo 无界面服务端启动官方 Waffle、ROS 桥、map_server、自研 AMCL、规划图与局部图节点。临时障碍加入时，前向扫描约 0.96 m，局部图 `(0.9, 0)` 的占据值由 51 升至 100；移走后扫描恢复无有限返回，该格回到 51。
+- 机器人前进约 0.294 m 后，4 m 局部窗口的 x 原点由 -2.00 m 移至 -1.75 m，仍为有效图；以上过程 `/map` 的 CRC32 始终为 `3708318207`。仅切断 `/scan` 而保持 `/clock`、`/odom` 时，`/mini_nav/local_costmap_valid` 变为 `false`，80 × 80 个栅格全部恢复为未知。
+- 验收使用无界面 Gazebo；图形版 Gazebo/RViz 的窗口显示未在本轮验收。当前局部图已能感知和清除动态障碍，但尚未接入路径执行与安全停车。
 
 ### M1：自研定位核心（2026-08-27）
 
@@ -111,11 +131,11 @@
 
 - Gazebo 长时间运动下的 AMCL 粒子收敛指标、定位误差和丢失恢复验证。
 - 路径跟踪、碰撞规避、恢复行为和 `/cmd_vel` 速度控制。
-- 动态代价地图更新、动态障碍处理和局部避障。
+- 局部图的障碍更新已独立验收；尚未接入路径执行时的局部避障和安全停车。
 
 因此，当前阶段不能把 `/mini_nav/global_path` 视为机器人可执行轨迹。
 
-现有 `maps/turtlebot3_map.yaml` 已接入官方 map_server 和自研 AMCL，初始位姿、激光、TF 和 `map -> odom` 基础链路已验证，低速 teleop 下的 TF 连续刷新也已通过；仍需用长时间和可量化的运动轨迹评估定位误差、收敛速度和丢失恢复能力。
+原 `maps/turtlebot3_map.yaml` 已接入官方 map_server 和自研 AMCL，初始位姿、激光、TF 和 `map -> odom` 基础链路已验证，低速 teleop 下的 TF 连续刷新也已通过；仍需用长时间和可量化的运动轨迹评估定位误差、收敛速度和丢失恢复能力。
 
 ## 下一里程碑：路径跟踪与安全停止
 
@@ -139,9 +159,91 @@
 2. **仿真接口基座**（已完成）：Waffle、时钟、TF、里程计、激光与速度接口。
 3. **定位与坐标系**（官方入口、自研基础链路和 TF 平滑刷新已验证）：继续量化评估 `map -> odom -> base_*` 链路下的定位误差、收敛和丢失恢复。
 4. **路径跟踪与安全停止**：将路径转换为受限速度命令，并加入目标到达、超时和零速度保护。
-5. **代价地图与障碍处理**：利用激光数据构建局部代价地图。
+5. **代价地图与障碍处理**（局部图构建与 Gazebo 验收已完成）：后续接入局部避障和安全停车。
 6. **官方 Nav2 对照**：将自研模块与 `nav2_learning` 的 AMCL、规划、控制和恢复行为逐项比较。
 
 ## 验收记录方式
 
 每完成一个里程碑，在本文件补充：完成日期、启动命令、验证过的话题/TF、测试结果、已知限制，以及下一步的唯一目标。
+
+
+## 2026-09-30：提高速度与不可达目标容差
+
+本次在已有路径跟踪器上调整配置，并扩展自研 A* 的目标选择；保持原有安全检查。
+当前完整能力与缺口以 `logs/26-9-30/navigation_gap_research.md` 的代码核查为准，
+上文早期阶段描述不代表当前路径跟踪器尚未实现。
+
+- `path_follower.yaml`：线速度上限从 0.10 提高到 0.15 m/s，角速度上限从
+  0.40 提高到 0.55 rad/s，接近目标、转弯减速和安全停车逻辑保持有效。
+- `planning.goal_tolerance` 默认 0.5 m，0 禁用。参考官方 Jazzy
+  [NavFnPlanner::makePlan](https://github.com/ros-navigation/navigation2/blob/f4108e5b1c2bce804a1aa0c7be6673a8eb4a1501/nav2_navfn_planner/src/navfn_planner.cpp#L274-L310)，
+  先规划原目标；原目标不可达时选容差半径内最近、从起点实际可达的安全格。
+  使用目标格中心和欧氏距离，保留用户朝向，以替代终点判断到达；仍拒绝越界目标。
+- 硬代价格、未知格、斜向穿角与连续车体扫掠规则均未放宽；容差内无路则清空路径。
+
+验证命令（均在工作区根目录，先加载 Jazzy，构建后加载 overlay）：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup
+source install/setup.bash
+colcon test --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup --event-handlers console_cohesion+
+colcon test-result --verbose
+```
+
+三个包构建通过。本次实际执行 7 个 CTest 目标、45 个 gtest 用例，全部通过，
+其中 A* 共 10 个用例（本次新增 9 个），包含替代终点被跟踪器判定到达并停车的联动验证。
+bringup 是资源包，无测试用例。`colcon test-result` 汇总显示 101 项、0 失败；
+该汇总包含历史残留 XML，本次执行数采用当前 CTest 清单及对应新 XML，不能视为本次执行了 101 项。
+
+隔离 ROS 节点验证使用域 208/209，并将控制器 `/cmd_vel` 重映射到测试话题，
+未连接真实底盘或 Gazebo：障碍目标被替代为偏移 0.3606 m 的安全终点且朝向保留，
+原目标可达时不替换，容差内无安全点时发布空路径；实际输出达到 0.15 m/s、
+0.55 rad/s，局部障碍仍触发零速度与 `collision_risk`。
+`tb3_learning` 新地图（112×103）也通过硬安全区目标替换，样例偏移 0.05 m，
+单次选点到路径发布约 0.002 s；该数值仅是本次样例耗时，不是普遍性能保证。
+
+尚未验证：新速度下 Gazebo 连续行驶的到达率、定位误差和转弯表现。
+配置在启动时读取，需重启导航入口使其生效。
+
+
+## 2026-09-30：修复接近终点时的 collision_risk 误停
+
+跟踪器改为先计算候选速度，再对最多 1 秒且不超过前视距离的实际运动做连续碰撞检查。
+每步不超过 0.05 秒，并计入圆弧到弦的偏离上界；原地转向保留当前位置检查。
+车体硬安全半径、目标容差、限速及失效停车规则保留。
+
+三个包构建成功，当前实际执行的 51 个 gtest 用例全部通过。
+修复前 84/84 帧真实快照误停，修复后同一输入为 0/84。
+实际 ROS 跟踪节点在隔离域中接入采集地图、路径及运动学反馈，完成到达和零速停车；
+真实运动方向的障碍仍触发停车。
+自动重启原进程的操作被审批阻止，未执行。随后只读核实后台已更换为修复版实例，
+当前一轮 Gazebo 导航达到 `goal_reached` 并零速停车：位置误差 0.1133 m，朝向误差 0.1331 rad。
+这一轮目标与原卡住目标不同，原位置以快照回归和隔离闭环验证为准；尚未完成长期固定路线验收。
+详情见 `logs/26-9-30/collision_risk_fix_report.md`。
+
+
+## 2026-09-30：RViz 常驻导航状态面板
+
+新增独立包 `mini_nav_rviz_plugins`，通过 RViz Panel/pluginlib 提供中文只读监控。
+`localization_astar.rviz` 默认在右侧加载“导航状态”，显示控制器状态及原因、
+指令线/角速度、局部感知和连接超时；原有显示层、话题和相机视角保留。
+控制器消息超过 2 秒无更新时显示失联，速度和局部感知超过 1 秒显示超时。
+两个包构建通过，1 个真实 RViz/ROS 集成用例通过；bringup 无测试用例。
+实际后台采样显示到达、零速、感知有效，右侧停靠可见。
+临时完整窗口验收发现独立的 DDS 动态库卸载崩溃，修改前配置亦复现；
+隔离面板测试正常退出，未修改工程 RMW 设置，完整窗口正常退出验收仍有限制。
+报告及截图：`logs/26-9-30/rviz_navigation_status_panel.md`。
+后续导航入口自动加载面板，当前旧 RViz 需重新加载工作区环境并重开。
+
+
+## 2026-09-30：完整导航入口内置环境
+
+`mini_localization_astar.launch.py` 默认设置域 61、Gazebo 分区 `mini_nav`、
+Cyclone DDS 和 Waffle，无需在完整启动命令里逐项 export。
+新增 `ros_domain_id`、`gz_partition`、`rmw_implementation` 参数用于覆盖默认值。
+环境动作在包含仿真入口和创建节点之前执行，原有导航节点、地图和 RViz 配置保留。
+资源包构建、Python 语法、安装入口 `--show-args` 和真实子进程环境继承验证通过；
+bringup 无测试用例，本轮未重启模拟导航或重复算法测试。
+其他终端观察话题仍须使用同一 ROS 域/RMW。
+启动命令与证据见 `logs/26-9-30/launch_environment_update.md`。

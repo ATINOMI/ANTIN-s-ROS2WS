@@ -1,3 +1,9 @@
+/**
+ * @file costmap_2d.cpp
+ * @brief ROS 无关二维代价图、坐标换算和栅格绘制。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 /* Includes ----------------------------------------------------------------*/
 #include "mini_nav_core/map/costmap_2d.hpp"
 
@@ -11,6 +17,17 @@ namespace mini_nav_core
 {
     /* Constructor ---------------------------------------------------------*/
     // 初始化地图几何信息，并将所有栅格填充为默认代价。
+    /**
+     * @brief 创建一张指定尺寸和分辨率的代价地图。
+     * @param cells_size_x x 方向的栅格数量。
+     * @param cells_size_y y 方向的栅格数量。
+     * @param resolution 每个栅格边长，单位为米。
+     * @param origin_x 地图左下角在世界坐标系中的 x 坐标，单位为米。
+     * @param origin_y 地图左下角在世界坐标系中的 y 坐标，单位为米。
+     * @param default_value 新建栅格的默认代价值。
+     *
+     * @throw std::invalid_argument；地图过大时抛出 std::length_error。
+     */
     Costmap2D::Costmap2D(
                 unsigned int cells_size_x,
                 unsigned int cells_size_y,
@@ -30,6 +47,16 @@ namespace mini_nav_core
 
 /*  Function implementations ----------------------------------------------*/
     // 重建底层数组；旧地图的代价会恢复为 default_value_。
+    /**
+     * @brief 调整地图尺寸和坐标信息，并用默认代价值重建全部栅格。
+     * @param size_x x 方向的栅格数量。
+     * @param size_y y 方向的栅格数量。
+     * @param resolution 每个栅格边长，单位为米。
+     * @param origin_x 地图左下角的世界 x 坐标，单位为米。
+     * @param origin_y 地图左下角的世界 y 坐标，单位为米。
+     *
+     * @throw std::invalid_argument；地图过大时抛出 std::length_error。
+     */
     void Costmap2D::ResizeMap(
                 unsigned int size_x,
                 unsigned int size_y,
@@ -46,6 +73,14 @@ namespace mini_nav_core
 
     /* Cell cost access --------------------------------------------------------*/
     // 二维坐标先转换为一维下标，再读取对应栅格。
+    /**
+     * @brief 读取指定二维栅格的代价。
+     *
+     * @param mx x 格下标。
+     * @param my y 格下标。
+     * @return 0..255 代价。
+     * @throws std::out_of_range 格坐标越界。
+     */
     unsigned char Costmap2D::GetCost(unsigned int mx, unsigned int my) const
     {
 
@@ -59,6 +94,13 @@ namespace mini_nav_core
     }
 
     // 调用方已持有一维下标时，可以直接读取底层数组。
+    /**
+     * @brief 读取按行存储的一维格索引的代价。
+     *
+     * @param index 一维存储索引。
+     * @return 0..255 代价。
+     * @throws std::out_of_range 索引越界。
+     */
     unsigned char Costmap2D::GetCost(unsigned int index) const
     {
 
@@ -72,6 +114,14 @@ namespace mini_nav_core
     }
 
     // 二维坐标先转换为一维下标，再写入新的代价。
+    /**
+     * @brief 设置指定地图栅格的代价值。
+     * @param mx 栅格的 x 下标。
+     * @param my 栅格的 y 下标。
+     * @param cost 要写入的代价值。
+     *
+     * @throw std::out_of_range；mx、my 不在地图范围内时抛出。
+     */
     void Costmap2D::SetCost(unsigned int mx, unsigned int my, unsigned char cost)
     {
         // 检查栅格坐标是否在地图范围内，避免越界写入。
@@ -85,12 +135,24 @@ namespace mini_nav_core
 
     /* Map drawing -------------------------------------------------------------*/
     // 将全部栅格写为同一代价，适合清空或重置地图。
+    /**
+     * @brief 用指定代价填充整张地图。
+     * @param cost 要写入全部栅格的代价值。
+     */
     void Costmap2D::Fill(unsigned char cost)
     {
         costmap_.assign(costmap_.size(), cost);
     }
 
     // 使用 Bresenham 算法连接两个端点，水平、竖直和斜向线段都适用。
+    /**
+     * @brief 绘制一条包含起点和终点且四邻域连续的栅格直线。
+     * @param start 直线起点的栅格坐标。
+     * @param end 直线终点的栅格坐标。
+     * @param cost 要写入直线上全部栅格的代价值。
+     *
+     * @throw std::out_of_range；任一端点不在地图范围内时抛出。
+     */
     void Costmap2D::DrawLine(
         const MapLocation & start,
         const MapLocation & end,
@@ -143,6 +205,15 @@ namespace mini_nav_core
     }
 
     // 填充由两个角点界定的所有栅格，角点传入顺序不影响结果。
+    /**
+     * @brief 填充两个包含端点围成的矩形区域。
+     * @param first 矩形的一个角点。
+     * @param second 矩形的另一个角点。
+     * @param cost 要写入矩形内全部栅格的代价值。
+     *
+     * 角点传入顺序不限。
+     * @throw std::out_of_range；任一角点不在地图范围内时抛出。
+     */
     void Costmap2D::FillRectangle(
         const MapLocation & first,
         const MapLocation & second,
@@ -173,11 +244,25 @@ namespace mini_nav_core
 
     /* Coordinate and index queries ------------------------------------------*/
     // 统一坐标边界判断，供访问、绘制和查询接口复用。
+    /**
+     * @brief 检查给定的栅格坐标是否在地图范围内。
+     * @param mx 栅格的 x 下标。
+     * @param my 栅格的 y 下标。
+     * @return 栅格在地图范围内时返回 true，否则返回 false。
+     */
     bool Costmap2D::IsInBounds(unsigned int mx, unsigned int my) const
     {
         return mx < size_x_ && my < size_y_;
     }
 
+    /**
+     * @brief 将二维栅格坐标转换为按行存储的一维下标。
+     * @param mx 栅格的 x 下标。
+     * @param my 栅格的 y 下标。
+     * @param index 返回对应的一维下标。
+     * @return 坐标在地图范围内时返回 true，否则返回 false。
+     *        返回 false 时不修改 index。
+     */
     bool Costmap2D::MapToIndex(
         unsigned int mx,
         unsigned int my,
@@ -192,6 +277,13 @@ namespace mini_nav_core
         return true;
     }
 
+    /**
+     * @brief 将按行存储的一维下标转换为栅格坐标。
+     * @param index 一维数组下标。
+     * @param location 返回对应的栅格坐标。
+     * @return 下标在地图范围内时返回 true，否则返回 false。
+     *        返回 false 时不修改 location。
+     */
     bool Costmap2D::IndexToMap(std::size_t index, MapLocation & location) const
     {
         if (index >= costmap_.size()) {
@@ -204,6 +296,9 @@ namespace mini_nav_core
         return true;
     }
 
+    /** @brief 获取地图中栅格的总数。
+     * @return 地图总格数。
+     */
     std::size_t Costmap2D::GetCellCount() const
     {
         return costmap_.size();
@@ -213,6 +308,14 @@ namespace mini_nav_core
      将地图栅格坐标转换为世界坐标，输出坐标位于栅格中心。
      加上 0.5，使输出坐标落在栅格中心而不是左下角边界。
     */
+    /**
+     * @brief 将地图栅格坐标转换为世界坐标。
+     * @param mx 栅格的 x 下标。
+     * @param my 栅格的 y 下标。
+     * @param wx 返回对应栅格中心的世界 x 坐标，单位为米。
+     * @param wy 返回对应栅格中心的世界 y 坐标，单位为米。
+     * @throw std::out_of_range；mx、my 不在地图范围内时抛出。
+     */
     void Costmap2D::MapToWorld(unsigned int mx,
                             unsigned int my,
                             double & wx,
@@ -229,9 +332,18 @@ namespace mini_nav_core
     }
 
     /*
-     将世界坐标转换为地图栅格坐标，输出坐标为栅格左下角。
+     将世界坐标转换为包含该点的栅格下标；不输出世界坐标。
      先检查输入坐标是否在地图范围内，再进行浮点运算和类型转换。
     */
+    /**
+     * @brief 将世界坐标转换为地图栅格坐标。
+     * @param wx 世界 x 坐标，单位为米。
+     * @param wy 世界 y 坐标，单位为米。
+     * @param mx 返回对应栅格的 x 下标。
+     * @param my 返回对应栅格的 y 下标。
+     * @return 坐标在地图合法范围内时返回 true，否则返回 false。
+     *        返回 false 时不修改 mx、my。
+     */
     bool Costmap2D::WorldToMap(double wx,
                             double wy,
                             unsigned int & mx,
@@ -270,27 +382,44 @@ namespace mini_nav_core
     *  返回地图原点在 x 方向的坐标  |   返回地图原点在 y 方向的坐标
     *
     */
+    /**
+     * @brief 查询地图宽度。
+     * @return x 方向格数。
+     */
     unsigned int Costmap2D::GetSizeInCellsX() const
     {
         return size_x_;
     }
 
+    /**
+     * @brief 查询地图高度。
+     * @return y 方向格数。
+     */
     unsigned int Costmap2D::GetSizeInCellsY() const
     {
         return size_y_;
     }
 
     //
+    /** @brief 获取地图原点的世界 x 坐标，单位为米。
+     * @return 地图左下角 x，米。
+     */
     double Costmap2D::GetOriginX() const
     {
         return origin_x_;
     }
 
+    /** @brief 获取地图原点的世界 y 坐标，单位为米。
+     * @return 地图左下角 y，米。
+     */
     double Costmap2D::GetOriginY() const
     {
         return origin_y_;
     }
 
+    /** @brief 获取地图分辨率，即每个栅格边长，单位为米。
+     * @return 每格边长，米。
+     */
     double Costmap2D::GetResolution() const
     {
         return resolution_;
@@ -299,6 +428,15 @@ namespace mini_nav_core
     /* Internal helpers --------------------------------------------------------*/
 
     // 构造和重置共用的地图建立流程，集中维护校验、分配和提交规则。
+    /**
+     * @brief 构造和重置共用的地图建立流程，
+     *        集中维护校验、分配和提交规则。
+     * @param size_x x 方向的栅格数量。
+     * @param size_y y 方向的栅格数量。
+     * @param resolution 每个栅格边长，单位为米。
+     * @param origin_x 地图左下角的世界 x 坐标，单位为米。
+     * @param origin_y 地图左下角的世界 y 坐标，单位为米。
+     */
     void Costmap2D::InitializeMap(
         unsigned int size_x,
         unsigned int size_y,
@@ -325,13 +463,27 @@ namespace mini_nav_core
     }
 
     // 将二维栅格坐标转换为一维数组下标，按行存储。
+    /**
+     * @brief 获取栅格坐标在按行存储数组中的下标。
+     * @param mx 栅格的 x 下标。
+     * @param my 栅格的 y 下标。
+     * @return 对应的一维数组下标。
+     */
     std::size_t Costmap2D::GetIndex(unsigned int mx, unsigned int my) const
     {
-        // 检查栅格坐标是否在地图范围内，避免越界访问。
+        // 本私有函数不检查边界；访问入口应先验证坐标。
         return static_cast<std::size_t>(my) * size_x_ + mx;
     }
 
     // 验证地图几何信息的有效性，避免无效尺寸和坐标进入后续计算。
+    /**
+     * @brief 校验地图几何信息的合法性。
+     * @param size_x x 方向的栅格数量。
+     * @param size_y y 方向的栅格数量。
+     * @param resolution 每个栅格边长，单位为米。
+     * @param origin_x 地图左下角的世界 x 坐标，单位为米。
+     * @param origin_y 地图左下角的世界 y 坐标，单位为米。
+     */
     void Costmap2D::ValidateGeometry(
         unsigned int size_x,
         unsigned int size_y,
@@ -344,7 +496,7 @@ namespace mini_nav_core
             throw std::invalid_argument("Costmap dimensions must be greater than zero");
         }
 
-        // 检查地图尺寸是否超过 std::size_t 的最大值，避免溢出。
+        // 分辨率必须为有限正数，保证坐标换算的除法有定义。
         if (!std::isfinite(resolution) || resolution <= 0.0) {
             throw std::invalid_argument("Costmap resolution must be finite and greater than zero");
         }
@@ -356,6 +508,12 @@ namespace mini_nav_core
     }
 
     // 计算地图中栅格的总数，并检查乘法溢出和容器容量。
+    /**
+     * @brief 计算地图中栅格的总数。
+     * @param size_x x 方向的栅格数量。
+     * @param size_y y 方向的栅格数量。
+     * @return 栅格总数。
+     */
     std::size_t Costmap2D::CalculateCellCount(unsigned int size_x, unsigned int size_y)
     {
         // 将 size_x 和 size_y 转换为 std::size_t 类型，避免乘法溢出。

@@ -13,6 +13,7 @@ add_library(${PROJECT_NAME}
   src/map/rolling_obstacle_grid.cpp
   src/navigator/astar_navigator.cpp
   src/navigator/path_postprocessor.cpp
+  src/navigator/path_tracker.cpp
   src/localization/localization_map.cpp
   src/localization/differential_motion_model.cpp
   src/localization/likelihood_field_model.cpp
@@ -54,6 +55,11 @@ if(BUILD_TESTING)
   ament_add_gtest(test_rolling_obstacle_grid test/test_rolling_obstacle_grid.cpp)
   if(TARGET test_rolling_obstacle_grid)
     target_link_libraries(test_rolling_obstacle_grid ${PROJECT_NAME})
+  endif()
+
+  ament_add_gtest(test_path_tracker test/test_path_tracker.cpp)
+  if(TARGET test_path_tracker)
+    target_link_libraries(test_path_tracker ${PROJECT_NAME})
   endif()
 
   ament_add_gtest(test_particle_filter test/test_particle_filter.cpp)

@@ -1,3 +1,10 @@
+/**
+ * @file test_localization_naming.cpp
+ * @brief 验证 localization_naming 模块行为及边界的测试。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -16,6 +23,9 @@ using mini_nav_core::localization::Particle;
 using mini_nav_core::localization::Pose2D;
 using mini_nav_core::localization::PoseBinIndex;
 
+/**
+ * @brief 验证位姿分箱在负坐标及边界处的归组。
+ */
 TEST(PoseBinIndex, GroupsPoseCoordinatesAtSemanticBoundaries)
 {
   PoseBinIndex index(0.5, mini_nav_core::localization::kPi / 2.0);
@@ -32,6 +42,9 @@ TEST(PoseBinIndex, GroupsPoseCoordinatesAtSemanticBoundaries)
   EXPECT_EQ(index.GetOccupiedBinCount(), 3U);
 }
 
+/**
+ * @brief 验证定位图空闲、占据、未知与图外距离查询。
+ */
 TEST(LocalizationMap, ExposesThreeStateCellsAndOutOfMapDistance)
 {
   Costmap2D costmap(3, 3, 1.0, 0.0, 0.0, 0);
@@ -52,6 +65,9 @@ TEST(LocalizationMap, ExposesThreeStateCellsAndOutOfMapDistance)
   EXPECT_DOUBLE_EQ(map.GetObstacleDistanceAtWorld(-0.1, 0.5), 5.0);
 }
 
+/**
+ * @brief 验证非有限位姿不能进入分箱索引。
+ */
 TEST(PoseBinIndex, RejectsNonFinitePoseCoordinates)
 {
   PoseBinIndex index;
@@ -61,6 +77,9 @@ TEST(PoseBinIndex, RejectsNonFinitePoseCoordinates)
   EXPECT_THROW(index.BuildPoseBinIndex(particles), std::invalid_argument);
 }
 
+/**
+ * @brief 验证 Beam 模型拒绝全零及负混合权重。
+ */
 TEST(BeamModel, RejectsInvalidMixtureWeights)
 {
   EXPECT_THROW(
@@ -69,4 +88,36 @@ TEST(BeamModel, RejectsInvalidMixtureWeights)
   EXPECT_THROW(
     mini_nav_core::localization::BeamModel(-0.1, 0.2, 0.2, 0.6, 0.2, 0.1, 10U),
     std::invalid_argument);
+}
+
+/**
+ * @brief 验证零权重分箱不桥接两个定位假设。
+ */
+TEST(PoseBinIndex, DominantHypothesisDoesNotBridgeDisconnectedModes)
+{
+    PoseBinIndex bins;
+    const std::vector<Particle> particles{
+        {{0.0, 0.0, 0.0}, 0.4}, {{0.5, 0.0, 0.0}, 0.35},
+        {{1.0, 0.0, 0.0}, 0.0}, {{1.5, 0.0, 0.0}, 0.0},
+        {{2.0, 0.0, 0.0}, 0.25}};
+    bins.Build(particles);
+    const auto mode = bins.GetDominantParticleIndices(particles);
+    ASSERT_EQ(mode.size(), 2u);
+    EXPECT_NE(std::find(mode.begin(), mode.end(), 0u), mode.end());
+    EXPECT_NE(std::find(mode.begin(), mode.end(), 1u), mode.end());
+}
+
+/**
+ * @brief 验证偏航 ±π 两侧主簇按周期邻接。
+ */
+TEST(PoseBinIndex, ConnectsYawAcrossMinusPiAndPi)
+{
+    PoseBinIndex bins;
+    const std::vector<Particle> particles{
+        {{0.0, 0.0, 3.13}, 0.4}, {{0.0, 0.0, -3.13}, 0.4}, {{0.0, 0.0, 0.0}, 0.2}};
+    bins.Build(particles);
+    const auto mode = bins.GetDominantParticleIndices(particles);
+    ASSERT_EQ(mode.size(), 2u);
+    EXPECT_NE(std::find(mode.begin(), mode.end(), 0u), mode.end());
+    EXPECT_NE(std::find(mode.begin(), mode.end(), 1u), mode.end());
 }

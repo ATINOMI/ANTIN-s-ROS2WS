@@ -1,8 +1,13 @@
+"""组合 Waffle 仿真、自研定位、规划、跟踪、任务管理及独立速度看门狗。
+
+资源从 package-share 查找；运行时参数由 launch 声明并解析。
+"""
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -10,8 +15,19 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    """建立启动描述。
+
+    Returns:
+        LaunchDescription: 节点、包含入口与参数声明组成的启动描述。
+
+    Note:
+        调用只构建动作描述；节点进程由 launch 执行动作时启动。
+    """
     bringup_share = get_package_share_directory("mini_nav_bringup")
 
+    ros_domain_id = LaunchConfiguration("ros_domain_id")
+    gz_partition = LaunchConfiguration("gz_partition")
+    rmw_implementation = LaunchConfiguration("rmw_implementation")
     use_sim_time = LaunchConfiguration("use_sim_time")
     map_file = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")
@@ -22,6 +38,28 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
+            "ros_domain_id",
+            default_value="61",
+            description="ROS domain shared by all nodes in this navigation example.",
+        ),
+        DeclareLaunchArgument(
+            "gz_partition",
+            default_value="mini_nav",
+            description="Gazebo transport partition for this navigation example.",
+        ),
+        DeclareLaunchArgument(
+            "rmw_implementation",
+            default_value="rmw_cyclonedds_cpp",
+            description="ROS middleware used by all nodes in this navigation example.",
+        ),
+        # 在包含仿真入口和启动节点之前设置，让所有子进程使用同一环境。
+        SetEnvironmentVariable("ROS_DOMAIN_ID", ros_domain_id),
+        SetEnvironmentVariable("GZ_PARTITION", gz_partition),
+        SetEnvironmentVariable("RMW_IMPLEMENTATION", rmw_implementation),
+        SetEnvironmentVariable("TURTLEBOT3_MODEL", "waffle"),
+        DeclareLaunchArgument("use_simulator", default_value="true"),
+        DeclareLaunchArgument("use_rviz", default_value="true"),
+        DeclareLaunchArgument(
             "use_sim_time",
             default_value="true",
             description="Use the Gazebo simulation clock.",
@@ -29,7 +67,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "map",
             default_value=os.path.join(
-                bringup_share, "maps", "turtlebot3_map.yaml"
+                bringup_share, "maps", "tb3_learning.yaml"
             ),
             description="Map YAML file used by the official map_server.",
         ),
@@ -64,6 +102,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(bringup_share, "launch", "waffle_sim.launch.py")
             ),
+            condition=IfCondition(LaunchConfiguration("use_simulator")),
             launch_arguments={
                 "use_sim_time": use_sim_time,
                 "x_pose": x_pose,
@@ -113,6 +152,8 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                     "map_topic": "/map",
                     "map_file": "",
+                    "enable_topic_goals": False,
+                    "fuse_local_obstacles": True,
                     "planning.inflate_around_unknown": ParameterValue(
                         inflate_around_unknown, value_type=bool
                     ),
@@ -135,6 +176,29 @@ def generate_launch_description():
             ],
         ),
         Node(
+            package="mini_nav_nodes",
+            executable="path_follower_node",
+            name="path_follower",
+            output="screen",
+            parameters=[
+                os.path.join(bringup_share, "config", "path_follower.yaml"),
+                {"use_sim_time": use_sim_time, "action_mode": True,
+                 "require_localization_quality": True, "cmd_vel_topic": "/mini_nav/cmd_vel_raw"},
+            ],
+        ),
+        Node(
+            package="mini_nav_nodes", executable="navigation_manager_node",
+            name="navigation_manager", output="screen",
+            parameters=[os.path.join(bringup_share, "config", "navigation_manager.yaml"),
+                        {"use_sim_time": use_sim_time, "enabled": ParameterValue(autostart, value_type=bool)}],
+        ),
+        Node(
+            package="mini_nav_nodes", executable="velocity_guard_node",
+            name="velocity_guard", output="screen",
+            parameters=[{"use_sim_time": use_sim_time, "command_timeout": 0.35}],
+        ),
+        Node(
+            condition=IfCondition(LaunchConfiguration("use_rviz")),
             package="rviz2",
             executable="rviz2",
             name="rviz2",

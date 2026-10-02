@@ -1,3 +1,9 @@
+/**
+ * @file test_costmap_2d.cpp
+ * @brief 验证 costmap_2d 模块行为及边界的测试。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 /* Includes ----------------------------------------------------------------*/
 #include <limits>
 #include <stdexcept>
@@ -11,6 +17,9 @@ using mini_nav_core::MapLocation;
 
 /* Test cases --------------------------------------------------------------*/
 // 验证构造函数是否保存地图元数据，并用默认代价填充全部栅格。
+/**
+ * @brief 验证地图构造初始化几何与默认代价。
+ */
 TEST(Costmap2D, ConstructorInitializesMetadataAndCells)
 {
   // 地图：4 × 3 格，每格 0.5 m，世界坐标原点为 (-1, -2)。
@@ -29,6 +38,9 @@ TEST(Costmap2D, ConstructorInitializesMetadataAndCells)
 }
 
 // 验证写入一个格子不会意外修改其他格子。
+/**
+ * @brief 验证代价写入只影响指定栅格。
+ */
 TEST(Costmap2D, SetCostChangesOnlyTargetCell)
 {
   Costmap2D map(4, 3, 0.5, -1.0, -2.0, 7);
@@ -44,6 +56,9 @@ TEST(Costmap2D, SetCostChangesOnlyTargetCell)
 }
 
 // 验证格子坐标转换为该格子的世界坐标中心点。
+/**
+ * @brief 验证栅格转换输出格中心米制坐标。
+ */
 TEST(Costmap2D, MapToWorldReturnsCellCenter)
 {
   Costmap2D map(4, 3, 0.5, -1.0, -2.0);
@@ -58,6 +73,9 @@ TEST(Costmap2D, MapToWorldReturnsCellCenter)
 }
 
 // 验证世界坐标到地图坐标的转换，以及地图边界判定。
+/**
+ * @brief 验证米制坐标换算与图边界拒绝。
+ */
 TEST(Costmap2D, WorldToMapConvertsCoordinatesAndChecksBounds)
 {
   Costmap2D map(4, 3, 0.5, -1.0, -2.0);
@@ -75,6 +93,9 @@ TEST(Costmap2D, WorldToMapConvertsCoordinatesAndChecksBounds)
 }
 
 // 验证 ResizeMap 会替换旧地图，并把所有新栅格恢复为默认代价。
+/**
+ * @brief 验证调整地图后全部格恢复默认代价。
+ */
 TEST(Costmap2D, ResizeMapResetsCellsToDefaultValue)
 {
   Costmap2D map(3, 2, 0.5, -1.0, -2.0, 7);
@@ -97,6 +118,9 @@ TEST(Costmap2D, ResizeMapResetsCellsToDefaultValue)
 }
 
 // 验证全图填充、直线绘制和矩形填充的结果。
+/**
+ * @brief 验证直线与矩形绘图的格覆盖。
+ */
 TEST(Costmap2D, DrawsCommonMapPrimitives)
 {
   Costmap2D map(5, 5, 1.0, 0.0, 0.0, 7);
@@ -120,6 +144,9 @@ TEST(Costmap2D, DrawsCommonMapPrimitives)
 }
 
 // 验证坐标和一维下标可以双向转换，并正确报告非法输入。
+/**
+ * @brief 验证格坐标与按行索引的双向转换。
+ */
 TEST(Costmap2D, ConvertsBetweenMapCoordinatesAndIndices)
 {
   Costmap2D map(4, 3, 1.0, 0.0, 0.0);
@@ -143,6 +170,9 @@ TEST(Costmap2D, ConvertsBetweenMapCoordinatesAndIndices)
 }
 
 // 验证绘制范围越界时不会修改已经存在的地图数据。
+/**
+ * @brief 验证非法绘图被拒绝且地图内容不变。
+ */
 TEST(Costmap2D, RejectsInvalidDrawingWithoutChangingMap)
 {
   Costmap2D map(4, 3, 1.0, 0.0, 0.0, 7);
@@ -155,6 +185,9 @@ TEST(Costmap2D, RejectsInvalidDrawingWithoutChangingMap)
 }
 
 // 验证非法输入会明确失败，且失败不会破坏已有地图数据。
+/**
+ * @brief 验证地图参数非法时保留原地图。
+ */
 TEST(Costmap2D, RejectsInvalidInputAndPreservesMap)
 {
   Costmap2D map(3, 2, 0.5, -1.0, -2.0, 7);

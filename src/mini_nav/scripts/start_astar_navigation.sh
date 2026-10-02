@@ -5,7 +5,7 @@ set -eo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workspace_dir="$(cd "${script_dir}/../../.." && pwd)"
 rviz_config="${script_dir}/../rviz/astar_navigation.rviz"
-map_yaml="${workspace_dir}/maps/turtlebot3_map.yaml"
+map_yaml="${script_dir}/../mini_nav_bringup/maps/tb3_learning.yaml"
 ros_setup="/opt/ros/jazzy/setup.bash"
 
 if [[ ! -f "${ros_setup}" ]]; then

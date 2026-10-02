@@ -1,3 +1,9 @@
+/**
+ * @file amcl_node.cpp
+ * @brief 自研 AMCL 生命周期、消息适配、质量心跳及动态 TF。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 #include "mini_nav_nodes/amcl_node.hpp"
 
 #include <algorithm>
@@ -22,6 +28,12 @@ namespace mini_nav_nodes
 
 namespace
 {
+/**
+ * @brief 移除参考帧名开头的全部斜杠。
+ *
+ * @param frame 输入帧名副本。
+ * @return 不含前导斜杠的帧名；全斜杠输入变为空串。
+ */
 std::string StripLeadingSlash(std::string frame)
 {
   while (!frame.empty() && frame.front() == '/') {
@@ -30,6 +42,12 @@ std::string StripLeadingSlash(std::string frame)
   return frame;
 }
 
+/**
+ * @brief 将平面偏航角转换为 ROS 四元数。
+ *
+ * @param yaw 偏航弧度。
+ * @return roll、pitch 为零的四元数。
+ */
 geometry_msgs::msg::Quaternion QuaternionFromYaw(double yaw)
 {
   tf2::Quaternion quaternion;
@@ -39,9 +57,30 @@ geometry_msgs::msg::Quaternion QuaternionFromYaw(double yaw)
 
 }  // namespace
 
+/**
+ * @brief 声明定位参数与质量心跳，延迟到 configure 阶段建立滤波资源。
+ *
+ * 部分 Nav2 风格参数仅为加载兼容而声明，不代表 beam-skip 或位姿持久化已实现。
+ *
+ * @param options ROS 节点选项及参数覆盖。
+ * @throws std::invalid_argument 定位质量阈值不合法。
+ */
 AmclNode::AmclNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("amcl", options)
 {
+  quality_publisher_ = rclcpp::create_publisher<std_msgs::msg::Bool>(
+    *this,
+    "/mini_nav/localization_valid", rclcpp::QoS(1).reliable());
+  quality_timer_ = create_wall_timer(std::chrono::milliseconds(100), [this]() { publishQuality(); });
+  quality_max_scan_age_ = declare_parameter<double>("quality.max_scan_age", 0.8);
+  quality_min_mass_ = declare_parameter<double>("quality.min_hypothesis_mass", 0.6);
+  quality_max_position_variance_ = declare_parameter<double>("quality.max_position_variance", 0.25);
+  quality_max_yaw_variance_ = declare_parameter<double>("quality.max_yaw_variance", 0.35);
+  if (!std::isfinite(quality_max_scan_age_) || quality_max_scan_age_ <= 0.0 ||
+      !std::isfinite(quality_min_mass_) || quality_min_mass_ <= 0.0 || quality_min_mass_ > 1.0 ||
+      !std::isfinite(quality_max_position_variance_) || quality_max_position_variance_ <= 0.0 ||
+      !std::isfinite(quality_max_yaw_variance_) || quality_max_yaw_variance_ <= 0.0)
+      throw std::invalid_argument("Invalid localization quality limits");
   declare_parameter<std::string>("global_frame_id", "map");
   declare_parameter<std::string>("odom_frame_id", "odom");
   declare_parameter<std::string>("base_frame_id", "base_footprint");
@@ -89,13 +128,31 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
   declare_parameter<double>("initial_pose.y", 0.0);
   declare_parameter<double>("initial_pose.z", 0.0);
   declare_parameter<double>("initial_pose.yaw", 0.0);
+  // bondcpp 的定时器必须在 ROS context 关闭前释放。
+  bond_shutdown_callback_handle_ = std::make_unique<rclcpp::PreShutdownCallbackHandle>(
+    get_node_base_interface()->get_context()->add_pre_shutdown_callback([this]() {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      bond_.reset();
+    }));
 }
 
+/**
+ * @brief 撤销 context 预关闭回调、释放 bond 并断开激光过滤器连接。
+ */
 AmclNode::~AmclNode()
 {
+  get_node_base_interface()->get_context()->remove_pre_shutdown_callback(
+    *bond_shutdown_callback_handle_);
+  bond_.reset();
   laser_connection_.disconnect();
 }
 
+/**
+ * @brief 读取参数并建立回调组、TF、滤波器、通信和服务。
+ *
+ * @note 无名参数（state）：生命周期转换前状态；当前实现不使用此值。
+ * @return 初始化成功为 SUCCESS；捕获到标准异常时为 FAILURE。
+ */
 AmclNode::CallbackReturn AmclNode::on_configure(const rclcpp_lifecycle::State &)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -114,6 +171,12 @@ AmclNode::CallbackReturn AmclNode::on_configure(const rclcpp_lifecycle::State &)
   return CallbackReturn::SUCCESS;
 }
 
+/**
+ * @brief 激活定位与可视化发布器，并建立生命周期管理器 bond。
+ *
+ * @note 无名参数（state）：生命周期转换前状态；当前实现不使用。
+ * @return 完成激活后返回 SUCCESS。
+ */
 AmclNode::CallbackReturn AmclNode::on_activate(const rclcpp_lifecycle::State &)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -124,9 +187,19 @@ AmclNode::CallbackReturn AmclNode::on_activate(const rclcpp_lifecycle::State &)
   distance_grid_publisher_->on_activate();
   active_ = true;
   publishDistanceFieldVisualization();
+  bond_ = std::make_shared<bond::Bond>("bond", get_name(), shared_from_this());
+  bond_->setHeartbeatPeriod(0.1);
+  bond_->setHeartbeatTimeout(4.0);
+  bond_->start();
   return CallbackReturn::SUCCESS;
 }
 
+/**
+ * @brief 关闭滤波更新和生命周期发布器，并释放 bond。
+ *
+ * @note 无名参数（state）：生命周期转换前状态；当前实现不使用。
+ * @return SUCCESS。
+ */
 AmclNode::CallbackReturn AmclNode::on_deactivate(const rclcpp_lifecycle::State &)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -146,13 +219,21 @@ AmclNode::CallbackReturn AmclNode::on_deactivate(const rclcpp_lifecycle::State &
   if (distance_grid_publisher_) {
     distance_grid_publisher_->on_deactivate();
   }
+  bond_.reset();
   return CallbackReturn::SUCCESS;
 }
 
+/**
+ * @brief 释放通信、TF 与滤波资源并清除地图、位姿和 TF 缓存状态。
+ *
+ * @note 无名参数（state）：生命周期转换前状态；当前实现不使用。
+ * @return SUCCESS。
+ */
 AmclNode::CallbackReturn AmclNode::on_cleanup(const rclcpp_lifecycle::State &)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   active_ = false;
+  bond_.reset();
   laser_connection_.disconnect();
   laser_filter_.reset();
   laser_subscription_.reset();
@@ -180,14 +261,25 @@ AmclNode::CallbackReturn AmclNode::on_cleanup(const rclcpp_lifecycle::State &)
   return CallbackReturn::SUCCESS;
 }
 
+/**
+ * @brief 停止更新、释放 bond 并使定位质量和 TF 缓存失效。
+ *
+ * @note 无名参数（state）：生命周期转换前状态；当前实现不使用。
+ * @return SUCCESS。
+ */
 AmclNode::CallbackReturn AmclNode::on_shutdown(const rclcpp_lifecycle::State &)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   active_ = false;
+  bond_.reset();
   invalidateMapToOdom();
   return CallbackReturn::SUCCESS;
 }
 
+/**
+ * @brief 读取已声明参数，校验数量、帧名和支持的运动模型。
+ * @throws std::invalid_argument 必要字段为空或数量、阈值及运动模型不支持。
+ */
 void AmclNode::initializeParameters()
 {
   get_parameter("global_frame_id", global_frame_id_);
@@ -258,6 +350,9 @@ void AmclNode::initializeParameters()
   base_frame_id_ = StripLeadingSlash(base_frame_id_);
 }
 
+/**
+ * @brief 建立 TF 缓冲、独立监听线程和动态变换广播器。
+ */
 void AmclNode::initializeTransforms()
 {
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
@@ -268,6 +363,10 @@ void AmclNode::initializeTransforms()
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(shared_from_this());
 }
 
+/**
+ * @brief 根据配置构建差速运动模型、激光模型与粒子滤波器。
+ * @throws std::invalid_argument 激光模型类型不支持或核心模型参数非法。
+ */
 void AmclNode::initializeFilter()
 {
   auto motion_model = std::make_unique<mini_nav_core::localization::DifferentialMotionModel>(
@@ -296,6 +395,12 @@ void AmclNode::initializeFilter()
     mini_nav_core::localization::kDefaultRandomSeed);
 }
 
+/**
+ * @brief 配置地图保留型 QoS、激光 SensorDataQoS 与生命周期发布器。
+ *
+ * MessageFilter 等待扫描时刻到 odom 的 TF；互斥回调组自动加入 executor，
+ * 否则节点虽有订阅连接，定位回调也不会得到调度。
+ */
 void AmclNode::initializeCommunications()
 {
   const auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
@@ -333,6 +438,9 @@ void AmclNode::initializeCommunications()
     std::bind(&AmclNode::laserCallback, this, std::placeholders::_1));
 }
 
+/**
+ * @brief 建立全局定位、静止强制更新与初始位姿服务。
+ */
 void AmclNode::initializeServices()
 {
   global_localization_service_ = create_service<std_srvs::srv::Empty>(
@@ -349,6 +457,13 @@ void AmclNode::initializeServices()
     std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
+/**
+ * @brief 校验并转换地图，重建定位距离场并使旧定位状态失效。
+ *
+ * first_map_only 启用后忽略后续地图；转换失败记录错误。
+ *
+ * @param message global_frame_id 下的未旋转占据图；未知保持未知，正占据值视作障碍。
+ */
 void AmclNode::mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -406,6 +521,13 @@ void AmclNode::mapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr me
   }
 }
 
+/**
+ * @brief 根据定位距离场缓存热力图、分段色块及网格线。
+ *
+ * 高度略微错开避免共面闪烁；这些消息只用于显示，不参与规划膨胀。
+ *
+ * @param map 提供几何和坐标系的原始地图；定位地图必须已经建立。
+ */
 void AmclNode::updateDistanceFieldVisualization(const nav_msgs::msg::OccupancyGrid & map)
 {
   distance_field_message_.header = map.header;
@@ -509,6 +631,9 @@ void AmclNode::updateDistanceFieldVisualization(const nav_msgs::msg::OccupancyGr
   distance_field_ready_ = true;
 }
 
+/**
+ * @brief 在节点激活且距离场缓存就绪时发布三种可视化消息。
+ */
 void AmclNode::publishDistanceFieldVisualization()
 {
   if (!active_ || !distance_field_ready_) {
@@ -519,6 +644,11 @@ void AmclNode::publishDistanceFieldVisualization()
   distance_grid_publisher_->publish(distance_grid_message_);
 }
 
+/**
+ * @brief 在互斥保护下处理初始位姿话题。
+ *
+ * @param message 全局坐标系的初始位姿与 ROS 6×6 协方差。
+ */
 void AmclNode::initialPoseCallback(
   const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr message)
 {
@@ -526,6 +656,13 @@ void AmclNode::initialPoseCallback(
   handleInitialPose(*message);
 }
 
+/**
+ * @brief 提取 x、y、yaw 协方差并在已知自由空间初始化粒子。
+ *
+ * 成功后清空 odom 基准和 TF 缓存，强制下一帧更新，避免跨定位周期复用结果。
+ *
+ * @param message 全局坐标系初始位姿；错误帧、无地图或非自由位置被拒绝。
+ */
 void AmclNode::handleInitialPose(
   const geometry_msgs::msg::PoseWithCovarianceStamped & message)
 {
@@ -572,6 +709,14 @@ void AmclNode::handleInitialPose(
   }
 }
 
+/**
+ * @brief 以扫描时刻 TF 驱动运动预测、激光加权、归一化与重采样。
+ *
+ * 未达运动阈值时只刷新缓存 map→odom 时间戳，避免低速停顿时 TF 过期。
+ * 首帧跳过运动预测；成功估计后才更新 odom 基准和发布结果。
+ *
+ * @param message 激光观测；至少 3 个有限有效量程且时间新鲜才进入更新。
+ */
 void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr message)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -588,6 +733,16 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
     return;
   }
 
+  const double age = (now() - rclcpp::Time(message->header.stamp, get_clock()->get_clock_type())).seconds();
+  const auto useful = std::count_if(message->ranges.begin(), message->ranges.end(), [&](float range) {
+    return std::isfinite(range) && range >= message->range_min && range <= message->range_max;
+  });
+  if (!std::isfinite(age) || age < -0.1 || age > quality_max_scan_age_ || useful < 3 ||
+      !std::isfinite(message->angle_increment) || message->angle_increment == 0.0) {
+    quality_estimate_.valid = false; force_update_ = true; publishQuality(); return;
+  }
+  quality_scan_received_ = std::chrono::steady_clock::now();
+  quality_scan_stamp_ = rclcpp::Time(message->header.stamp, get_clock()->get_clock_type());
   const bool first_update = !have_odom_pose_;
   if (!first_update && !shouldUpdate(odom_pose)) {
     publishCachedMapToOdom(message->header.stamp);
@@ -599,6 +754,7 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
     }
     particle_filter_->SensorUpdate(
       convertScan(*message), *localization_map_, base_to_laser_pose);
+    quality_estimate_.valid = false;
     if (!particle_filter_->NormalizeWeights()) {
       RCLCPP_WARN(get_logger(), "AMCL received a scan with unusable particle weights");
       return;
@@ -612,6 +768,7 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
     if (!estimate.valid) {
       return;
     }
+    quality_estimate_ = estimate;
     last_odom_pose_ = odom_pose;
     have_odom_pose_ = true;
     force_update_ = false;
@@ -624,6 +781,13 @@ void AmclNode::laserCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr m
   }
 }
 
+/**
+ * @brief 在地图自由空间全局采样粒子，并使旧 TF 和里程计基准失效。
+ *
+ * @note 无名参数（request_header）：服务请求标识；未使用。
+ * @note 无名参数（request）：空请求；未使用。
+ * @note 无名参数（response）：空响应；未使用。
+ */
 void AmclNode::globalLocalizationCallback(
   const std::shared_ptr<rmw_request_id_t>,
   const std::shared_ptr<std_srvs::srv::Empty::Request>,
@@ -645,6 +809,13 @@ void AmclNode::globalLocalizationCallback(
   }
 }
 
+/**
+ * @brief 设置强制更新标志，使下一帧扫描绕过运动阈值。
+ *
+ * @note 无名参数（request_header）：服务请求标识；未使用。
+ * @note 无名参数（request）：空请求；未使用。
+ * @note 无名参数（response）：空响应；未使用。
+ */
 void AmclNode::nomotionUpdateCallback(
   const std::shared_ptr<rmw_request_id_t>,
   const std::shared_ptr<std_srvs::srv::Empty::Request>,
@@ -653,6 +824,13 @@ void AmclNode::nomotionUpdateCallback(
   force_update_ = true;
 }
 
+/**
+ * @brief 通过服务复用初始位姿校验与粒子初始化。
+ *
+ * @note 无名参数（request_header）：请求标识；未使用。
+ * @param request 包含初始位姿与协方差。
+ * @note 无名参数（response）：空响应；未使用。
+ */
 void AmclNode::setInitialPoseCallback(
   const std::shared_ptr<rmw_request_id_t>,
   const std::shared_ptr<nav2_msgs::srv::SetInitialPose::Request> request,
@@ -662,6 +840,15 @@ void AmclNode::setInitialPoseCallback(
   handleInitialPose(request->pose);
 }
 
+/**
+ * @brief 查询指定时刻 TF 并提取二维位姿。
+ *
+ * @param target_frame 目标参考帧。
+ * @param source_frame 被查询帧。
+ * @param stamp TF 查询时刻。
+ * @param pose 输出 source_frame 在 target_frame 中的二维位姿。
+ * @return TF 可用且提取位姿有限时为 true；失败时输出不可使用。
+ */
 bool AmclNode::getTransformPose(
   const std::string & target_frame,
   const std::string & source_frame,
@@ -680,6 +867,12 @@ bool AmclNode::getTransformPose(
   }
 }
 
+/**
+ * @brief 判断强制更新或相对上次滤波的平移/转角是否达到阈值。
+ *
+ * @param pose 当前 odom 系机器人位姿。
+ * @return 需要更新为 true；角误差采用周期归一化。
+ */
 bool AmclNode::shouldUpdate(const mini_nav_core::localization::Pose2D & pose) const
 {
   if (force_update_) {
@@ -690,6 +883,12 @@ bool AmclNode::shouldUpdate(const mini_nav_core::localization::Pose2D & pose) co
          update_min_a_;
 }
 
+/**
+ * @brief 把 ROS 扫描转换为核心数据，并按配置收窄有效量程。
+ *
+ * @param message 原始扫描；角度为弧度、量程为米。
+ * @return 独立扫描副本；下限取较大值、上限取较小值。
+ */
 mini_nav_core::localization::LaserScanData AmclNode::convertScan(
   const sensor_msgs::msg::LaserScan & message) const
 {
@@ -708,6 +907,15 @@ mini_nav_core::localization::LaserScanData AmclNode::convertScan(
   return scan;
 }
 
+/**
+ * @brief 将核心位姿与 3×3 协方差嵌入 ROS 6×6 消息并发布。
+ *
+ * 发布器未激活时不发布；未表示的 z、roll、pitch 协方差保持默认值。
+ *
+ * @param estimate map 系定位估计。
+ * @param stamp 扫描时刻。
+ * @note 无名参数（odom_pose）：保留的接口参数；当前实现未使用。
+ */
 void AmclNode::publishEstimate(
   const mini_nav_core::localization::PoseEstimate & estimate,
   const rclcpp::Time & stamp,
@@ -734,6 +942,11 @@ void AmclNode::publishEstimate(
   pose_publisher_->publish(message);
 }
 
+/**
+ * @brief 发布当前粒子的全局位姿与权重，用于定位可视化。
+ *
+ * @param stamp 扫描时刻。
+ */
 void AmclNode::publishParticleCloud(const rclcpp::Time & stamp)
 {
   if (!particle_cloud_publisher_ || !particle_cloud_publisher_->is_activated()) {
@@ -755,12 +968,26 @@ void AmclNode::publishParticleCloud(const rclcpp::Time & stamp)
   particle_cloud_publisher_->publish(message);
 }
 
+/**
+ * @brief 清空定位质量及动态 map→odom 缓存，禁止复用旧定位结果。
+ */
 void AmclNode::invalidateMapToOdom()
 {
+  quality_estimate_ = {};
+  quality_scan_received_ = {};
   map_to_odom_valid_ = false;
   cached_map_to_odom_ = geometry_msgs::msg::Transform();
 }
 
+/**
+ * @brief 根据同一机器人在 map 和 odom 中的位姿计算并缓存 map→odom。
+ *
+ * T_map_odom = T_map_base × inverse(T_odom_base)。
+ * 不能直接相减平移，因为两个参考系的坐标轴可能发生旋转。
+ *
+ * @param estimate map 系定位估计。
+ * @param odom_pose 同一时刻 odom 系机器人位姿。
+ */
 void AmclNode::cacheMapToOdom(
   const mini_nav_core::localization::PoseEstimate & estimate,
   const mini_nav_core::localization::Pose2D & odom_pose)
@@ -782,6 +1009,15 @@ void AmclNode::cacheMapToOdom(
   map_to_odom_valid_ = true;
 }
 
+/**
+ * @brief 为有效 TF 缓存填充帧名与前推的扫描时间戳。
+ *
+ * 只刷新时间戳，不改变缓存几何；前推量为 transform_tolerance 秒。
+ *
+ * @param scan_stamp 本次扫描时刻。
+ * @param message 输出变换消息；缓存无效时不修改。
+ * @return 缓存有效时 true；尚未估计或缓存失效时 false。
+ */
 bool AmclNode::makeCachedMapToOdomTransform(
   const rclcpp::Time & scan_stamp,
   geometry_msgs::msg::TransformStamped & message) const
@@ -796,6 +1032,11 @@ bool AmclNode::makeCachedMapToOdomTransform(
   return true;
 }
 
+/**
+ * @brief 在 TF 广播启用且缓存有效时重发动态 map→odom。
+ *
+ * @param scan_stamp 本次扫描时刻，用于刷新 TF 有效期。
+ */
 void AmclNode::publishCachedMapToOdom(const rclcpp::Time & scan_stamp)
 {
   if (!tf_broadcast_ || !tf_broadcaster_) {
@@ -808,3 +1049,35 @@ void AmclNode::publishCachedMapToOdom(const rclcpp::Time & scan_stamp)
 }
 
 }  // namespace mini_nav_nodes
+
+
+/**
+ * @brief 检查节点活跃、可信主簇、协方差、扫描双时钟年龄与 TF 缓存。
+ * @return 全部满足质量限制为 true；用于运动前提，不是绝对定位精度保证。
+ */
+bool mini_nav_nodes::AmclNode::localizationQualityValid() const
+{
+    const double age = (now() - quality_scan_stamp_).seconds();
+    bool valid = active_ && map_to_odom_valid_ && initial_pose_known_ && quality_estimate_.valid &&
+        quality_scan_received_ != std::chrono::steady_clock::time_point{} &&
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - quality_scan_received_).count() <= quality_max_scan_age_ &&
+        std::isfinite(age) && age >= -0.1 && age <= quality_max_scan_age_ &&
+        quality_estimate_.hypothesis_mass >= quality_min_mass_;
+    for (int i = 0; i < 3; ++i) {
+        const double variance = quality_estimate_.covariance.At(i, i);
+        valid = valid && std::isfinite(variance) && variance >= 0.0 &&
+          variance <= (i == 2 ? quality_max_yaw_variance_ : quality_max_position_variance_);
+    }
+    return valid;
+}
+
+/**
+ * @brief 在递归互斥保护下发布定位有效性心跳，包括未激活阶段的 false。
+ */
+void mini_nav_nodes::AmclNode::publishQuality()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std_msgs::msg::Bool message;
+    message.data = localizationQualityValid();
+    quality_publisher_->publish(message);
+}

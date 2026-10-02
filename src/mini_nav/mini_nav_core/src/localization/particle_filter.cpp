@@ -404,16 +404,41 @@ bool ParticleFilter::Resample()
   return ResampleImpl(nullptr, nullptr);
 }
 
+/**
+ * @brief 利用地图采样恢复粒子并执行系统重采样。
+ *
+ * @param map 已知自由空间来源。
+ * @return 完成为 true；权重或初始化状态不可用为 false。
+ * @throws std::runtime_error 需要恢复位姿但自由空间采样失败。
+ */
 bool ParticleFilter::Resample(const LocalizationMap & map)
 {
   return ResampleImpl(&map, nullptr);
 }
 
+/**
+ * @brief 重采样并可选记录实际累计权重区间和粒子来源。
+ *
+ * @param map 随机恢复时用于采样已知自由空间的地图。
+ * @param trace 诊断输出，nullptr 时不记录。
+ * @return 成功为 true；状态或权重不可用时 false。
+ * @throws std::runtime_error 需要随机恢复而自由空间采样失败。
+ */
 bool ParticleFilter::Resample(const LocalizationMap & map, ResampleTrace * trace)
 {
   return ResampleImpl(&map, trace);
 }
 
+/**
+ * @brief 归一化源权重并执行自适应系统重采样，可选记录真实抽样轨迹。
+ *
+ * 按位姿分箱估计数量并限制在配置区间；输出粒子等权，记录只用于诊断。
+ *
+ * @param map 随机恢复位姿的地图来源；未提供而需要恢复时抛出异常。
+ * @param trace 可选诊断输出指针，nullptr 禁用记录。
+ * @return 完成重采样为 true；未初始化或无法归一化为 false。
+ * @throws std::logic_error 需要随机恢复但无地图；自由空间采样失败可能抛出 std::runtime_error。
+ */
 bool ParticleFilter::ResampleImpl(const LocalizationMap * map, ResampleTrace * trace)
 {
   if (trace != nullptr) {
@@ -530,6 +555,12 @@ PoseEstimate ParticleFilter::Estimate() const
   // 创建一个索引数组，包含从 0 到粒子数量减一的连续整数，用于遍历粒子集合。
   std::vector<std::size_t> indices(particles_.size());
   std::iota(indices.begin(), indices.end(), 0U);
+  // 从连续索引中选出最大权重的连通位姿簇，避免多个定位假设被平均到障碍里。
+  PoseBinIndex estimate_bins;
+  estimate_bins.BuildPoseBinIndex(particles_);
+  indices = estimate_bins.GetDominantParticleIndices(particles_);
+  double all_weight = 0.0;
+  for (const auto & particle : particles_) all_weight += particle.weight;
 
   double total_weight = 0.0;  // 初始化总权重为零，用于累加所有粒子的权重。
   double mean_x = 0.0;        // 初始化加权平均的 x 坐标为零，用于计算粒子集合的加权平均位置。
@@ -552,6 +583,7 @@ PoseEstimate ParticleFilter::Estimate() const
 
   estimate.valid = true;
   estimate.weight = total_weight;
+  estimate.hypothesis_mass = total_weight / all_weight;
   estimate.pose.x = mean_x / total_weight;
   estimate.pose.y = mean_y / total_weight;
   /*

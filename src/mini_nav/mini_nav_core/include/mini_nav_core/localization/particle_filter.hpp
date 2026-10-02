@@ -181,13 +181,22 @@ public:
    */
   bool Resample();
   /**
-   * @brief 重采样时按观测权重下降程度注入地图自由区域的随机位姿。
-   * @param map 提供已知自由栅格采样的定位地图。
-   * @return 重采样完成返回 true；状态或权重不可用时返回 false。
-   * @throws std::runtime_error 当需要随机位姿而地图没有已知自由栅格时抛出。
+   * @brief 重采样并可选记录实际累计权重区间和粒子来源。
+   *
+   * @param map 随机恢复时用于采样已知自由空间的地图。
+   * @param trace 诊断输出，nullptr 时不记录。
+   * @return 成功为 true；状态或权重不可用时 false。
+   * @throws std::runtime_error 需要随机恢复而自由空间采样失败。
    */
   bool Resample(const LocalizationMap & map);
-  /** 重采样并记录实际使用的累计权重区间与输出来源。 */
+  /**
+   * @brief 重采样并可选记录实际累计权重区间和粒子来源。
+   *
+   * @param map 随机恢复时用于采样已知自由空间的地图。
+   * @param trace 诊断输出，nullptr 时不记录。
+   * @return 成功为 true；状态或权重不可用时 false。
+   * @throws std::runtime_error 需要随机恢复而自由空间采样失败。
+   */
   bool Resample(const LocalizationMap & map, ResampleTrace * trace);
   /**
    * @brief 计算当前粒子集的加权均值位姿及协方差。
@@ -215,6 +224,16 @@ private:
   static double NormalQuantile(double probability);
   /** @brief 根据 KLD 公式计算目标粒子数。@return 限制在配置上下界内的粒子数。 */
   std::size_t GetTargetParticleCount() const;
+  /**
+   * @brief 归一化源权重并执行自适应系统重采样，可选记录真实抽样轨迹。
+   *
+   * 按位姿分箱估计数量并限制在配置区间；输出粒子等权，记录只用于诊断。
+   *
+   * @param map 随机恢复位姿的地图来源；未提供而需要恢复时抛出异常。
+   * @param trace 可选诊断输出指针，nullptr 禁用记录。
+   * @return 完成重采样为 true；未初始化或无法归一化为 false。
+   * @throws std::logic_error 需要随机恢复但无地图；自由空间采样失败可能抛出 std::runtime_error。
+   */
   bool ResampleImpl(const LocalizationMap * map, ResampleTrace * trace);
 
   std::vector<Particle> particles_;

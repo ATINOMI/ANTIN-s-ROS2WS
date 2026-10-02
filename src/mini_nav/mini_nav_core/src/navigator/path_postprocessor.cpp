@@ -1,3 +1,12 @@
+/**
+ * @file path_postprocessor.cpp
+ * @brief 连续圆形扫掠、代价约束的路径简化和平滑。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
+
+/* Includes -----------------------------------------------------------------------*/
+
 #include "mini_nav_core/navigator/path_postprocessor.hpp"
 
 #include <algorithm>
@@ -6,32 +15,66 @@
 #include <stdexcept>
 #include <utility>
 
+/* Namespaces ---------------------------------------------------------------------*/
+
 namespace mini_nav_core {
     namespace {
-        constexpr unsigned char kBlockedCost = 253;
-        constexpr unsigned char kUnknownCost = 255;
-        constexpr double kEpsilon = 1.0e-9;
 
+/* Constants ----------------------------------------------------------------------*/
+
+        constexpr unsigned char kBlockedCost = 253;  // 规划器约定的硬禁行阈值；253 及以上视为不可通行。
+        constexpr unsigned char kUnknownCost = 255;  // 规划器约定的未知代价阈值；255 视为未知或不可知。
+        constexpr double kEpsilon = 1.0e-9;          // 计算误差容忍，避免浮点数比较时的边界问题。
+
+/* Structures ---------------------------------------------------------------------*/
+
+        /**
+         * @brief 线段安全性及沿线软代价积分的内部结果。
+         */
         struct SegmentResult {
-            bool safe;
-            double cost;
+            bool safe;    // 线段扫掠是否严格安全；不安全时 cost 为正无穷。
+            double cost;  // 线段扫掠的积分软代价；不安全时为正无穷。
         };
 
-        double PointToSegmentSquared(const PathPoint &point, const PathPoint &first,
-                                     const PathPoint &second) {
+/* Functions ----------------------------------------------------------------------*/
+
+        /**
+         * @brief 计算点到闭线段的最短距离平方，退化线段按单点处理。
+         *
+         * @param point 待查询世界坐标点，米。
+         * @param first 线段第一端点，世界坐标，米。
+         * @param second 线段第二端点，世界坐标，米。
+         * @return 距离平方，m²。
+         */
+        double PointToSegmentSquared(const PathPoint &point, 
+                                     const PathPoint &first,
+                                     const PathPoint &second) 
+        {
+            // 计算x和y方向的差值
             const double dx = second.x - first.x;
             const double dy = second.y - first.y;
             const double length_squared = dx * dx + dy * dy;
-            const double t =
-                length_squared == 0.0
-                    ? 0.0
-                    : std::clamp(((point.x - first.x) * dx + (point.y - first.y) * dy) /
-                                     length_squared,
-                                 0.0, 1.0);
+
+            // 计算点在线段上的投影参数
+            const double t =  length_squared == 0.0 ? 0.0
+                                                    : std::clamp(( (point.x - first.x) * dx + (point.y - first.y) * dy ) /
+                                                                        length_squared,
+                                                                    0.0, 1.0);
+
             return std::pow(point.x - first.x - t * dx, 2) +
                    std::pow(point.y - first.y - t * dy, 2);
         }
 
+        /**
+         * @brief 通过坐标钳位计算点到轴对齐矩形的距离平方。
+         *
+         * @param point 查询点，米。
+         * @param min_x 矩形左边界，米。
+         * @param min_y 矩形下边界，米。
+         * @param max_x 矩形右边界，米。
+         * @param max_y 矩形上边界，米。
+         * @return 距离平方，m²；点在矩形内或边界上时为零。
+         */
         double PointToRectangleSquared(const PathPoint &point, double min_x, double min_y,
                                        double max_x, double max_y) {
             const double dx = point.x - std::clamp(point.x, min_x, max_x);
@@ -39,6 +82,17 @@ namespace mini_nav_core {
             return dx * dx + dy * dy;
         }
 
+        /**
+         * @brief 按参数区间裁剪检查闭线段是否接触轴对齐矩形。
+         *
+         * @param first 线段第一端点，世界坐标，米。
+         * @param second 线段第二端点，世界坐标，米。
+         * @param min_x 矩形左边界，米。
+         * @param min_y 矩形下边界，米。
+         * @param max_x 矩形右边界，米。
+         * @param max_y 矩形上边界，米。
+         * @return 相交或接触为 true；平行且在矩形外为 false。
+         */
         bool SegmentIntersectsRectangle(const PathPoint &first, const PathPoint &second,
                                         double min_x, double min_y, double max_x, double max_y) {
             double enter = 0.0;
@@ -66,6 +120,17 @@ namespace mini_nav_core {
         }
 
         // 线段到占据方格的最短距离：相交、端点到方格、四角到线段三种情形。
+        /**
+         * @brief 计算闭线段与占据格矩形面积之间的最短距离平方。
+         *
+         * @param first 线段第一端点，世界坐标，米。
+         * @param second 线段第二端点，世界坐标，米。
+         * @param min_x 矩形左边界，米。
+         * @param min_y 矩形下边界，米。
+         * @param max_x 矩形右边界，米。
+         * @param max_y 矩形上边界，米。
+         * @return 距离平方，m²；接触或相交为零。
+         */
         double SegmentToRectangleSquared(const PathPoint &first, const PathPoint &second,
                                          double min_x, double min_y, double max_x, double max_y) {
             if (SegmentIntersectsRectangle(first, second, min_x, min_y, max_x, max_y)) {
@@ -80,6 +145,19 @@ namespace mini_nav_core {
             return distance;
         }
 
+        /**
+         * @brief 检查圆形车体中心沿线段移动的扫掠是否与禁行格或图外相交。
+         *
+         * 遍历线段扩张包围盒中的格子，以线段到方格面积的距离判断，
+         * 避免仅采样中心线漏掉格角碰撞；安全图已膨胀时应避免再次加入完整车体半径。
+         *
+         * @param source 几何碰撞地图；253 及以上视为禁行，未知可单独放宽。
+         * @param first 线段第一端点，世界坐标，米。
+         * @param second 线段第二端点，世界坐标，米。
+         * @param radius 有限正车体半径，米，由外层接口验证。
+         * @param include_unknown_clearance 是否把未知格面积也作为碰撞源。
+         * @return 全部扫掠严格在图内且不接触所选禁行格时为 true。
+         */
         bool SweepIsClear(const Costmap2D &source, const PathPoint &first, const PathPoint &second,
                           double radius, bool include_unknown_clearance) {
             const double origin_x = source.GetOriginX();
@@ -129,6 +207,21 @@ namespace mini_nav_core {
         }
 
         // 二维 DDA 逐格积分；恰好穿过栅格角时，两侧格也必须可通行。
+        /**
+         * @brief 用 DDA 积分线段软代价，并检查中心线及圆形车体扫掠。
+         *
+         * 每格贡献为格内线长 × (1 + multiplier × cost / 252)。
+         * 角点及沿格边行驶时同时检查相邻格，防止穿角或贴禁行格边界。
+         *
+         * @param source 原始几何碰撞地图。
+         * @param planning 匹配几何的膨胀规划图，253 及以上禁行。
+         * @param first 线段第一端点，世界坐标，米。
+         * @param second 线段第二端点，世界坐标，米。
+         * @param radius 车体安全半径，米。
+         * @param multiplier 非负软代价权重。
+         * @param include_unknown_clearance 是否检查圆盘与未知格的相交。
+         * @return 安全标志和积分代价；不安全时 cost 为正无穷。
+         */
         SegmentResult EvaluateSegment(const Costmap2D &source, const Costmap2D &planning,
                                       const PathPoint &first, const PathPoint &second,
                                       double radius, double multiplier,
@@ -222,6 +315,16 @@ namespace mini_nav_core {
         }
     } // namespace
 
+    /**
+     * @brief 检查圆形车体沿闭线段的连续扫掠。
+     *
+     * @param source 碰撞用原图。
+     * @param first 线段第一端点，世界坐标，米。
+     * @param second 线段第二端点，世界坐标，米。
+     * @param clearance_radius 有限正安全半径，米。
+     * @param include_unknown_clearance 是否将未知格作为碰撞源。
+     * @return 参数有效且扫掠严格安全为 true，否则 false。
+     */
     bool IsCircularSweepClear(const Costmap2D &source, const PathPoint &first,
                               const PathPoint &second, double clearance_radius,
                               bool include_unknown_clearance) {
@@ -229,6 +332,21 @@ namespace mini_nav_core {
                SweepIsClear(source, first, second, clearance_radius, include_unknown_clearance);
     }
 
+    /**
+     * @brief 简化并平滑栅格路径，逐段检查硬禁行、扫掠和积分软代价。
+     *
+     * 先验证原始路径，再通过迭代分割保留必要折点；加密后最多做五轮局部平滑。
+     * 每次改点都验证相邻两段，最终仍复查整条路径，不能以视觉平滑代替安全验证。
+     *
+     * @param source 原始碰撞地图。
+     * @param planning 与 source 尺寸、分辨率及原点完全一致的膨胀规划图。
+     * @param raw_path A* 栅格中心路径；空输入直接返回空。
+     * @param clearance_radius 有限正安全半径，米。
+     * @param cost_travel_multiplier 有限非负软代价权重。
+     * @param include_unknown_clearance 是否检查车体与邻近未知格的余量；规划中心线仍不得进入未知格。
+     * @return 安全且不增加代价的连续路径；最终验证失败回退原始中心路径，原始路径不安全返回空。
+     * @throws std::invalid_argument 地图几何不匹配或半径、代价权重非法。
+     */
     std::vector<PathPoint> SimplifyAndSmoothPath(const Costmap2D &source, const Costmap2D &planning,
                                                  const std::vector<MapLocation> &raw_path,
                                                  double clearance_radius,

@@ -1,3 +1,9 @@
+/**
+ * @file local_costmap_node.cpp
+ * @brief 激光观测到 odom 系滚动局部安全图的适配。
+ * @author Antinomy
+ * @date 2026-10-01
+ */
 #include "mini_nav_nodes/local_costmap_node.hpp"
 #include "mini_nav_nodes/costmap_display.hpp"
 
@@ -18,6 +24,14 @@ namespace mini_nav_nodes
 {
     namespace
     {
+        /**
+         * @brief 按分辨率四舍五入计算局部窗口格数并限制容量。
+         *
+         * @param meters 窗口单轴长度，有限正数，米。
+         * @param resolution 格边长，有限正数，米。
+         * @return 1..1000 范围的格数。
+         * @throws std::invalid_argument 几何非法或格数超出限制。
+         */
         unsigned int GridCells(double meters, double resolution)
         {
             if (!std::isfinite(meters) || !std::isfinite(resolution) ||
@@ -31,6 +45,15 @@ namespace mini_nav_nodes
             return static_cast<unsigned int>(cells);
         }
 
+        /**
+         * @brief 声明并读取有限正浮点参数。
+         *
+         * @param node 声明参数的节点。
+         * @param name 参数名称。
+         * @param fallback 未覆盖时的默认值。
+         * @return 通过校验的参数值。
+         * @throws std::invalid_argument 数值非有限或不大于零。
+         */
         double PositiveParameter(rclcpp::Node & node, const char * name, double fallback)
         {
             const double value = node.declare_parameter<double>(name, fallback);
@@ -41,6 +64,10 @@ namespace mini_nav_nodes
         }
     }
 
+    /**
+     * @brief 建立 odom 系滚动局部图、传感器订阅和发布定时器。
+     * @throws std::invalid_argument 图尺寸、膨胀参数、帧名或量程限制不合法。
+     */
     LocalCostmapNode::LocalCostmapNode()
       : Node("local_costmap")
     {
@@ -49,7 +76,7 @@ namespace mini_nav_nodes
         const double resolution = PositiveParameter(*this, "local_costmap.resolution", 0.05);
         mini_nav_core::InflationParameters inflation;
         inflation.robot_radius = PositiveParameter(*this, "local_costmap.robot_radius", 0.24);
-        inflation.safety_margin = declare_parameter<double>("local_costmap.safety_margin", 0.05);
+        inflation.safety_margin = declare_parameter<double>("local_costmap.safety_margin", 0.02);
         inflation.inflation_radius = PositiveParameter(*this, "local_costmap.inflation_radius", 0.45);
         inflation.cost_scaling_factor = PositiveParameter(*this, "local_costmap.cost_scaling_factor", 10.0);
         inflation.inflate_around_unknown =
@@ -89,6 +116,11 @@ namespace mini_nav_nodes
           [this]() { publishMap(); });
     }
 
+    /**
+     * @brief 使全部观测失效，清除扫描时间并把局部图恢复为未知。
+     *
+     * @param reason 失效原因，用于有效到无效转换时的警告日志。
+     */
     void LocalCostmapNode::invalidate(const char * reason)
     {
         if (valid_) {
@@ -99,6 +131,14 @@ namespace mini_nav_nodes
         grid_->Reset();
     }
 
+    /**
+     * @brief 按扫描时刻 TF 清除射线并统一标记命中障碍。
+     *
+     * 正无穷量程按无返回处理，只清除可见空间而不标记障碍。
+     * 一帧先完成全部清除再标记命中，避免束间相互擦除；传感器和机器人使用同一时刻 TF。
+     *
+     * @param scan 激光扫描；非法时间、元数据、TF 或无可用射线使局部图失效。
+     */
     void LocalCostmapNode::scanCallback(
       const sensor_msgs::msg::LaserScan::ConstSharedPtr scan)
     {
@@ -177,6 +217,12 @@ namespace mini_nav_nodes
         }
     }
 
+    /**
+     * @brief 过期观测后发布局部图与独立的感知有效性标志。
+     *
+     * 扫描超时先重置为未知；有效时生成膨胀副本。消息发布时间不是观测时间，
+     * 消费者必须同时检查 local_costmap_valid 的新鲜度。
+     */
     void LocalCostmapNode::publishMap()
     {
         if (valid_ && last_scan_stamp_ &&

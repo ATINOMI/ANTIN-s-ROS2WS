@@ -1,3 +1,7 @@
+"""组合官方 AMCL 对照组与自研 A*、局部代价图和 RViz。
+
+资源从 package-share 查找；运行时参数由 launch 声明并解析。
+"""
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -10,6 +14,14 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    """建立启动描述。
+
+    Returns:
+        LaunchDescription: 节点、包含入口与参数声明组成的启动描述。
+
+    Note:
+        调用只构建动作描述；节点进程由 launch 执行动作时启动。
+    """
     bringup_share = get_package_share_directory("mini_nav_bringup")
     nav2_bringup_share = get_package_share_directory("nav2_bringup")
 
@@ -30,7 +42,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "map",
             default_value=os.path.join(
-                bringup_share, "maps", "turtlebot3_map.yaml"
+                bringup_share, "maps", "tb3_learning.yaml"
             ),
             description="Map YAML file used by the official map_server.",
         ),

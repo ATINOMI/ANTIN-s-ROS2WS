@@ -8,9 +8,9 @@ local_costmap:
       width: 4.0
       height: 4.0
       resolution: 0.05
-      # 与全局图共用按 Waffle 碰撞几何取整的车体半径和 0.05 m 余量。
+      # 与全局图共用按 Waffle 碰撞几何取整的车体半径和 0.02 m 余量。
       robot_radius: 0.24
-      safety_margin: 0.05
+      safety_margin: 0.02
       inflation_radius: 0.45
       cost_scaling_factor: 10.0
       # 未知格始终禁行；开启后只额外传播硬安全区。
