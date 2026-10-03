@@ -48,7 +48,7 @@ def read_pcd(path):
         return points
 
 
-def save_bundle(root, grid, geometry, alignment):
+def save_bundle(root, grid, geometry, alignment, free_space_model='flat_ground_real_scan'):
     if grid.out_of_bounds or geometry.full:
         raise ValueError('Mapping capacity exceeded; incomplete map cannot be saved')
     data = grid.data()
@@ -69,7 +69,7 @@ def save_bundle(root, grid, geometry, alignment):
         rigid(alignment['map_world'])
         (temporary / 'alignment.json').write_text(json.dumps(alignment, indent=2))
         names = ['navigation.pgm', 'navigation.yaml', 'geometry.pcd', 'observations.npz', 'alignment.json']
-        manifest = {'schema': 1, 'map_id': map_id, 'frame': 'map', 'free_space_model': 'flat_ground_real_scan',
+        manifest = {'schema': 1, 'map_id': map_id, 'frame': 'map', 'free_space_model': free_space_model,
                     'files': {name: digest(temporary / name) for name in names}}
         (temporary / 'manifest.json').write_text(json.dumps(manifest, indent=2))
         for path in temporary.iterdir():

@@ -15,6 +15,7 @@ from tf2_ros import Buffer, TransformListener, StaticTransformBroadcaster, Trans
 from .geometry import transform, collision_points, rigid, estimate_ground
 from .grid import HeightGrid, GeometryStore
 from .bundle import save_bundle
+from .session import SessionWriter
 from .runtime import ObservationCache, ns, message_tf, tf_message, cloud_xyz, cloud_message, grid_message, positive
 
 
@@ -35,6 +36,19 @@ class MappingNode(Node):
         self.imu_base = np.eye(4)
         self.imu_base[:3, 3] = [0.032, 0.0, -0.078]
         self.output = self.declare_parameter('output_dir', './maps/fastlivo2').value
+        self.session = None
+        if self.declare_parameter('record_session', False).value:
+            lidar = np.eye(4)
+            lidar[:3, 3] = [0.032, 0.0, 0.232]
+            self.session = SessionWriter(self.output + '/sessions', {
+                'map_world': self.anchor.tolist(), 'imu_base': self.imu_base.tolist(),
+                'imu_lidar': lidar.tolist(), 'min_height': self.minimum,
+                'max_height': self.maximum, 'resolution': self.grid.resolution,
+                'map_size': self.grid.width * self.grid.resolution,
+                'frontend': 'FAST-LIVO2 RDR 837b7bb + final full-world scan patches',
+                'source': 'full undistorted /fastlivo/cloud_body paired by exact stamp with /aft_mapped_to_init'})
+            self.get_logger().info('Recording full local scans: ' + str(self.session.path))
+        self.body_clouds = OrderedDict()
         self.cache = ObservationCache()
         self.failed = False
         self.ground_plane = None
@@ -56,6 +70,8 @@ class MappingNode(Node):
         self.status_pub = self.create_publisher(String, '/fastlivo/mapping_status', latched)
         self.create_subscription(Odometry, '/aft_mapped_to_init', self.pose, sensor)
         self.create_subscription(PointCloud2, '/fastlivo/cloud_world', self.cloud, sensor)
+        if self.session:
+            self.create_subscription(PointCloud2, '/fastlivo/cloud_body', self.body_cloud, sensor)
         self.create_subscription(LaserScan, '/scan', self.scan, sensor)
         self.create_service(Trigger, '/fastlivo/save_nav_map', self.save)
         self.create_timer(0.5, self.publish)
@@ -72,6 +88,7 @@ class MappingNode(Node):
                 self.failed = True
                 return
             self.cache.pose(message)
+            self.record_available()
             self.consume()
         except ValueError as error:
             self.failed = True
@@ -88,6 +105,33 @@ class MappingNode(Node):
             self.failed = True
             self.get_logger().error(str(error))
 
+    def body_cloud(self, message):
+        if message.header.frame_id != 'aft_mapped':
+            self.failed = True
+            return
+        stamp = ns(message.header.stamp)
+        if stamp <= self.session.last_stamp:
+            return
+        self.body_clouds[stamp] = message
+        while len(self.body_clouds) > 20:
+            self.body_clouds.popitem(last=False)
+        self.record_available()
+
+    def record_available(self):
+        if not self.session or self.failed:
+            return
+        stamps = sorted(set(self.body_clouds).intersection(self.cache.poses))
+        for stamp in stamps:
+            message = self.body_clouds.pop(stamp)
+            if stamp <= self.session.last_stamp:
+                continue
+            try:
+                self.session.append(stamp, cloud_xyz(message), self.cache.poses[stamp][1])
+            except ValueError as error:
+                self.failed = True
+                self.get_logger().error(str(error))
+                return
+
     def consume(self):
         self.check_time()
         if self.failed:
@@ -98,7 +142,8 @@ class MappingNode(Node):
         cloud, _, world_imu = item
         if abs(self.get_clock().now().nanoseconds - ns(cloud.header.stamp)) > 1000000000:
             return
-        points = transform(cloud_xyz(cloud), self.anchor)
+        points_world = cloud_xyz(cloud)
+        points = transform(points_world, self.anchor)
         base = self.anchor @ world_imu @ self.imu_base
         own = np.linalg.norm(points[:, :2] - base[:2, 3], axis=1) < 0.28
         self.geometry.add(points[~own])
@@ -171,7 +216,9 @@ class MappingNode(Node):
         state = {'valid': not self.failed and not self.grid.out_of_bounds and not self.geometry.full and self.ground_plane is not None,
                  'geometry_points': len(self.geometry.voxels), 'scan_observations': self.scans,
                  'free_cells': int((self.grid.data() == 0).sum()), 'reason': 'reset_detected' if self.failed else 'flat_scan_model',
-                 'last_livo_stamp': self.cache.last_processed, 'last_scan_stamp': self.last_scan}
+                 'last_livo_stamp': self.cache.last_processed, 'last_scan_stamp': self.last_scan,
+                 'recording_session': str(self.session.path) if self.session else '',
+                 'recorded_frames': self.session.count if self.session else 0}
         self.status_pub.publish(String(data=json.dumps(state)))
 
     def save(self, request, response):
@@ -184,6 +231,8 @@ class MappingNode(Node):
                      'world_ground_z': -float(self.anchor[2, 3]), 'scan_observations': self.scans,
                      'first_map_base': self.first_base.tolist(), 'ground_plane': self.ground_plane.tolist()}
         try:
+            if self.session:
+                self.session.checkpoint()
             path = save_bundle(self.output, self.grid, self.geometry, alignment)
             response.success, response.message = True, str(path)
             self.get_logger().info('Saved navigation bundle: ' + str(path))
@@ -206,6 +255,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if node.session:
+            node.session.close()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

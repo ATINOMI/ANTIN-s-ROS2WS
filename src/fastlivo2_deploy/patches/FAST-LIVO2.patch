@@ -49,7 +49,7 @@ index af27e8a..dfe4d07 100755
  ament_package()
 \ No newline at end of file
 diff --git a/include/LIVMapper.h b/include/LIVMapper.h
-index 7477e2f..8da2438 100644
+index 7477e2f..0c0dd2d 100644
 --- a/include/LIVMapper.h
 +++ b/include/LIVMapper.h
 @@ -61,6 +61,7 @@ public:
@@ -60,11 +60,13 @@ index 7477e2f..8da2438 100644
    void publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr &pubPath);
    void readParameters(rclcpp::Node::SharedPtr &node);
    template <typename T> void set_posestamp(T &out);
-@@ -175,6 +176,7 @@ public:
+@@ -175,6 +176,9 @@ public:
    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubSubVisualMap;
    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect;
    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap;
 +  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubFullWorldScan;
++  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubFullBodyScan;
++  PointCloudXYZI fullBodyScan;
    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath;
    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudDyn;
@@ -107,7 +109,7 @@ index f38b1f1..182ac0f 100755
    <test_depend>ament_lint_common</test_depend>
  
 diff --git a/src/LIVMapper.cpp b/src/LIVMapper.cpp
-index d67d140..0f9a5d2 100755
+index d67d140..85ff216 100755
 --- a/src/LIVMapper.cpp
 +++ b/src/LIVMapper.cpp
 @@ -15,7 +15,7 @@ which is included as part of this source code package.
@@ -134,7 +136,7 @@ index d67d140..0f9a5d2 100755
  }
  
  void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node) 
-@@ -259,18 +267,19 @@ void LIVMapper::initializeSubscribersAndPublishers(rclcpp::Node::SharedPtr &node
+@@ -259,18 +267,20 @@ void LIVMapper::initializeSubscribersAndPublishers(rclcpp::Node::SharedPtr &node
  {
    image_transport::ImageTransport it(this->node);
    if (p_pre->lidar_type == AVIA) {
@@ -154,11 +156,12 @@ index d67d140..0f9a5d2 100755
    pubSubVisualMap = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_visual_sub_map_before", 100);
    pubLaserCloudEffect = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 100);
    pubLaserCloudMap = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 100);
++  pubFullBodyScan = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/fastlivo/cloud_body", rclcpp::SensorDataQoS().keep_last(5));
 +  pubFullWorldScan = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/fastlivo/cloud_world", rclcpp::SensorDataQoS().keep_last(2));
    pubOdomAftMapped = this->node->create_publisher<nav_msgs::msg::Odometry>("/aft_mapped_to_init", 10);
    pubPath = this->node->create_publisher<nav_msgs::msg::Path>("/path", 10);
    plane_pub = this->node->create_publisher<visualization_msgs::msg::Marker>("/planner_normal", 1);
-@@ -371,6 +380,7 @@ void LIVMapper::handleVIO()
+@@ -371,6 +381,7 @@ void LIVMapper::handleVIO()
      vio_manager->plot_flag = false;
    }
  
@@ -166,7 +169,7 @@ index d67d140..0f9a5d2 100755
    vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
  
    if (imu_prop_enable) 
-@@ -393,8 +403,19 @@ void LIVMapper::handleVIO()
+@@ -393,8 +404,19 @@ void LIVMapper::handleVIO()
    //   visual_sub_map->push_back(temp_map);
    // }
  
@@ -186,7 +189,7 @@ index d67d140..0f9a5d2 100755
  
    euler_cur = RotMtoEuler(_state.rot_end);
    fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
-@@ -475,7 +496,7 @@ void LIVMapper::handleLIO()
+@@ -475,7 +497,7 @@ void LIVMapper::handleLIO()
    
    euler_cur = RotMtoEuler(_state.rot_end);
    geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
@@ -195,7 +198,19 @@ index d67d140..0f9a5d2 100755
  
    double t3 = omp_get_wtime();
  
-@@ -511,11 +532,16 @@ void LIVMapper::handleLIO()
+@@ -501,6 +523,11 @@ void LIVMapper::handleLIO()
+     voxelmap_manager->mapSliding();
+   }
+   
++  // Keep this LIO-stage scan alive until the paired final VIO pose is available.
++  fullBodyScan.resize(feats_undistort->size());
++  for (size_t i = 0; i < feats_undistort->size(); ++i) {
++    RGBpointBodyLidarToIMU(&feats_undistort->points[i], &fullBodyScan.points[i]);
++  }
+   PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);
+   int size = laserCloudFullRes->points.size();
+   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
+@@ -511,11 +538,16 @@ void LIVMapper::handleLIO()
    }
    *pcl_w_wait_pub = *laserCloudWorld;
  
@@ -215,7 +230,7 @@ index d67d140..0f9a5d2 100755
  
    frame_num++;
    aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
-@@ -606,9 +632,16 @@ void LIVMapper::run(rclcpp::Node::SharedPtr &node)
+@@ -606,9 +638,16 @@ void LIVMapper::run(rclcpp::Node::SharedPtr &node)
    while (rclcpp::ok()) 
    {
      rclcpp::spin_some(this->node);
@@ -234,7 +249,7 @@ index d67d140..0f9a5d2 100755
        continue;
      }
      handleFirstFrame();
-@@ -780,7 +813,7 @@ void LIVMapper::RGBpointBodyLidarToIMU(PointType const *const pi, PointType *con
+@@ -780,7 +819,7 @@ void LIVMapper::RGBpointBodyLidarToIMU(PointType const *const pi, PointType *con
  void LIVMapper::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
  {
    if (!lidar_en) return;
@@ -243,7 +258,7 @@ index d67d140..0f9a5d2 100755
  
    double cur_head_time = stamp2Sec(msg->header.stamp) + lidar_time_offset;
    // cout<<"got feature"<<endl;
-@@ -792,11 +825,16 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstShare
+@@ -792,11 +831,16 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstShare
    // ROS_INFO("get point cloud at time: %.6f", stamp2Sec(msg->header.stamp));
    PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
    p_pre->process(msg, ptr);
@@ -261,7 +276,7 @@ index d67d140..0f9a5d2 100755
    sig_buffer.notify_all();
  }
  
-@@ -825,7 +863,7 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstShar
+@@ -825,7 +869,7 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstShar
      RCLCPP_ERROR(this->node->get_logger(), "lidar loop back, clear buffer");
      lid_raw_data_buffer.clear();
    }
@@ -270,7 +285,7 @@ index d67d140..0f9a5d2 100755
    PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
    p_pre->process(msg, ptr);
  
-@@ -848,7 +886,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
+@@ -848,7 +892,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
    if (!imu_en) return;
  
    if (last_timestamp_lidar < 0.0) return;
@@ -279,7 +294,7 @@ index d67d140..0f9a5d2 100755
    sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
    msg->header.stamp = sec2Stamp(stamp2Sec(msg->header.stamp) - imu_time_offset);
    double timestamp = stamp2Sec(msg->header.stamp);
-@@ -882,7 +920,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
+@@ -882,7 +926,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
    last_timestamp_imu = timestamp;
  
    imu_buffer.push_back(msg);
@@ -288,7 +303,7 @@ index d67d140..0f9a5d2 100755
    mtx_buffer.unlock();
    if (imu_prop_enable)
    {
-@@ -923,7 +961,7 @@ void LIVMapper::img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in)
+@@ -923,7 +967,7 @@ void LIVMapper::img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in)
    // double msg_header_time =  stamp2Sec(msg->header.stamp);
    double msg_header_time = stamp2Sec(msg->header.stamp) + img_time_offset;
    if (abs(msg_header_time - last_timestamp_img) < 0.001) return;
@@ -297,7 +312,7 @@ index d67d140..0f9a5d2 100755
    if (last_timestamp_lidar < 0) return;
  
    if (msg_header_time < last_timestamp_img)
-@@ -1094,7 +1132,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
+@@ -1094,7 +1138,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
          for (int i = 0; i < pcl.size(); i++)
          {
            auto pt = pcl[i];
@@ -307,7 +322,7 @@ index d67d140..0f9a5d2 100755
            {
              pt.curvature += (frame_header_time - meas.last_lio_update_time) * 1000.0f;
              meas.pcl_proc_cur->points.push_back(pt);
-@@ -1195,11 +1234,23 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
+@@ -1195,11 +1240,28 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
    RCLCPP_ERROR(this->node->get_logger(), "out sync");
  }
  
@@ -321,6 +336,11 @@ index d67d140..0f9a5d2 100755
 +  message.header.frame_id = "camera_init";
 +  message.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
 +  pubFullWorldScan->publish(message);
++  // Preserve the complete undistorted scan in IMU coordinates for offline BA.
++  pcl::toROSMsg(fullBodyScan, message);
++  message.header.frame_id = "aft_mapped";
++  message.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
++  pubFullBodyScan->publish(message);
 +}
 +
  void LIVMapper::publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager)
@@ -332,7 +352,7 @@ index d67d140..0f9a5d2 100755
    // out_msg.header.frame_id = "camera_init";
    out_msg.encoding = sensor_msgs::image_encodings::BGR8;
    out_msg.image = img_rgb;
-@@ -1261,7 +1312,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
+@@ -1261,7 +1323,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
    { 
      pcl::toROSMsg(*pcl_w_wait_pub, laserCloudmsg); 
    }
@@ -341,7 +361,7 @@ index d67d140..0f9a5d2 100755
    laserCloudmsg.header.frame_id = "camera_init";
    pubLaserCloudFullRes->publish(laserCloudmsg);
  
-@@ -1412,13 +1463,16 @@ template <typename T> void LIVMapper::set_posestamp(T &out)
+@@ -1412,13 +1474,16 @@ template <typename T> void LIVMapper::set_posestamp(T &out)
  
  void LIVMapper::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pubOdomAftMapped)
  {
@@ -360,7 +380,7 @@ index d67d140..0f9a5d2 100755
    tf2::Transform transform;
    tf2::Quaternion q;
    transform.setOrigin(tf2::Vector3(_state.pos_end(0), _state.pos_end(1), _state.pos_end(2)));
-@@ -1433,7 +1487,7 @@ void LIVMapper::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry
+@@ -1433,7 +1498,7 @@ void LIVMapper::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry
  
  void LIVMapper::publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr &mavros_pose_publisher)
  {
@@ -369,7 +389,7 @@ index d67d140..0f9a5d2 100755
    msg_body_pose.header.frame_id = "camera_init";
    set_posestamp(msg_body_pose.pose);
    mavros_pose_publisher->publish(msg_body_pose);
-@@ -1442,8 +1496,9 @@ void LIVMapper::publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseS
+@@ -1442,8 +1507,9 @@ void LIVMapper::publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseS
  void LIVMapper::publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr &pubPath)
  {
    set_posestamp(msg_body_pose.pose);

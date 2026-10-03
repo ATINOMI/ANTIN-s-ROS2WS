@@ -34,6 +34,31 @@ export GZ_PARTITION=mini_nav_fastlivo_deploy
 
 先退出已有仿真、导航和手柄控制进程。两个入口会检查同域的地图、命令及仿真发布者冲突。
 
+## 离线概率重放实验（2026-10-04）
+
+当前实验保留原在线预览，建图入口默认 `record_session:=true`，另外保存完整去畸变 IMU 点云和严格同时间戳融合位姿。停止建图后再生成最终候选地图；在线预览和原 `/fastlivo/save_nav_map` 服务仍是原始布尔累积图，不能当成已优化结果。
+
+先准备独立后端（仅安装到工作区，源码版本锁定）：
+
+```bash
+bash src/mini_nav/mini_nav_fastlivo/offline/build.sh
+bash src/mini_nav/mini_nav_fastlivo/tools/build.sh
+```
+
+建图时可从日志或 `/fastlivo/mapping_status` 的 `recording_session` 字段找到本次 session。停车、退出建图后执行：
+
+```bash
+ros2 run mini_nav_fastlivo finalize_map /实际记录目录/session_xxxxxxxxxxxxxxxx \
+  --output /home/a/ros2_ws/maps/fastlivo2_offline \
+  --binaries /home/a/ros2_ws/build_mapping_offline/bin
+```
+
+输出 JSON 中 `bundles.original_probability` 是本次候选图，交给原导航 launch 的 `map_bundle` 即可。每次生成新目录；原记录、原地图不覆盖。默认方案重放完整3D扫描的真实射线，按帧去重 hit/miss，保留未确认命中为未知，再投影 0.02–0.40m 车高；二维激光噪声命中不写入最终静态墙。体素面积投影保护格边低障碍。
+
+`--backend hba` 显式运行官方 HBA 的无 ROS1 适配并输出两个对照包；第一轮本机 A/B 中 HBA 未改善墙厚，因此默认不启用。HBA 使用下采样关键帧做优化，最终仍重放全部完整原扫描，不使用粗优化图或相机裁剪彩图作为碰撞地图。
+
+边界：只验证了当前单层平地 Gazebo。自由投影沿用明确的平地观测假设，不证明整个车高柱每个高度都被看到。0.02m 三维体素、0.05m 二维格仍有量化包络；前端长期漂移、全局闭环、动态物体离线剔除和实车尚未验证。高度下界2cm与地面容差8mm绑定本机标定，换设备需重新验证；不缩小0.26m硬安全距离掩盖地图错误。
+
 ## 1. 建图，不运行自主导航
 
 ```bash

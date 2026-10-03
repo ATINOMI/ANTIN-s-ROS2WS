@@ -9,6 +9,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from .bundle import load_bundle
 
 
@@ -66,7 +67,8 @@ def preflight(context, mapping, bringup_share):
                  condition=IfCondition(LaunchConfiguration('external_control')), parameters=[use_sim]),
             Node(package='mini_nav_fastlivo', executable='height_mapper', output='screen',
                  parameters=[os.path.join(package_share, 'config', 'mapping.yaml'),
-                             {'output_dir': LaunchConfiguration('output_dir')}])
+                             {'output_dir': LaunchConfiguration('output_dir'),
+                              'record_session': ParameterValue(LaunchConfiguration('record_session'), value_type=bool)}])
         ]
     else:
         root, _, _, _ = load_bundle(LaunchConfiguration('map_bundle').perform(context))
@@ -112,6 +114,7 @@ def description(mapping, bringup_share):
         DeclareLaunchArgument('rviz', default_value='true')
     ]
     if mapping:
+        args.append(DeclareLaunchArgument('record_session', default_value='true', description='Record full local scans for offline final-map generation'))
         args.append(DeclareLaunchArgument('teleop', default_value='true', description='Start PS5 driver and its guard'))
         args.append(DeclareLaunchArgument('external_control', default_value='false', description='Start guard for a separate raw/lease source; teleop must be false'))
         args.append(DeclareLaunchArgument('output_dir', default_value=os.environ.get('FASTLIVO_MAP_DIR', './maps/fastlivo2')))

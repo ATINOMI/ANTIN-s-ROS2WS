@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from mini_nav_fastlivo.offline import main
+main()
