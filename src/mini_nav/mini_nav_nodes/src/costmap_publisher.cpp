@@ -5,6 +5,8 @@
  * @date 2026-10-01
  */
 /* Includes ----------------------------------------------------------------*/
+#include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "mini_nav_nodes/cloud_validation.hpp"
 #include "costmap_publisher.hpp"
 #include "mini_nav_nodes/costmap_display.hpp"
 
@@ -144,6 +146,23 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
       [this](const geometry_msgs::msg::PoseStamped::SharedPtr message) {
         goalPoseCallback(message);
       });
+    }
+    epoch_subscription_ = create_subscription<std_msgs::msg::String>(
+        "/mini_nav/localization_epoch", rclcpp::QoS(1).reliable().transient_local(),
+        [this](std_msgs::msg::String::ConstSharedPtr msg) {
+            if (!localization_epoch_.empty() && localization_epoch_ != msg->data) {
+                clearPath(); waitForNewLocalizationTf();
+                latest_cloud_.reset();
+            }
+            localization_epoch_ = msg->data;
+        });
+    const auto cloud_topic = declare_parameter<std::string>("collision_cloud_topic", "");
+    require_cloud_ = !cloud_topic.empty();
+    if (require_cloud_) {
+        cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+            cloud_topic, rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+                latest_cloud_ = msg; cloud_received_ = std::chrono::steady_clock::now();
+            });
     }
     fuse_local_obstacles_ = declare_parameter<bool>("fuse_local_obstacles", false);
     obstacle_max_range_ = declarePositiveDoubleParameter("planning.obstacle_max_range", 2.5);
@@ -1142,6 +1161,31 @@ bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
                     fused_costmap_->GetCost(mx, my) != kUnknownCost) fused_costmap_->SetCost(mx, my, kLethalObstacle);
             }
         } catch (const tf2::TransformException &) { return false; }
+    }
+    if (require_cloud_) {
+        if (!latest_cloud_ || std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - cloud_received_).count() > 0.8) return false;
+        const auto & cloud = *latest_cloud_;
+        const auto stamp = rclcpp::Time(cloud.header.stamp, get_clock()->get_clock_type());
+        const double age = (now() - stamp).seconds();
+        if (age < -0.1 || age > 0.8 || cloud.header.frame_id.empty() ||
+            !ValidCollisionCloud(cloud)) return false;
+        try {
+            const auto tf = tf_buffer_->lookupTransform(frame_id_, cloud.header.frame_id, stamp,
+                rclcpp::Duration::from_seconds(0.05));
+            sensor_msgs::PointCloud2ConstIterator<float> x(cloud, "x"), y(cloud, "y"), z(cloud, "z");
+            for (; x != x.end(); ++x, ++y, ++z) {
+                if (!std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) continue;
+                geometry_msgs::msg::PoseStamped source, target;
+                source.pose.position.x = *x; source.pose.position.y = *y; source.pose.position.z = *z;
+                source.pose.orientation.w = 1.0;
+                tf2::doTransform(source, target, tf);
+                unsigned int mx, my;
+                if (fused_costmap_->WorldToMap(target.pose.position.x, target.pose.position.y, mx, my) &&
+                    fused_costmap_->GetCost(mx, my) != kUnknownCost)
+                    fused_costmap_->SetCost(mx, my, kLethalObstacle);
+            }
+        } catch (const std::exception &) { return false; }
     }
     planning_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(
       mini_nav_core::InflateCostmap(*fused_costmap_, inflation_parameters_));

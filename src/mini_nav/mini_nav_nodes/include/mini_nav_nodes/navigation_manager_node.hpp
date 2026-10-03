@@ -121,6 +121,8 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr epoch_subscription_;
+    std::string localization_epoch_;
     uint64_t generation_{0};
     bool request_pending_{false};
     bool motion_enabled_{false};

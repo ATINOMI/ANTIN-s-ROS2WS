@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mini_nav_teleop</name><version>0.1.0</version>
+  <description>USB DualForge manual control for the isolated mini_nav Gazebo simulation</description>
+  <maintainer email="mini_nav@example.com">mini_nav</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>std_srvs</depend>
+  <depend>pluginlib</depend>
+  <depend>rviz_common</depend>
+  <depend>qtbase5-dev</depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <depend>std_msgs</depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>mini_nav_nodes</exec_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_index_cpp</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

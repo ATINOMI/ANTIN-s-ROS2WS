@@ -1,0 +1,5 @@
+<library path="ps5_control_panel">
+  <class name="mini_nav_teleop/Ps5Control" type="mini_nav_teleop::Ps5ControlPanel" base_class_type="rviz_common::Panel">
+    <description>PS5 手柄控制开关与双摇杆限速设置</description>
+  </class>
+</library>

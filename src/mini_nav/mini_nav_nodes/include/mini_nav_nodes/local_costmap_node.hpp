@@ -13,6 +13,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -69,6 +70,10 @@ namespace mini_nav_nodes
         double obstacle_max_range_ = 2.5;
         double raytrace_max_range_ = 3.0;
         std::optional<rclcpp::Time> last_scan_stamp_;
+        rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscription_;
+        sensor_msgs::msg::PointCloud2::ConstSharedPtr latest_cloud_;
+        std::chrono::steady_clock::time_point cloud_received_{};
+        bool require_cloud_{false};
         bool valid_ = false;
     };
 }

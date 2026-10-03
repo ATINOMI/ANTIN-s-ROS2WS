@@ -1,0 +1,20 @@
+{
+  "source_path": "/media/a/新加卷/工科学习资料/计算机/pydualforge",
+  "source_head": "06ea424ad587657621db0aec9b4eee0f754574ee",
+  "source_has_uncommitted_changes": true,
+  "source_file_sha256": {
+    "__init__.py": "10154ef800663b880a75bd44e17e333ec2be3f553431af10b35ebaf86bc6f169",
+    "constants.py": "8cd0af4a5bdb0014149972c93574e25fa1cfbaef503b99051b01bf0571ca3f74",
+    "device.py": "2559e7de3ca980ae5f4f6f34844934308cca9f267b8131b695144dfbfcbd4a2a",
+    "feature.py": "99b01a07c343bd1a5dfc619c782e844302ee2d33d432f02c1b8d12dc004223e8",
+    "input_parser.py": "8eb7678f2526be676fa3e7238101af2d215f1d2b4dd9cbfecfd12a7f76f0b0e3",
+    "output_builder.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "trigger_effects.py": "d21f6b756c51725d621e13af5db0f8887f01c3d94dc2f8bcbb2a7294cd80517d"
+  },
+  "local_changes": [
+    "Guard Windows DLL directory calls",
+    "Accept only 64-byte USB input report 0x01",
+    "Join USB read thread before closing HID handle",
+    "Select USB or unknown-bus main interface only"
+  ]
+}

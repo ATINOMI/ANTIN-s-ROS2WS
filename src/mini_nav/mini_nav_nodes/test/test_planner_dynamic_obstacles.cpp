@@ -5,6 +5,8 @@
  * @date 2026-10-01
  */
 #include <cmath>
+#include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "mini_nav_nodes/cloud_validation.hpp"
 #include <gtest/gtest.h>
 #include "costmap_publisher.hpp"
 
@@ -52,6 +54,20 @@ protected:
      * @param node 被测规划节点。
      * @return 重建是否成功。
      */
+    static void SetCloud(CostmapPublisherNode & node, double age = 0.0)
+    {
+        node.require_cloud_ = true;
+        auto cloud = std::make_shared<sensor_msgs::msg::PointCloud2>();
+        cloud->header.frame_id = "map";
+        cloud->header.stamp = node.now() - rclcpp::Duration::from_seconds(age);
+        sensor_msgs::PointCloud2Modifier modifier(*cloud);
+        modifier.setPointCloud2FieldsByString(1, "xyz");
+        modifier.resize(1);
+        sensor_msgs::PointCloud2Iterator<float> x(*cloud, "x"), y(*cloud, "y"), z(*cloud, "z");
+        *x = 0.5F; *y = 0.5F; *z = 0.2F;
+        node.latest_cloud_ = cloud;
+        node.cloud_received_ = std::chrono::steady_clock::now();
+    }
     static bool Rebuild(CostmapPublisherNode & node) { return node.rebuildPlanningMap(); }
     /**
      * @brief 读取规划图指定单元的内部代价。
@@ -90,4 +106,29 @@ TEST_F(CostmapPublisherNodeTest, StaleLaserCannotProduceAnUpdatedPlan)
     EXPECT_FALSE(Rebuild(node));
     EXPECT_FALSE(node.PlanAndPublish({34, 42}, {27, 42}));
 }
+TEST_F(CostmapPublisherNodeTest, HeightCloudMarksObstacleOnceAndStaleCloudRejectsPlan)
+{
+    CostmapPublisherNode node(40, 30, 0.1, 0.0, 0.0, 0, 1000);
+    SetScan(node);
+    SetCloud(node);
+    ASSERT_TRUE(Rebuild(node));
+    EXPECT_EQ(Cost(node, 29, 51), 254);
+    SetCloud(node, 1.0);
+    EXPECT_FALSE(Rebuild(node));
+}
+
+TEST(CollisionCloudLayout, RejectsTruncatedOrWrongTypedData)
+{
+    sensor_msgs::msg::PointCloud2 cloud;
+    sensor_msgs::PointCloud2Modifier modifier(cloud);
+    modifier.setPointCloud2FieldsByString(1, "xyz");
+    modifier.resize(1);
+    EXPECT_TRUE(ValidCollisionCloud(cloud));
+    cloud.data.pop_back();
+    EXPECT_FALSE(ValidCollisionCloud(cloud));
+    cloud.data.push_back(0);
+    cloud.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT64;
+    EXPECT_FALSE(ValidCollisionCloud(cloud));
+}
+
 }

@@ -47,6 +47,7 @@ private:
     rclcpp::Time clock_time_{0, 0, RCL_ROS_TIME};
     bool active_{false};
     double timeout_{0.35};
+    double max_linear_speed_{0.15}, max_angular_speed_{0.60};
     rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr command_subscription_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr lease_subscription_;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr publisher_;

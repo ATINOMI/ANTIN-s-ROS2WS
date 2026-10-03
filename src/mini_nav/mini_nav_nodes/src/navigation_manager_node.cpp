@@ -93,6 +93,16 @@ NavigationManagerNode::NavigationManagerNode() : Node("navigation_manager")
             quality_valid_ = msg->data; quality_received_ = Clock::now();
             if (!quality_valid_ && task_) lease(false);
         });
+    // 定位会话改变时撤销旧任务，避免质量恢复后继续旧目标。
+    epoch_subscription_ = create_subscription<std_msgs::msg::String>(
+        "/mini_nav/localization_epoch", rclcpp::QoS(1).reliable().transient_local(),
+        [this](std_msgs::msg::String::ConstSharedPtr msg) {
+            if (!localization_epoch_.empty() && localization_epoch_ != msg->data) {
+                quality_valid_ = false;
+                if (task_) finish("localization_epoch_changed"); else lease(false);
+            }
+            localization_epoch_ = msg->data;
+        });
     local_subscription_ = create_subscription<std_msgs::msg::Bool>(
         "/mini_nav/local_costmap_valid", rclcpp::QoS(1).reliable(), [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
             local_valid_ = msg->data; local_received_ = Clock::now();

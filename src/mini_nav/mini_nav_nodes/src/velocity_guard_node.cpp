@@ -20,6 +20,10 @@ VelocityGuardNode::VelocityGuardNode() : Node("velocity_guard")
 {
     timeout_ = declare_parameter<double>("command_timeout", 0.35);
     if (!std::isfinite(timeout_) || timeout_ <= 0.1 || timeout_ > 1.0) throw std::invalid_argument("command_timeout");
+    max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.15);
+    max_angular_speed_ = declare_parameter<double>("max_angular_speed", 0.60);
+    if (!std::isfinite(max_linear_speed_) || max_linear_speed_ <= 0.0 || max_linear_speed_ > 2.0) throw std::invalid_argument("max_linear_speed");
+    if (!std::isfinite(max_angular_speed_) || max_angular_speed_ <= 0.0 || max_angular_speed_ > 2.0) throw std::invalid_argument("max_angular_speed");
     clock_time_ = now(); clock_advanced_ = Clock::now();
     auto qos = rclcpp::QoS(1).reliable();
     publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>("/cmd_vel", qos);
@@ -70,7 +74,7 @@ void VelocityGuardNode::tick()
         const auto & v = command_.twist.linear; const auto & w = command_.twist.angular;
         const double age = (stamp - rclcpp::Time(command_.header.stamp, get_clock()->get_clock_type())).seconds();
         if (command_.header.frame_id != "base_footprint" || !std::isfinite(v.x) || !std::isfinite(w.z) ||
-            std::abs(v.x) > 0.15 + 1e-9 || std::abs(w.z) > 0.60 || v.y != 0.0 || v.z != 0.0 ||
+            std::abs(v.x) > max_linear_speed_ + 1e-9 || std::abs(w.z) > max_angular_speed_ || v.y != 0.0 || v.z != 0.0 ||
             w.x != 0.0 || w.y != 0.0 || !std::isfinite(age) || age < -0.1 || age > timeout_) reason = "invalid_command";
     }
     /* 默认构造即零速度，只有全部前提通过才复制缓存命令；失败分支不能沿用上一帧速度。

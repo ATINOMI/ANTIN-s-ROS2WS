@@ -8,6 +8,8 @@
 #include "mini_nav_nodes/costmap_display.hpp"
 
 #include <algorithm>
+#include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "mini_nav_nodes/cloud_validation.hpp"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -112,6 +114,14 @@ namespace mini_nav_nodes
         scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
           scan_topic, rclcpp::SensorDataQoS(),
           [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) { scanCallback(scan); });
+        const auto cloud_topic = declare_parameter<std::string>("collision_cloud_topic", "");
+        require_cloud_ = !cloud_topic.empty();
+        if (require_cloud_) {
+            cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+                cloud_topic, rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+                    latest_cloud_ = msg; cloud_received_ = std::chrono::steady_clock::now();
+                });
+        }
         timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / publish_frequency),
           [this]() { publishMap(); });
     }
@@ -231,6 +241,29 @@ namespace mini_nav_nodes
             invalidate("scan timeout");
         }
         grid_->Expire(now().seconds(), observation_persistence_);
+        bool cloud_valid = !require_cloud_;
+        if (require_cloud_ && latest_cloud_) {
+            const auto & cloud = *latest_cloud_;
+            const auto stamp = rclcpp::Time(cloud.header.stamp, get_clock()->get_clock_type());
+            const double age = (now() - stamp).seconds();
+            cloud_valid = age >= -0.1 && age <= max_scan_age_ &&
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - cloud_received_).count() <= max_scan_age_ &&
+                !cloud.header.frame_id.empty() && ValidCollisionCloud(cloud);
+            if (cloud_valid) {
+                try {
+                    const auto tf = tf_buffer_->lookupTransform(odom_frame_id_, cloud.header.frame_id, stamp,
+                        rclcpp::Duration::from_seconds(0.05));
+                    tf2::Transform sensor_to_odom;
+                    tf2::fromMsg(tf.transform, sensor_to_odom);
+                    sensor_msgs::PointCloud2ConstIterator<float> x(cloud, "x"), y(cloud, "y"), z(cloud, "z");
+                    for (; x != x.end(); ++x, ++y, ++z) {
+                        if (!std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) continue;
+                        const auto point = sensor_to_odom * tf2::Vector3(*x, *y, *z);
+                        grid_->MarkObstacle(point.x(), point.y(), stamp.seconds());
+                    }
+                } catch (const std::exception &) { cloud_valid = false; }
+            }
+        }
         const auto & raw = grid_->Raw();
         const mini_nav_core::Costmap2D inflated = valid_ ? grid_->Inflated() : raw;
         nav_msgs::msg::OccupancyGrid message;
@@ -250,7 +283,7 @@ namespace mini_nav_nodes
         }
         map_publisher_->publish(message);
         std_msgs::msg::Bool status;
-        status.data = valid_;
+        status.data = valid_ && cloud_valid;
         valid_publisher_->publish(status);
     }
 }

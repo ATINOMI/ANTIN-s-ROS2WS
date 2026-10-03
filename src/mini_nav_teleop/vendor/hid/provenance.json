@@ -1,0 +1,7 @@
+{
+  "package": "hid",
+  "version": "1.0.9",
+  "upstream": "https://github.com/apmorton/pyhidapi",
+  "license": "MIT",
+  "module_sha256": "1348add0a8570a007deafa511a2a8e11f1459d191f87fb9efa06352f395a1fbc"
+}

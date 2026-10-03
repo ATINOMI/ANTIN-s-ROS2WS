@@ -1,0 +1,11 @@
+<?xml version="1.0"?><package format="3">
+<name>fastlivo_sim</name><version>0.1.0</version>
+<description>Isolated Waffle 3D lidar camera IMU acceptance for FAST-LIVO2</description>
+<maintainer email="mini_nav@example.com">mini_nav</maintainer><license>Apache-2.0</license>
+<buildtool_depend>ament_cmake</buildtool_depend>
+<exec_depend>ament_index_python</exec_depend><exec_depend>launch</exec_depend><exec_depend>rviz2</exec_depend>
+<exec_depend>mini_nav_teleop</exec_depend>
+<exec_depend>fast_livo</exec_depend><exec_depend>ros_gz_sim</exec_depend><exec_depend>ros_gz_bridge</exec_depend><exec_depend>ros_gz_image</exec_depend><exec_depend>turtlebot3_gazebo</exec_depend><exec_depend>launch_ros</exec_depend><exec_depend>rclpy</exec_depend><exec_depend>cv_bridge</exec_depend>
+<exec_depend>sensor_msgs</exec_depend><exec_depend>std_msgs</exec_depend><exec_depend>sensor_msgs_py</exec_depend><exec_depend>std_srvs</exec_depend><exec_depend>python3-numpy</exec_depend>
+<test_depend>ament_cmake_pytest</test_depend>
+<export><build_type>ament_cmake</build_type></export></package>

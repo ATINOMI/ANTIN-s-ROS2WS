@@ -1,7 +1,14 @@
 build/
 install/
 log/
+build_fastlivo/
+install_fastlivo/
+log_fastlivo/
+build_fastlivo_deps/
+install_fastlivo_deps/
+maps/fastlivo2/
 src/rqt_robot_steering/
 *.pyc
 __pycache__/
 .vscode/
+maps/fastlivo2_acceptance/

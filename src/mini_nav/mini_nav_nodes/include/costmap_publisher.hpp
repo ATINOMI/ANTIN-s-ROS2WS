@@ -7,6 +7,8 @@
 #pragma once
 
 /* Includes ----------------------------------------------------------------*/
+#include "std_msgs/msg/string.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -180,6 +182,12 @@ namespace mini_nav_nodes
             std::unique_ptr<mini_nav_core::Costmap2D> fused_costmap_;
             bool fuse_local_obstacles_{false};
             rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
+            rclcpp::Subscription<std_msgs::msg::String>::SharedPtr epoch_subscription_;
+            std::string localization_epoch_;
+            rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscription_;
+            sensor_msgs::msg::PointCloud2::ConstSharedPtr latest_cloud_;
+            std::chrono::steady_clock::time_point cloud_received_{};
+            bool require_cloud_{false};
             sensor_msgs::msg::LaserScan::ConstSharedPtr latest_scan_;
             std::chrono::steady_clock::time_point scan_received_{};
             double obstacle_max_range_{2.5};

@@ -1,0 +1,66 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7344d08..e63a44a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -221,6 +221,21 @@ else(ROS_EDITION STREQUAL "ROS2")
+   # uncomment the following section in order to fill in
+   # further dependencies manually.
+   # find_package(<dependency> REQUIRED)
++  option(BUILD_LIVOX_DRIVER "Build hardware driver (OFF builds original messages only)" ON)
++  if(NOT BUILD_LIVOX_DRIVER)
++    find_package(ament_cmake REQUIRED)
++    find_package(rosidl_default_generators REQUIRED)
++    find_package(builtin_interfaces REQUIRED)
++    find_package(std_msgs REQUIRED)
++    rosidl_generate_interfaces(livox_interfaces2
++      "msg/CustomPoint.msg" "msg/CustomMsg.msg"
++      DEPENDENCIES builtin_interfaces std_msgs
++      LIBRARY_NAME ${PROJECT_NAME})
++    ament_export_dependencies(rosidl_default_runtime)
++    ament_package()
++    return()
++  endif()
++
+   find_package(ament_cmake_auto REQUIRED)
+   ament_auto_find_build_dependencies()
+   find_package(PCL REQUIRED)
+diff --git a/package.xml b/package.xml
+new file mode 100644
+--- /dev/null
++++ b/package.xml
+@@ -0,0 +1,35 @@
++<?xml version="1.0"?>
++<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
++<package format="3">
++  <name>livox_ros_driver2</name>
++  <version>1.0.0</version>
++  <description>The ROS device driver for Livox 3D LiDARs, for ROS2</description>
++  <maintainer email="dev@livoxtech.com">feng</maintainer>
++  <license>MIT</license>
++
++  <buildtool_depend>ament_cmake_auto</buildtool_depend>
++  <build_depend>rosidl_default_generators</build_depend>
++  <member_of_group>rosidl_interface_packages</member_of_group>
++
++  <depend>rclcpp</depend>
++  <depend>rclcpp_components</depend>
++  <depend>std_msgs</depend>
++  <depend>sensor_msgs</depend>
++  <depend>rcutils</depend>
++  <depend>pcl_conversions</depend>
++  <depend>rcl_interfaces</depend>
++  <depend>libpcl-all-dev</depend>
++
++  <exec_depend>rosbag2</exec_depend>
++  <exec_depend>rosidl_default_runtime</exec_depend>
++
++  <test_depend>ament_lint_auto</test_depend>
++  <test_depend>ament_lint_common</test_depend>
++
++  <depend>git</depend>
++  <depend>apr</depend>
++
++  <export>
++    <build_type>ament_cmake</build_type>
++  </export>
++</package>

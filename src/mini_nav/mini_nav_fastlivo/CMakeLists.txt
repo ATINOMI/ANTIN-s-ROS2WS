@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.16)
+project(mini_nav_fastlivo)
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+ament_python_install_package(${PROJECT_NAME})
+set(SMALL_GICP_PYTHON_ROOT "" CACHE PATH "Isolated Python root containing small_gicp 1.0.1")
+file(GLOB SMALL_GICP_MODULE "${SMALL_GICP_PYTHON_ROOT}/small_gicp*.so")
+if(NOT SMALL_GICP_MODULE OR NOT EXISTS "${SMALL_GICP_PYTHON_ROOT}/small_gicp-1.0.1.dist-info")
+  message(FATAL_ERROR "Install small_gicp==1.0.1 into an isolated directory and set SMALL_GICP_PYTHON_ROOT")
+endif()
+install(FILES ${SMALL_GICP_MODULE} DESTINATION lib/${PROJECT_NAME}/deps)
+install(DIRECTORY "${SMALL_GICP_PYTHON_ROOT}/small_gicp.libs"
+  "${SMALL_GICP_PYTHON_ROOT}/small_gicp-1.0.1.dist-info" DESTINATION lib/${PROJECT_NAME}/deps)
+install(PROGRAMS scripts/height_mapper scripts/prior_localizer DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_mapping_core test/test_mapping_core.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR})
+  ament_add_pytest_test(test_observation_cache test/test_observation_cache.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR})
+  ament_add_pytest_test(test_registration test/test_registration.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:${SMALL_GICP_PYTHON_ROOT})
+endif()
+ament_package()

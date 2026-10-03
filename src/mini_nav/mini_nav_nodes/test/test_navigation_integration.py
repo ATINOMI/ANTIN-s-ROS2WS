@@ -353,6 +353,20 @@ class NavigationIntegration(unittest.TestCase):
         self.spin_for(0.2)
         self.assertEqual(self.command, (0.0, 0.0))
 
+    def test_localization_epoch_cancels_task_without_automatic_resume(self):
+        """定位会话改变终止旧任务，质量恢复不续跑。"""
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        publisher = self.node.create_publisher(String, '/mini_nav/localization_epoch', latched)
+        publisher.publish(String(data='map/session/0'))
+        self.spin_for(0.3)
+        _, result = self.send(1.0)
+        self.wait(lambda: self.command[0] > 0.0)
+        publisher.publish(String(data='map/session/1'))
+        self.wait(result.done)
+        self.assertEqual(result.result().result.error_msg, 'localization_epoch_changed')
+        self.spin_for(0.5)
+        self.assertEqual(self.command, (0.0, 0.0))
+
     def test_dynamic_obstacle_replan_and_arrival(self):
         """验证新增动态障碍触发重规划并最终到达。
         """

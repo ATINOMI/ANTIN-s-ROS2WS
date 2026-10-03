@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-09-30
+最后更新：2026-10-03
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -17,6 +17,12 @@
 主入口已接入 `NavigateToPose -> ComputePathToPose -> FollowPath` Action 任务链、取消/抢占、原始激光融合重规划、有限失败期限、AMCL 主簇与定位质量门控、独立命令看门狗、统一任务暂停入口和 RViz 反馈/取消按钮。
 
 使用说明与边界见 [单目标导航任务](navigation_tasks.md)，本轮验证记录见 [实施报告](../logs/26-9-30/navigation_completion_implementation.md)。下方按日期保留以前的完成记录；旧记录中的测试数量和未完成项表示当时状态。
+
+## FAST-LIVO2 双入口原型（2026-10-03）
+
+新增独立 `mini_nav_fastlivo` 包，建图入口保存三维定位图与二维高度导航图；导航入口独立重启后只读加载旧图，经人工初值和 GICP 先验约束定位，复用原导航 Action 与核心。现有平地 Gazebo 的原起点、偏移起点导航及前端失效停车通过；尚未验收实车、全局自动重定位和长程精度。
+
+启动步骤见 [使用说明](../mini_nav_fastlivo/README.md)，改动、验收证据和 RViz 截图限制见 [实施报告](../logs/26-10-3/fastlivo_two_launch_implementation.md)。AMCL 原入口保留。
 
 ## 当前已完成
 

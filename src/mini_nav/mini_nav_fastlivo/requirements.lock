@@ -1,0 +1,2 @@
+# CPython 3.12 Linux x86_64 wheel; system numpy remains managed by ROS/apt.
+small-gicp==1.0.1 --hash=sha256:cb08400204c468acf5145503f5ab8c0bd495871d335975638916e64b32cf8452

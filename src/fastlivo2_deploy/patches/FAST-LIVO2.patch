@@ -1,0 +1,505 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index af27e8a..dfe4d07 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -30,9 +30,10 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM|AARCH64)")
+   endif()
+   add_definitions(-DARM_ARCH)
+ else()
+-  # x86-64 (Intel/AMD) optimizations
+-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -mtune=native -funroll-loops") #-flto
+-  message(STATUS "Using general x86 optimizations: -O3 -march=native -mtune=native -funroll-loops") 
++  # Match the baseline Eigen alignment ABI used by Ubuntu PCL binaries.
++  # -march=native can enable AVX allocation rules incompatible with those libraries.
++  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -mtune=native -funroll-loops") #-flto
++  message(STATUS "Using general x86 optimizations: -O3 -mtune=native -funroll-loops")
+   add_definitions(-DX86_ARCH)
+ endif()
+ 
+@@ -126,7 +127,7 @@ set(dependencies
+   livox_ros_driver2
+ )
+ 
+-set(COMMON_DEPENDENCIES OpenMP::OpenMP_CXX fmt::fmt)
++set(COMMON_DEPENDENCIES OpenMP::OpenMP_CXX fmt::fmt Sophus::Sophus)
+ 
+ # link_directories(${COMMON_DEPENDENCIES}
+ #   ${vikit_common_LIBRARIES}/libvikit_common.so
+@@ -149,8 +150,7 @@ ament_target_dependencies(laser_mapping ${dependencies})
+ 
+ # linking libraries or executables to public dependencies
+ target_link_libraries(laser_mapping 
+-    ${CMAKE_SOURCE_DIR}/../../install/vikit_common/lib/libvikit_common.so 
+-    ${CMAKE_SOURCE_DIR}/../../install/vikit_ros/lib/libvikit_ros.so
++    vikit_common::vikit_common vikit_ros::vikit_ros Sophus::Sophus
+     ${COMMON_DEPENDENCIES}
+ )
+ target_link_libraries(vio ${COMMON_DEPENDENCIES})
+@@ -209,4 +209,11 @@ ament_export_dependencies(
+   Sophus
+ )
+ 
++if(BUILD_TESTING)
++  find_package(ament_cmake_gtest REQUIRED)
++  ament_add_gtest(test_gazebo_snapshot test/test_gazebo_snapshot.cpp)
++  ament_target_dependencies(test_gazebo_snapshot ${dependencies})
++  target_link_libraries(test_gazebo_snapshot pre ${PCL_LIBRARIES})
++endif()
++
+ ament_package()
+\ No newline at end of file
+diff --git a/include/LIVMapper.h b/include/LIVMapper.h
+index 7477e2f..8da2438 100644
+--- a/include/LIVMapper.h
++++ b/include/LIVMapper.h
+@@ -61,6 +61,7 @@ public:
+   void publish_effect_world(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
+   void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pmavros_pose_publisherubOdomAftMapped);
+   void publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr &mavros_pose_publisher);
++  void publish_full_world_scan();
+   void publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr &pubPath);
+   void readParameters(rclcpp::Node::SharedPtr &node);
+   template <typename T> void set_posestamp(T &out);
+@@ -175,6 +176,7 @@ public:
+   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubSubVisualMap;
+   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect;
+   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMap;
++  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubFullWorldScan;
+   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
+   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath;
+   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudDyn;
+diff --git a/include/common_lib.h b/include/common_lib.h
+index 6202918..f7b02b6 100755
+--- a/include/common_lib.h
++++ b/include/common_lib.h
+@@ -46,7 +46,8 @@ enum LID_TYPE
+   L515 = 4,
+   XT32 = 5,
+   PANDAR128 = 6,
+-  ROBOSENSE = 7
++  ROBOSENSE = 7,
++  GAZEBO_SNAPSHOT = 8
+ };
+ enum SLAM_MODE
+ {
+diff --git a/include/preprocess.h b/include/preprocess.h
+index bb550cf..4c51f6b 100755
+--- a/include/preprocess.h
++++ b/include/preprocess.h
+@@ -178,6 +178,7 @@ private:
+   void xt32_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+   void Pandar128_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+   void robosense_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
++  void gazebo_snapshot_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+   void l515_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
+   void pub_func(PointCloudXYZI &pl, const rclcpp::Time &ct);
+diff --git a/package.xml b/package.xml
+index f38b1f1..182ac0f 100755
+--- a/package.xml
++++ b/package.xml
+@@ -46,6 +46,7 @@
+ 
+   <member_of_group>rosidl_interface_packages</member_of_group>
+ 
++  <test_depend>ament_cmake_gtest</test_depend>
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
+ 
+diff --git a/src/LIVMapper.cpp b/src/LIVMapper.cpp
+index d67d140..0f9a5d2 100755
+--- a/src/LIVMapper.cpp
++++ b/src/LIVMapper.cpp
+@@ -15,7 +15,7 @@ which is included as part of this source code package.
+ 
+ using namespace Sophus;
+ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name)
+-    : node(std::make_shared<rclcpp::Node>(node_name)),
++    : node(node),
+       extT(0, 0, 0),
+       extR(M3D::Identity())
+ {
+@@ -174,6 +174,14 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
+   this->node->get_parameter("publish.pub_scan_num", pub_scan_num);
+   this->node->get_parameter("publish.pub_effect_point_en", pub_effect_point_en);
+   this->node->get_parameter("publish.dense_map_en", dense_map_en);
++  if (p_pre->point_filter_num < 1 || !std::isfinite(p_pre->blind) || p_pre->blind < 0 ||
++      !std::isfinite(filter_size_surf_min) || filter_size_surf_min <= 0) {
++    throw std::invalid_argument("Invalid preprocess stride, blind range or voxel size");
++  }
++  if (extrinT.size() != 3 || extrinR.size() != 9 ||
++      cameraextrinT.size() != 3 || cameraextrinR.size() != 9) {
++    throw std::invalid_argument("Extrinsics require translation[3] and rotation[9]");
++  }
+ }
+ 
+ void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node) 
+@@ -259,18 +267,19 @@ void LIVMapper::initializeSubscribersAndPublishers(rclcpp::Node::SharedPtr &node
+ {
+   image_transport::ImageTransport it(this->node);
+   if (p_pre->lidar_type == AVIA) {
+-    sub_pcl = this->node->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 200000, std::bind(&LIVMapper::livox_pcl_cbk, this, std::placeholders::_1));
++    sub_pcl = this->node->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, rclcpp::SensorDataQoS().keep_last(5), std::bind(&LIVMapper::livox_pcl_cbk, this, std::placeholders::_1));
+   } else {
+-    sub_pcl = this->node->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, 200000, std::bind(&LIVMapper::standard_pcl_cbk, this, std::placeholders::_1));
++    sub_pcl = this->node->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS().keep_last(5), std::bind(&LIVMapper::standard_pcl_cbk, this, std::placeholders::_1));
+   }
+-  sub_imu = this->node->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 200000, std::bind(&LIVMapper::imu_cbk, this, std::placeholders::_1));
+-  sub_img = this->node->create_subscription<sensor_msgs::msg::Image>(img_topic, 200000, std::bind(&LIVMapper::img_cbk, this, std::placeholders::_1));
++  sub_imu = this->node->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_last(400), std::bind(&LIVMapper::imu_cbk, this, std::placeholders::_1));
++  sub_img = this->node->create_subscription<sensor_msgs::msg::Image>(img_topic, rclcpp::SensorDataQoS().keep_last(5), std::bind(&LIVMapper::img_cbk, this, std::placeholders::_1));
+   
+   pubLaserCloudFullRes = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 100);
+   pubNormal = this->node->create_publisher<visualization_msgs::msg::MarkerArray>("/visualization_marker", 100);
+   pubSubVisualMap = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_visual_sub_map_before", 100);
+   pubLaserCloudEffect = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 100);
+   pubLaserCloudMap = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 100);
++  pubFullWorldScan = this->node->create_publisher<sensor_msgs::msg::PointCloud2>("/fastlivo/cloud_world", rclcpp::SensorDataQoS().keep_last(2));
+   pubOdomAftMapped = this->node->create_publisher<nav_msgs::msg::Odometry>("/aft_mapped_to_init", 10);
+   pubPath = this->node->create_publisher<nav_msgs::msg::Path>("/path", 10);
+   plane_pub = this->node->create_publisher<visualization_msgs::msg::Marker>("/planner_normal", 1);
+@@ -371,6 +380,7 @@ void LIVMapper::handleVIO()
+     vio_manager->plot_flag = false;
+   }
+ 
++  const V3D before_visual_position = _state.pos_end;
+   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
+ 
+   if (imu_prop_enable) 
+@@ -393,8 +403,19 @@ void LIVMapper::handleVIO()
+   //   visual_sub_map->push_back(temp_map);
+   // }
+ 
++  RCLCPP_INFO_THROTTLE(this->node->get_logger(), *this->node->get_clock(), 5000,
++      "Final VIO state: features=%d position_correction_m=%.9f stamp=%.3f",
++      vio_manager->total_points, (_state.pos_end - before_visual_position).norm(),
++      LidarMeasures.last_lio_update_time);
++  // Reproject this scan using the final fused pose before publishing its colors.
++  transformLidar(_state.rot_end, _state.pos_end,
++      dense_map_en ? feats_undistort : feats_down_body, pcl_w_wait_pub);
++  publish_full_world_scan();
+   publish_frame_world(pubLaserCloudFullRes, vio_manager);
+   publish_img_rgb(pubImage, vio_manager);
++  publish_odometry(pubOdomAftMapped);
++  publish_path(pubPath);
++  publish_mavros(mavros_pose_publisher);
+ 
+   euler_cur = RotMtoEuler(_state.rot_end);
+   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
+@@ -475,7 +496,7 @@ void LIVMapper::handleLIO()
+   
+   euler_cur = RotMtoEuler(_state.rot_end);
+   geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
+-  publish_odometry(pubOdomAftMapped);
++  if (slam_mode_ != LIVO) publish_odometry(pubOdomAftMapped);
+ 
+   double t3 = omp_get_wtime();
+ 
+@@ -511,11 +532,16 @@ void LIVMapper::handleLIO()
+   }
+   *pcl_w_wait_pub = *laserCloudWorld;
+ 
+-  publish_frame_world(pubLaserCloudFullRes, vio_manager);
++  if (slam_mode_ != LIVO) {
++    publish_full_world_scan();
++    publish_frame_world(pubLaserCloudFullRes, vio_manager);
++  }
+   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
+   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
+-  publish_path(pubPath);
+-  publish_mavros(mavros_pose_publisher);
++  if (slam_mode_ != LIVO) {
++    publish_path(pubPath);
++    publish_mavros(mavros_pose_publisher);
++  }
+ 
+   frame_num++;
+   aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
+@@ -606,9 +632,16 @@ void LIVMapper::run(rclcpp::Node::SharedPtr &node)
+   while (rclcpp::ok()) 
+   {
+     rclcpp::spin_some(this->node);
+-    if (!sync_packages(LidarMeasures)) 
++    if (!rclcpp::ok()) break;
++    if (!sync_packages(LidarMeasures))
+     {
+-      rate.sleep();
++      try {
++        rate.sleep();
++      } catch (const std::runtime_error &) {
++        // Jazzy can invalidate the context between the check and sleep on SIGINT.
++        if (rclcpp::ok()) throw;
++        break;
++      }
+       continue;
+     }
+     handleFirstFrame();
+@@ -780,7 +813,7 @@ void LIVMapper::RGBpointBodyLidarToIMU(PointType const *const pi, PointType *con
+ void LIVMapper::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
+ {
+   if (!lidar_en) return;
+-  mtx_buffer.lock();
++  std::unique_lock<std::mutex> buffer_lock(mtx_buffer);
+ 
+   double cur_head_time = stamp2Sec(msg->header.stamp) + lidar_time_offset;
+   // cout<<"got feature"<<endl;
+@@ -792,11 +825,16 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstShare
+   // ROS_INFO("get point cloud at time: %.6f", stamp2Sec(msg->header.stamp));
+   PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
+   p_pre->process(msg, ptr);
++  if (ptr->size() < 2) {
++    RCLCPP_WARN_THROTTLE(this->node->get_logger(), *this->node->get_clock(), 2000,
++        "Discard scan with fewer than two finite returns after preprocessing");
++    return;
++  }
+   lid_raw_data_buffer.push_back(ptr);
+   lid_header_time_buffer.push_back(cur_head_time);
+   last_timestamp_lidar = cur_head_time;
+ 
+-  mtx_buffer.unlock();
++  buffer_lock.unlock();
+   sig_buffer.notify_all();
+ }
+ 
+@@ -825,7 +863,7 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstShar
+     RCLCPP_ERROR(this->node->get_logger(), "lidar loop back, clear buffer");
+     lid_raw_data_buffer.clear();
+   }
+-  RCLCPP_INFO(this->node->get_logger(), "get point cloud at time: %.6f", stamp2Sec(msg->header.stamp));
++  RCLCPP_DEBUG(this->node->get_logger(), "get point cloud at time: %.6f", stamp2Sec(msg->header.stamp));
+   PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
+   p_pre->process(msg, ptr);
+ 
+@@ -848,7 +886,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
+   if (!imu_en) return;
+ 
+   if (last_timestamp_lidar < 0.0) return;
+-  RCLCPP_INFO(this->node->get_logger(), "get imu at time: %.6f", stamp2Sec(msg_in->header.stamp));
++  RCLCPP_DEBUG(this->node->get_logger(), "get imu at time: %.6f", stamp2Sec(msg_in->header.stamp));
+   sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
+   msg->header.stamp = sec2Stamp(stamp2Sec(msg->header.stamp) - imu_time_offset);
+   double timestamp = stamp2Sec(msg->header.stamp);
+@@ -882,7 +920,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
+   last_timestamp_imu = timestamp;
+ 
+   imu_buffer.push_back(msg);
+-  cout<<"got imu: "<<timestamp<<" imu size "<<imu_buffer.size()<<endl;
++  RCLCPP_DEBUG(this->node->get_logger(), "IMU buffer size: %zu", imu_buffer.size());
+   mtx_buffer.unlock();
+   if (imu_prop_enable)
+   {
+@@ -923,7 +961,7 @@ void LIVMapper::img_cbk(const sensor_msgs::msg::Image::ConstSharedPtr &msg_in)
+   // double msg_header_time =  stamp2Sec(msg->header.stamp);
+   double msg_header_time = stamp2Sec(msg->header.stamp) + img_time_offset;
+   if (abs(msg_header_time - last_timestamp_img) < 0.001) return;
+-  RCLCPP_INFO(this->node->get_logger(), "Get image, its header time: %.6f", msg_header_time);
++  RCLCPP_DEBUG(this->node->get_logger(), "Get image, its header time: %.6f", msg_header_time);
+   if (last_timestamp_lidar < 0) return;
+ 
+   if (msg_header_time < last_timestamp_img)
+@@ -1094,7 +1132,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
+         for (int i = 0; i < pcl.size(); i++)
+         {
+           auto pt = pcl[i];
+-          if (pcl[i].curvature < max_offs_time_ms)
++          if (pcl[i].curvature < max_offs_time_ms ||
++              (p_pre->lidar_type == GAZEBO_SNAPSHOT && pcl[i].curvature <= max_offs_time_ms))
+           {
+             pt.curvature += (frame_header_time - meas.last_lio_update_time) * 1000.0f;
+             meas.pcl_proc_cur->points.push_back(pt);
+@@ -1195,11 +1234,23 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
+   RCLCPP_ERROR(this->node->get_logger(), "out sync");
+ }
+ 
++// Full 360-degree geometry in the final state frame; independent of camera visibility.
++void LIVMapper::publish_full_world_scan()
++{
++  pcl::PointCloud<pcl::PointXYZI> cloud;
++  pcl::copyPointCloud(*pcl_w_wait_pub, cloud);
++  sensor_msgs::msg::PointCloud2 message;
++  pcl::toROSMsg(cloud, message);
++  message.header.frame_id = "camera_init";
++  message.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
++  pubFullWorldScan->publish(message);
++}
++
+ void LIVMapper::publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager)
+ {
+   cv::Mat img_rgb = vio_manager->img_cp;
+   cv_bridge::CvImage out_msg;
+-  out_msg.header.stamp = this->node->get_clock()->now();
++  out_msg.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
+   // out_msg.header.frame_id = "camera_init";
+   out_msg.encoding = sensor_msgs::image_encodings::BGR8;
+   out_msg.image = img_rgb;
+@@ -1261,7 +1312,7 @@ void LIVMapper::publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::Po
+   { 
+     pcl::toROSMsg(*pcl_w_wait_pub, laserCloudmsg); 
+   }
+-  laserCloudmsg.header.stamp = this->node->get_clock()->now(); //.fromSec(last_timestamp_lidar);
++  laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
+   laserCloudmsg.header.frame_id = "camera_init";
+   pubLaserCloudFullRes->publish(laserCloudmsg);
+ 
+@@ -1412,13 +1463,16 @@ template <typename T> void LIVMapper::set_posestamp(T &out)
+ 
+ void LIVMapper::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pubOdomAftMapped)
+ {
++  const Eigen::Quaterniond fused_q(_state.rot_end);
++  geoQuat.x = fused_q.x(); geoQuat.y = fused_q.y();
++  geoQuat.z = fused_q.z(); geoQuat.w = fused_q.w();
+   odomAftMapped.header.frame_id = "camera_init";
+   odomAftMapped.child_frame_id = "aft_mapped";
+-  odomAftMapped.header.stamp = this->node->get_clock()->now(); //.ros::Time()fromSec(last_timestamp_lidar);
++  odomAftMapped.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
+   set_posestamp(odomAftMapped.pose.pose);
+ 
+   static std::shared_ptr<tf2_ros::TransformBroadcaster> br;
+-  br = std::make_shared<tf2_ros::TransformBroadcaster>(this->node);
++  if (!br) br = std::make_shared<tf2_ros::TransformBroadcaster>(this->node);
+   tf2::Transform transform;
+   tf2::Quaternion q;
+   transform.setOrigin(tf2::Vector3(_state.pos_end(0), _state.pos_end(1), _state.pos_end(2)));
+@@ -1433,7 +1487,7 @@ void LIVMapper::publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry
+ 
+ void LIVMapper::publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr &mavros_pose_publisher)
+ {
+-  msg_body_pose.header.stamp = this->node->get_clock()->now();
++  msg_body_pose.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
+   msg_body_pose.header.frame_id = "camera_init";
+   set_posestamp(msg_body_pose.pose);
+   mavros_pose_publisher->publish(msg_body_pose);
+@@ -1442,8 +1496,9 @@ void LIVMapper::publish_mavros(const rclcpp::Publisher<geometry_msgs::msg::PoseS
+ void LIVMapper::publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr &pubPath)
+ {
+   set_posestamp(msg_body_pose.pose);
+-  msg_body_pose.header.stamp = this->node->get_clock()->now();
++  msg_body_pose.header.stamp = rclcpp::Time(static_cast<int64_t>(LidarMeasures.last_lio_update_time * 1e9), RCL_ROS_TIME);
+   msg_body_pose.header.frame_id = "camera_init";
++  path.header.stamp = msg_body_pose.header.stamp;
+   path.poses.push_back(msg_body_pose);
+   pubPath->publish(path);
+ }
+\ No newline at end of file
+diff --git a/src/main.cpp b/src/main.cpp
+index 61dd592..346927e 100755
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -4,7 +4,7 @@ int main(int argc, char **argv)
+ {
+   rclcpp::init(argc, argv);
+   rclcpp::NodeOptions options;
+-  rclcpp::Node::SharedPtr nh;
++  rclcpp::Node::SharedPtr nh = std::make_shared<rclcpp::Node>("laserMapping", options);
+   image_transport::ImageTransport it_(nh);
+   LIVMapper mapper(nh, "laserMapping");
+   mapper.initializeSubscribersAndPublishers(nh, it_);
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index bf0d497..3f4655f 100755
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -61,6 +61,9 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &ms
+ {
+   switch (lidar_type)
+   {
++  case GAZEBO_SNAPSHOT:
++    gazebo_snapshot_handler(msg);
++    break;
+   case OUST64:
+     oust64_handler(msg);
+     break;
+@@ -200,6 +203,27 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::SharedPtr
+   printf("[ Preprocess ] Output point number: %zu \n", pl_surf.points.size());
+ }
+ 
++void Preprocess::gazebo_snapshot_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
++{
++  pl_surf.clear();
++  pl_corn.clear();
++  pl_full.clear();
++  pcl::PointCloud<pcl::PointXYZI> input;
++  pcl::fromROSMsg(*msg, input);
++  if (point_filter_num < 1) throw std::runtime_error("point_filter_num must be positive");
++  for (size_t i = 0; i < input.size(); i += point_filter_num)
++  {
++    const auto &p = input[i];
++    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
++    if (p.x*p.x + p.y*p.y + p.z*p.z < blind*blind) continue;
++    PointType out{};
++    out.x = p.x; out.y = p.y; out.z = p.z;
++    out.intensity = std::isfinite(p.intensity) ? p.intensity : 0.0f;
++    out.curvature = 0.0f;  // All points were rendered at the header timestamp.
++    pl_surf.push_back(out);
++  }
++}
++
+ void Preprocess::l515_handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg)
+ {
+   pl_surf.clear();
+diff --git a/test/test_gazebo_snapshot.cpp b/test/test_gazebo_snapshot.cpp
+new file mode 100644
+index 0000000..74c2378
+--- /dev/null
++++ b/test/test_gazebo_snapshot.cpp
+@@ -0,0 +1,61 @@
++#include <gtest/gtest.h>
++#include "preprocess.h"
++#include <limits>
++
++namespace {
++sensor_msgs::msg::PointCloud2::SharedPtr cloud(
++    const std::vector<std::array<float, 4>> &points)
++{
++    pcl::PointCloud<pcl::PointXYZI> input;
++    for (const auto &v : points) {
++        pcl::PointXYZI point;
++        point.x = v[0]; point.y = v[1]; point.z = v[2]; point.intensity = v[3];
++        input.push_back(point);
++    }
++    input.is_dense = false;
++    auto message = std::make_shared<sensor_msgs::msg::PointCloud2>();
++    pcl::toROSMsg(input, *message);
++    return message;
++}
++}
++
++TEST(GazeboSnapshot, RejectsNonFiniteAndBlindReturns)
++{
++    Preprocess preprocess;
++    preprocess.lidar_type = GAZEBO_SNAPSHOT;
++    preprocess.blind = 0.3;
++    const float inf = std::numeric_limits<float>::infinity();
++    const float nan = std::numeric_limits<float>::quiet_NaN();
++    auto message = cloud({{1, 2, 3, 4}, {inf, 0, 1, 4}, {1, nan, 0, 4},
++                          {0.1, 0.1, 0.1, 4}, {2, 1, -1, inf}});
++    PointCloudXYZI::Ptr output(new PointCloudXYZI);
++    preprocess.process(message, output);
++    ASSERT_EQ(output->size(), 2u);
++    EXPECT_FLOAT_EQ(output->at(0).z, 3.f);
++    EXPECT_FLOAT_EQ(output->at(1).z, -1.f);
++    EXPECT_FLOAT_EQ(output->at(1).intensity, 0.f);
++    for (const auto &point : *output) EXPECT_FLOAT_EQ(point.curvature, 0.f);
++}
++
++TEST(GazeboSnapshot, EmptySnapshotClearsPreviousScan)
++{
++    Preprocess preprocess;
++    preprocess.lidar_type = GAZEBO_SNAPSHOT;
++    PointCloudXYZI::Ptr output(new PointCloudXYZI);
++    auto full = cloud({{1, 0, 1, 0}});
++    preprocess.process(full, output);
++    ASSERT_EQ(output->size(), 1u);
++    auto empty = cloud({});
++    preprocess.process(empty, output);
++    EXPECT_TRUE(output->empty());
++}
++
++TEST(GazeboSnapshot, RejectsZeroStrideInsteadOfLooping)
++{
++    Preprocess preprocess;
++    preprocess.lidar_type = GAZEBO_SNAPSHOT;
++    preprocess.point_filter_num = 0;
++    PointCloudXYZI::Ptr output(new PointCloudXYZI);
++    auto message = cloud({{1, 0, 1, 0}});
++    EXPECT_THROW(preprocess.process(message, output), std::runtime_error);
++}

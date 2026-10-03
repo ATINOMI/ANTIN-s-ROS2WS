@@ -131,6 +131,8 @@ namespace mini_nav_nodes
         std::shared_ptr<rclcpp_action::ServerGoalHandle<FollowPath>> follow_goal_;
         geometry_msgs::msg::PoseStamped follow_endpoint_;
         bool action_mode_{false};
+        rclcpp::Subscription<std_msgs::msg::String>::SharedPtr epoch_subscription_;
+        std::string localization_epoch_;
         bool require_quality_{false};
         bool quality_valid_{false};
         SteadyTime quality_received_{};

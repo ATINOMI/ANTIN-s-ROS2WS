@@ -205,6 +205,17 @@ namespace mini_nav_nodes
                 quality_valid_ = msg->data;
                 quality_received_ = std::chrono::steady_clock::now();
             });
+        // 前端重启或重新配准使旧路径失效，要求新的 FollowPath 目标。
+        epoch_subscription_ = create_subscription<std_msgs::msg::String>(
+            "/mini_nav/localization_epoch", latched,
+            [this](std_msgs::msg::String::ConstSharedPtr msg) {
+                if (!localization_epoch_.empty() && localization_epoch_ != msg->data) {
+                    quality_valid_ = false;
+                    if (follow_goal_) finishFollow(FollowPath::Result::UNKNOWN, "localization_epoch_changed");
+                    else { tracker_->ClearPath(); publishStop("localization_epoch_changed"); }
+                }
+                localization_epoch_ = msg->data;
+            });
         follow_server_ = rclcpp_action::create_server<FollowPath>(this, "/follow_path",
             [](const rclcpp_action::GoalUUID &, std::shared_ptr<const FollowPath::Goal> goal) {
                 if (goal->path.poses.empty() || (!goal->controller_id.empty() && goal->controller_id != "PathTracker") ||

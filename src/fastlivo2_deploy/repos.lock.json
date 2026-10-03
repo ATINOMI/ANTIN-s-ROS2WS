@@ -1,0 +1,22 @@
+[
+  {
+    "path": "FAST-LIVO2",
+    "url": "https://github.com/Robotic-Developer-Road/FAST-LIVO2.git",
+    "commit": "837b7bbc1431cb04cf936528e52c83c835efba8e"
+  },
+  {
+    "path": "rpg_vikit",
+    "url": "https://github.com/Robotic-Developer-Road/rpg_vikit.git",
+    "commit": "4b7abc838f5d2ca9137f70f122eaaeff9eaf0f50"
+  },
+  {
+    "path": "livox_ros_driver2",
+    "url": "https://github.com/Livox-SDK/livox_ros_driver2.git",
+    "commit": "21445540f0d100dc86a7e6df312dd70bbdb4afdf"
+  },
+  {
+    "path": "Sophus",
+    "url": "https://github.com/strasdat/Sophus.git",
+    "commit": "d0b7315a0d90fc6143defa54596a3a95d9fa10ec"
+  }
+]
