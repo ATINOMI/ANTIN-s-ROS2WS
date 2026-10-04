@@ -108,6 +108,42 @@ TEST(PathTracker, RotatesAtGoalThenLatchesStopAcrossPathRepublication)
 }
 
 /**
+ * @brief 终点内圈进入转向，定位轻微波动时保持转向，外圈仍按原容差判定到达。
+ */
+TEST(PathTracker, GoalPositionHysteresisKeepsHeadingWithoutRelaxingArrival)
+{
+    mini_nav_core::PathTrackerParameters parameters;
+    parameters.goal_position_hysteresis = 0.03;
+    mini_nav_core::PathTracker tracker(parameters);
+    const auto map = ClearMap();
+    tracker.SetPath({{0.0, 0.0}, {1.0, 0.0}}, 1.0);
+
+    EXPECT_GT(Step(tracker, map, map, Pose(0.881, 0.0), 0.0).linear_x, 0.0);
+    EXPECT_DOUBLE_EQ(Step(tracker, map, map, Pose(0.915, 0.0), 1.0).linear_x, 0.0);
+    const auto noisy = Step(tracker, map, map, Pose(0.885, 0.0), 2.0);
+    EXPECT_DOUBLE_EQ(noisy.linear_x, 0.0);
+    EXPECT_GT(noisy.angular_z, 0.0);
+    EXPECT_GT(Step(tracker, map, map, Pose(0.879, 0.0), 3.0).linear_x, 0.0);
+    EXPECT_NE(Step(tracker, map, map, Pose(0.879, 0.0, 1.0), 4.0).status,
+              mini_nav_core::TrackingStatus::kGoalReached);
+    EXPECT_EQ(Step(tracker, map, map, Pose(0.885, 0.0, 1.0), 5.0).status,
+              mini_nav_core::TrackingStatus::kGoalReached);
+
+    tracker.ClearPath();
+    tracker.SetPath({{0.0, 0.0}, {1.0, 0.0}}, 1.0);
+    EXPECT_GT(Step(tracker, map, map, Pose(0.881, 0.0), 6.0).linear_x, 0.0);
+}
+
+TEST(PathTracker, RejectsInvalidGoalPositionHysteresis)
+{
+    mini_nav_core::PathTrackerParameters parameters;
+    for (const double value : {-0.01, 0.12, std::numeric_limits<double>::infinity()}) {
+        parameters.goal_position_hysteresis = value;
+        EXPECT_THROW({ mini_nav_core::PathTracker tracker(parameters); }, std::invalid_argument);
+    }
+}
+
+/**
  * @brief 验证全局、局部障碍及未知格导致停车。
  */
 TEST(PathTracker, StopsForStaticLocalAndUnknownCells)

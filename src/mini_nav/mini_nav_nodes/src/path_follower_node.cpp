@@ -161,6 +161,8 @@ namespace mini_nav_nodes
         parameters.lookahead_distance = PositiveParameter(*this, "controller.lookahead_distance", 0.35);
         parameters.goal_position_tolerance = PositiveParameter(
             *this, "controller.goal_position_tolerance", 0.12);
+        parameters.goal_position_hysteresis = declare_parameter<double>(
+            "controller.goal_position_hysteresis", 0.0);
         parameters.goal_yaw_tolerance = PositiveParameter(
             *this, "controller.goal_yaw_tolerance", 0.15);
         parameters.rotate_in_place_angle = PositiveParameter(

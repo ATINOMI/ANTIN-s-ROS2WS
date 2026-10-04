@@ -1,0 +1,168 @@
+{
+  "repository": "https://github.com/PolarisXQ/SCURM_SentryNavigation",
+  "commit": "46e6425c692ec98f8e65446fb6fdd360f44ef8e5",
+  "patch": "../patches/jazzy_sim.patch",
+  "note": "Snapshot of the already-patched and validated working sources before mini_nav layout migration. FAST_LIO retains GPL-2.0 LICENSE; icp_relocalization declares Apache-2.0 in package.xml.",
+  "files": [
+    {
+      "path": "FAST_LIO/package.xml",
+      "sha256": "5fb574900c718f60abecec3a5aac35e010de12545b57a4c8a99c392380e0e296"
+    },
+    {
+      "path": "FAST_LIO/LICENSE",
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+    },
+    {
+      "path": "FAST_LIO/CMakeLists.txt",
+      "sha256": "ded1da5b635d6ffaf5bce27f078a6d7d702ec10434789b0bf9c1764766e9c7ca"
+    },
+    {
+      "path": "FAST_LIO/README.md",
+      "sha256": "f1fbe9178871c53a63ed2bff627c712520a07463a996e579d7c8d800d2d8e27b"
+    },
+    {
+      "path": "FAST_LIO/msg/Pose6D.msg",
+      "sha256": "91b5397207076295c2b20273552b80267e258a749ae1a932dc00f48cfc31334f"
+    },
+    {
+      "path": "FAST_LIO/launch/mapping.launch.py",
+      "sha256": "f30524e951dfe77bb48ef48bc8f61a2a372e6cb46c8d6dbef9fe34ffc14228b5"
+    },
+    {
+      "path": "FAST_LIO/rviz_cfg/loam_livox.rviz",
+      "sha256": "dcabd81e8b2283b4c8977299a654924d16ca6941fe7241219a6663cbee0335eb"
+    },
+    {
+      "path": "FAST_LIO/src/preprocess.h",
+      "sha256": "62dd70ed1c8ca651dd4fcb4ab0bef93fde1bf0a19beaf0f9d0e9a254ae860e6d"
+    },
+    {
+      "path": "FAST_LIO/src/preprocess.cpp",
+      "sha256": "e418183db55483609a0169f0ee696f4d9757b2bab64989009e7a4169cfbec128"
+    },
+    {
+      "path": "FAST_LIO/src/IMU_Processing.hpp",
+      "sha256": "e9cbb09aaceabb833a9b18a1de0f51ba57fbe560c35c1a29c8166752eecd71a2"
+    },
+    {
+      "path": "FAST_LIO/src/laserMapping.cpp",
+      "sha256": "1104dc602a2118964d4d9af746bd5fde3afbebc9b4e229ec489b57fdaa78de65"
+    },
+    {
+      "path": "FAST_LIO/include/use-ikfom.hpp",
+      "sha256": "1ee2c078ee757ff2dffedf48da764daec152baa79876a70785d010cc2e6165ab"
+    },
+    {
+      "path": "FAST_LIO/include/so3_math.h",
+      "sha256": "e02f73dc804c3f539a80fe49d4221a85dbfeaee4cf0b643d7af062b49148e9f7"
+    },
+    {
+      "path": "FAST_LIO/include/Exp_mat.h",
+      "sha256": "abce87e1fb0e60febf42f38b75f4c018bac24c1bf652e26b7a510a9296d3031d"
+    },
+    {
+      "path": "FAST_LIO/include/matplotlibcpp.h",
+      "sha256": "360d70cb9a7dd6cb981622871204c394b56f856ef42abd0e07a011a5e146f4d6"
+    },
+    {
+      "path": "FAST_LIO/include/common_lib.h",
+      "sha256": "bd9d6cf500f6f77e880c0cbf451ce6fc8b0e6d638773a4580a1ee779744e9e54"
+    },
+    {
+      "path": "FAST_LIO/config/mid360_pri.yaml",
+      "sha256": "1ab3e109f230d0056015f408ae3a9e0b0a19ee9b7784e94e481bd409fbc14bc9"
+    },
+    {
+      "path": "FAST_LIO/config/mid360.yaml",
+      "sha256": "b710c206c0553675710bb7e38d722f7a99d85cdc0164fe2bf14e6a39a430cce3"
+    },
+    {
+      "path": "FAST_LIO/include/ikd-Tree/ikd_Tree.cpp",
+      "sha256": "ec3cbbbb6386eb6c68f9aa081c48b5d62209ada44fe167a002d4e3b112a1ea9f"
+    },
+    {
+      "path": "FAST_LIO/include/ikd-Tree/ikd_Tree.h",
+      "sha256": "bb87cab944c6c59e0be61cb0b3a2cd0e334d93dc1bf768875058857278135a4b"
+    },
+    {
+      "path": "FAST_LIO/include/ikd-Tree/README.md",
+      "sha256": "a7f6feab008dc54a053963fb518e360389ee807af63ebddcc15e90b1ede78073"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/startIdx.hpp",
+      "sha256": "79cdc368bb4e083f5fda7549094c0aba8b599aee1f88e9f2a8b7fa785bf1f757"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/build_manifold.hpp",
+      "sha256": "0e88522551d02e78dc995e6c9d7883d9ecca7190379ec047ab839fff7186ea0f"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/esekfom/esekfom.hpp",
+      "sha256": "b990411209fe06ae64112c8bc807b0c2a13922fc1460ec2745c6701cc9344e85"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/esekfom/util.hpp",
+      "sha256": "3c4265d25ea3f8c7f586d1e34bc352e981e09e30555e42011cd23a0a147d6918"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/types/wrapped_cv_mat.hpp",
+      "sha256": "3040f43fcb4195a2572a8819be012ebd2c4b59a38cfae86fcac3e01d7039a589"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/types/SOn.hpp",
+      "sha256": "90a8384a05d656698e6826b892561dc6cd619b62a7e32f9e6e3a9253e5e0c8aa"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/types/S2.hpp",
+      "sha256": "f861be0bbb1a80d968189c90f9ef6b8e56b5f4bb19a9043a2e41c9397c215d56"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/types/vect.hpp",
+      "sha256": "771ecededd51dc694bdadb57f8a49fad7bc6091c6f6112142096954649ac405f"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/src/mtkmath.hpp",
+      "sha256": "f9627989cf578f35ec5594a6956b4e9283d4dd109b26e7d2621682c508546295"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/src/vectview.hpp",
+      "sha256": "7855408124ea65df4423bae5f97d5104af5552318796bc6324bdbf98a45101f3"
+    },
+    {
+      "path": "FAST_LIO/include/IKFoM_toolkit/mtk/src/SubManifold.hpp",
+      "sha256": "96709f0f453a0c8776b1969064275ebf14dc5234b7024e68eb1cfc51a513864f"
+    },
+    {
+      "path": "icp_relocalization/package.xml",
+      "sha256": "b81b830ad6f60e808447e4091579dd9c7079874d7b890e3a79b6a16af676b210"
+    },
+    {
+      "path": "icp_relocalization/CMakeLists.txt",
+      "sha256": "5672ade198f2010a47e09cd0bec8dfb56e719d55ecb09f4b11cf761d1042665b"
+    },
+    {
+      "path": "icp_relocalization/README.md",
+      "sha256": "5602bcdf971ff02e96a5c6c9a2193730badce8821675b85bf68881321188f105"
+    },
+    {
+      "path": "icp_relocalization/launch/icp.launch.py",
+      "sha256": "17e8dad9a549ade2cb086a52dbc700658ba4e30f2454d09ae3322501d6889fe9"
+    },
+    {
+      "path": "icp_relocalization/launch/sac_ia_gicp.launch.py",
+      "sha256": "e3ef7e47c50f6bcb6be4d0a3d79595383608a2c102c6560bfb9df12c91af578a"
+    },
+    {
+      "path": "icp_relocalization/src/transform_publisher.cpp",
+      "sha256": "1d33cbda5dc1f333a289c0b1a74c5d13a5971a11241ac7a79309401e50b34198"
+    },
+    {
+      "path": "icp_relocalization/src/sac_ia_gicp.cpp",
+      "sha256": "709338d9bf7a927634670f94bb647122e9bed4b3b59b92a686cf14005d907ee2"
+    },
+    {
+      "path": "icp_relocalization/src/icp_node.cpp",
+      "sha256": "da06766fbe0f58074812e1f2ee970cb9e73949b7edbe85c7a584ab195250fad1"
+    }
+  ]
+}

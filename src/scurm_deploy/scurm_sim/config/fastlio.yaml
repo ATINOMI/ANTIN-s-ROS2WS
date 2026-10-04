@@ -1,0 +1,45 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+    publish_tf: false
+    common:
+      lid_topic: /scurm/lidar/points
+      imu_topic: /imu
+      odom_frame_id: odom
+      sensor_frame_id: imu_link
+      base_frame_id: base_footprint
+      send_odom_base_tf: false
+      time_sync_en: false
+      time_offset_lidar_to_imu: 0.0
+    locate_in_prior_map: true
+    filter_size_surf: 0.08
+    filter_size_map: 0.08
+    cube_side_length: 200.0
+    max_iteration: 5
+    preprocess:
+      lidar_type: 8
+      blind: 0.3
+      scan_line: 32
+      scan_rate: 10
+      timestamp_unit: 2
+    feature_extract_enable: false
+    point_filter_num: 1
+    mapping:
+      acc_cov: 0.01
+      gyr_cov: 0.001
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 30.0
+      extrinsic_est_en: false
+      extrinsic_T: [0.032, 0.0, 0.232]
+      extrinsic_R: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    publish:
+      path_en: true
+      scan_publish_en: true
+      dense_publish_en: true
+      scan_bodyframe_pub_en: true
+      map_en: false
+    pcd_save:
+      pcd_save_en: false
+      interval: -1

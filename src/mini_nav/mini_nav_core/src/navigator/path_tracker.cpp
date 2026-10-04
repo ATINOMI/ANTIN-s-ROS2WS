@@ -135,6 +135,9 @@ namespace mini_nav_core
             !positive(parameters_.max_angular_speed) ||
             !positive(parameters_.lookahead_distance) ||
             !positive(parameters_.goal_position_tolerance) ||
+            !std::isfinite(parameters_.goal_position_hysteresis) ||
+            parameters_.goal_position_hysteresis < 0.0 ||
+            parameters_.goal_position_hysteresis >= parameters_.goal_position_tolerance ||
             !positive(parameters_.goal_yaw_tolerance) ||
             !positive(parameters_.rotate_in_place_angle) ||
             !positive(parameters_.max_path_deviation) ||
@@ -188,6 +191,7 @@ namespace mini_nav_core
         }
         path_ = path;
         goal_yaw_ = NormalizeAngle(goal_yaw);
+        aligning_goal_yaw_ = false;
         terminal_status_ = TrackingStatus::kTracking;
         PauseProgress();
     }
@@ -198,6 +202,7 @@ namespace mini_nav_core
     void PathTracker::ClearPath()
     {
         path_.clear();
+        aligning_goal_yaw_ = false;
         terminal_status_ = TrackingStatus::kNoPath;
         PauseProgress();
     }
@@ -364,8 +369,15 @@ namespace mini_nav_core
             return {0.0, 0.0, terminal_status_};
         }
 
+        // 内圈进入转向、外圈退出，避免定位噪声让终点航向与路径航向反复切换。
+        if (goal_distance > parameters_.goal_position_tolerance) {
+            aligning_goal_yaw_ = false;
+        } else if (goal_distance <= parameters_.goal_position_tolerance -
+                parameters_.goal_position_hysteresis) {
+            aligning_goal_yaw_ = true;
+        }
         double distance_to_path = 0.0;
-        const PathPoint target = goal_distance <= parameters_.goal_position_tolerance ?
+        const PathPoint target = aligning_goal_yaw_ ?
             /**
              * @brief 从机器人到折线的最近投影处沿路径弧长寻找前视点。
              *
@@ -381,7 +393,7 @@ namespace mini_nav_core
             return {0.0, 0.0, TrackingStatus::kOffPath};
         }
         VelocityCommand command{0.0, 0.0, TrackingStatus::kTracking};
-        if (goal_distance <= parameters_.goal_position_tolerance) {
+        if (aligning_goal_yaw_) {
             command.angular_z = std::clamp(1.5 * goal_yaw_error,
                 -parameters_.max_angular_speed, parameters_.max_angular_speed);
         } else {

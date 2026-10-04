@@ -46,6 +46,8 @@ namespace mini_nav_core
         double max_angular_speed{0.40};
         double lookahead_distance{0.35};
         double goal_position_tolerance{0.12};
+        // 进入终点转向前额外靠近的距离；零保持原有切换行为，不放宽到达容差。
+        double goal_position_hysteresis{0.0};
         double goal_yaw_tolerance{0.15};
         double rotate_in_place_angle{0.35};
         double max_path_deviation{0.40};
@@ -150,6 +152,7 @@ namespace mini_nav_core
         PathTrackerParameters parameters_;
         std::vector<PathPoint> path_;
         double goal_yaw_{0.0};
+        bool aligning_goal_yaw_{false};
         TrackingStatus terminal_status_{TrackingStatus::kNoPath};
         bool progress_started_{false};
         localization::Pose2D progress_pose_;
