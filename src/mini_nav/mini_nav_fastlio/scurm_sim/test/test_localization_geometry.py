@@ -6,7 +6,7 @@ import pytest
 from scipy.spatial.transform import Rotation
 from geometry_msgs.msg import Pose
 
-spec = importlib.util.spec_from_file_location('geometry', Path(__file__).parents[1] / 'scripts/localization_geometry.py')
+spec = importlib.util.spec_from_file_location('geometry', Path(__file__).parents[3] / 'mini_nav_nodes/src/localization/fastlio2/adapter/localization_geometry.py')
 geometry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(geometry)
 

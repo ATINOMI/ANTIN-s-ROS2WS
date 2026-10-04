@@ -46,7 +46,9 @@ def main():
         if args.controls_pid is None:
             parser.error('--motion requires the PID of this demo mapping_controls process')
         command = Path(f'/proc/{args.controls_pid}/cmdline').read_bytes()
-        if b'/install_scurm/scurm_sim/lib/scurm_sim/mapping_controls' not in command:
+        controls_paths = [b'/install_scurm/scurm_sim/lib/scurm_sim/mapping_controls',
+                          b'/install_mini_nav_fastlio/scurm_sim/lib/scurm_sim/mapping_controls']
+        if not any(path in command for path in controls_paths):
             raise RuntimeError('Refusing to pause a process outside the demo controls')
         os.kill(args.controls_pid, signal.SIGSTOP)
         controls_paused = True

@@ -98,9 +98,14 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 ament_export_dependencies(rosidl_default_runtime)
 
-add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
+get_filename_component(MINI_NAV_FASTLIO_CORE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../mini_nav_core/src/localization/fastlio2"
+  ABSOLUTE)
+add_executable(fastlio_mapping src/laserMapping.cpp
+  "${MINI_NAV_FASTLIO_CORE}/ikd-Tree/ikd_Tree.cpp" src/preprocess.cpp)
 target_include_directories(fastlio_mapping PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${MINI_NAV_FASTLIO_CORE}>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
 )

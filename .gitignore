@@ -11,6 +11,8 @@ src/rqt_robot_steering/
 *.pyc
 __pycache__/
 .vscode/
+build_mini_nav_fastlio/
+install_mini_nav_fastlio/
 maps/fastlivo2_acceptance/
 third_party/mini_nav_mapping/
 build_mapping_deps/

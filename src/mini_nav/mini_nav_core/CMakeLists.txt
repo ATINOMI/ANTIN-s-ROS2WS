@@ -14,12 +14,12 @@ add_library(${PROJECT_NAME}
   src/navigator/astar_navigator.cpp
   src/navigator/path_postprocessor.cpp
   src/navigator/path_tracker.cpp
-  src/localization/localization_map.cpp
-  src/localization/differential_motion_model.cpp
-  src/localization/likelihood_field_model.cpp
-  src/localization/beam_model.cpp
-  src/localization/kd_tree.cpp
-  src/localization/particle_filter.cpp
+  src/localization/amcl/localization_map.cpp
+  src/localization/amcl/differential_motion_model.cpp
+  src/localization/amcl/likelihood_field_model.cpp
+  src/localization/amcl/beam_model.cpp
+  src/localization/amcl/kd_tree.cpp
+  src/localization/amcl/particle_filter.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

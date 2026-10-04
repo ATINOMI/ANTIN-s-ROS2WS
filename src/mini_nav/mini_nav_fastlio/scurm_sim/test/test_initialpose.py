@@ -9,7 +9,7 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from std_msgs.msg import String
 
-sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
+sys.path.insert(0, str(Path(__file__).parents[3] / 'mini_nav_nodes/src/localization/fastlio2/adapter'))
 from mini_nav_localizer import MiniNavLocalizer
 from localization_backend import parse_request
 

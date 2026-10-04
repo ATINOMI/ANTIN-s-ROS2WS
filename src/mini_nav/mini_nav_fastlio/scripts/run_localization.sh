@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
-scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-scurm_ws=$(cd -- "$scurm_root/../.." && pwd)
+scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+scurm_ws=$(cd -- "$scurm_root/../../.." && pwd -P)
 export ROS_DOMAIN_ID=227
 export GZ_PARTITION=scurm_mini_nav
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -15,5 +15,5 @@ echo $$ > "$scurm_ws/log_scurm/localization_runtime/launch.pid"
 source /opt/ros/jazzy/setup.bash
 source "$scurm_ws/install_fastlivo/local_setup.bash"
 source "$scurm_ws/install/local_setup.bash"
-source "$scurm_ws/install_scurm/local_setup.bash"
+source "$scurm_ws/install_mini_nav_fastlio/local_setup.bash"
 exec ros2 launch scurm_sim mini_nav_fastlio.launch.py "$@"

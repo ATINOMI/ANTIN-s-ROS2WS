@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WS = ROOT.parents[1]
+WS = ROOT.parents[2]
 SIM = ROOT / 'scurm_sim'
 
 

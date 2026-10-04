@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-WS = ROOT.parents[1]
+WS = ROOT.parents[2]
 UPSTREAM = ROOT / 'upstream/SCURM_SentryNavigation'
 COMMIT = '46e6425c692ec98f8e65446fb6fdd360f44ef8e5'
 

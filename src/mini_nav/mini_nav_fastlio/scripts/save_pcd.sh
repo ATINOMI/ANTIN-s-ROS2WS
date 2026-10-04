@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-scurm_ws=$(cd -- "$scurm_root/../.." && pwd)
+scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+scurm_ws=$(cd -- "$scurm_root/../../.." && pwd -P)
 export ROS_DOMAIN_ID=231
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-scurm_ws=$(cd -- "$scurm_root/../.." && pwd)
+scurm_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+scurm_ws=$(cd -- "$scurm_root/../../.." && pwd -P)
 scurm_pid_file="$scurm_ws/log_scurm/fastlio_runtime/launch.pid"
 if [[ ! -f "$scurm_pid_file" ]]; then echo 'FAST-LIO2 demo is not running'; exit 0; fi
 read -r scurm_pid < "$scurm_pid_file"

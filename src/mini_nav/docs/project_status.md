@@ -1,6 +1,6 @@
 # mini_nav 项目状态
 
-最后更新：2026-10-03
+最后更新：2026-10-04
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
@@ -25,6 +25,8 @@
 启动步骤见 [使用说明](../mini_nav_fastlivo/README.md)，改动、验收证据和 RViz 截图限制见 [实施报告](../logs/26-10-3/fastlivo_two_launch_implementation.md)。AMCL 原入口保留。
 
 ## 当前已完成
+
+SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定位源码按 `mini_nav_core/src/localization/amcl` 和 `fastlio2` 整理，ROS 接入和独立构建位置见 [定位后端目录说明](localization_backends.md)。该入口使用 FAST-LIO2，不启动 LIVO2；默认 AMCL 入口保留。
 
 - `mini_nav_core`
   - 二维静态代价地图 `Costmap2D`。
