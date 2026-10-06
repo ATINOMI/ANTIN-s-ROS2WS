@@ -47,6 +47,7 @@
 
 #include <boost/bind.hpp>
 #include <Eigen/Core>
+#include <functional>
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
@@ -318,7 +319,7 @@ public:
 	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
 	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
 	 */
-	void init_dyn_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel_dyn_share h_dyn_share_in, int maximum_iteration, scalar_type limit_vector[n])
+	void init_dyn_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, std::function<measurementModel_dyn_share> h_dyn_share_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
 		f_x = f_x_in;
@@ -2179,7 +2180,7 @@ private:
 	measurementMatrix2_dyn *h_v_dyn;
 
 	measurementModel_share *h_share;
-	measurementModel_dyn_share *h_dyn_share;
+	std::function<measurementModel_dyn_share> h_dyn_share;
 
 	int maximum_iter = 0;
 	scalar_type limit[n];

@@ -8,17 +8,17 @@
 
 #include "rclcpp/rclcpp.hpp"
 #ifdef MINI_NAV_BUILD_NAVIGATION_MANAGER
-#include "mini_nav_nodes/navigation_manager_node.hpp"
+#include "mini_nav_nodes/navigation_task_manager/navigation_manager_node.hpp"
 #elif defined(MINI_NAV_BUILD_VELOCITY_GUARD)
-#include "mini_nav_nodes/velocity_guard_node.hpp"
+#include "mini_nav_nodes/velocity_guard/velocity_guard_node.hpp"
 #elif defined(MINI_NAV_BUILD_AMCL)
-#include "mini_nav_nodes/amcl_node.hpp"
+#include "mini_nav_nodes/amcl/amcl_node.hpp"
 #elif defined(MINI_NAV_BUILD_LOCAL_COSTMAP)
-#include "mini_nav_nodes/local_costmap_node.hpp"
+#include "mini_nav_nodes/map_manager/local_costmap_node.hpp"
 #elif defined(MINI_NAV_BUILD_PATH_FOLLOWER)
-#include "mini_nav_nodes/path_follower_node.hpp"
+#include "mini_nav_nodes/tracker_manager/path_follower_node.hpp"
 #else
-#include "costmap_publisher.hpp"
+#include "mini_nav_nodes/map_manager/costmap_publisher.hpp"
 #endif
 
 /**

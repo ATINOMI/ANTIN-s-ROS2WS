@@ -6,10 +6,10 @@
  */
 #include <cmath>
 #include "sensor_msgs/point_cloud2_iterator.hpp"
-#include "mini_nav_nodes/cloud_validation.hpp"
+#include "mini_nav_nodes/map_manager/cloud_validation.hpp"
 #include <gtest/gtest.h>
-#include "costmap_publisher.hpp"
-#include "mini_nav_nodes/collision_map.hpp"
+#include "mini_nav_nodes/map_manager/costmap_publisher.hpp"
+#include "mini_nav_nodes/map_manager/collision_map.hpp"
 #include <limits>
 
 namespace mini_nav_nodes

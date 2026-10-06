@@ -18,8 +18,8 @@
 
 /* Includes ----------------------------------------------------------------*/
 
-#include "mini_nav_core/localization/likelihood_field_model.hpp"
-#include "mini_nav_core/localization/pose_utils.hpp"
+#include "mini_nav_core/localization/amcl/likelihood_field_model.hpp"
+#include "mini_nav_core/localization/amcl/pose_utils.hpp"
 
 #include <algorithm>
 #include <cmath>

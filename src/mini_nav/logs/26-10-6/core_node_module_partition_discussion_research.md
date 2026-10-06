@@ -7,6 +7,8 @@
 
 > 状态：本文件记录讨论结论和当前源码调研结果，不是重构完成报告。调研时工作树已有未提交修改，因此 HEAD 不能完整代表本次读取的源码。此次仅新增本文档，没有移动源码，也没有重新构建、运行测试或启动仿真。
 
+后续实施：重构前源码已留档于 `f2218c9`。当前目录、验证和实际边界见 [实施记录](core_node_module_partition_implementation.md)。下文的“当前”均指调研时版本；已迁移或拆分的证据文件可用 `git show f2218c9:src/mini_nav/<旧相对路径>` 读取，原行号对应该版本。
+
 ## 1. 目标与已确定的讨论结论
 
 目标是让算法职责和节点运行职责更容易从目录中辨认，并解除目前不必要的跨模块依赖。两层采用不同的组织依据：
@@ -47,10 +49,10 @@ FAST-LIO2 底层文件虽然位于 `mini_nav_core/src/localization/fastlio2/`，
 
 | 源码证据 | 当前情况 | 整理方向 |
 |---|---|---|
-| [path_postprocessor.hpp](../../mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp)，第 18、33、59 行 | 同时定义 `PathPoint`、`CollisionGeometry` 和连续圆形扫掠接口 | 路径点归 `nav_types`；碰撞几何与扫掠归 `collision_checker`；后处理保留在 planner |
+| `path_postprocessor.hpp`（留档路径 `mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp`），第 18、33、59 行 | 同时定义 `PathPoint`、`CollisionGeometry` 和连续圆形扫掠接口 | 路径点归 `nav_types`；碰撞几何与扫掠归 `collision_checker`；后处理保留在 planner |
 | [rolling_obstacle_grid.hpp](../../mini_nav_core/include/mini_nav_core/map/rolling_obstacle_grid.hpp)，第 13 行 | 地图模块包含路径后处理头文件以取得共用类型 | 改为依赖基础类型，消除 map 对路径后处理的依赖 |
-| [astar_navigator.hpp](../../mini_nav_core/include/mini_nav_core/navigator/astar_navigator.hpp)，第 13 行 | A* 为使用碰撞几何而依赖路径后处理头文件 | A* 与后处理共同依赖碰撞检查器 |
-| [path_tracker.hpp](../../mini_nav_core/include/mini_nav_core/navigator/path_tracker.hpp)，第 11–12 行 | 控制器依赖定位的 `types.hpp` 和路径后处理头文件 | 共用位姿归 `nav_types`，共用碰撞接口归 `collision_checker` |
+| `astar_navigator.hpp`（留档路径 `mini_nav_core/include/mini_nav_core/navigator/astar_navigator.hpp`），第 13 行 | A* 为使用碰撞几何而依赖路径后处理头文件 | A* 与后处理共同依赖碰撞检查器 |
+| `path_tracker.hpp`（留档路径 `mini_nav_core/include/mini_nav_core/navigator/path_tracker.hpp`），第 11–12 行 | 控制器依赖定位的 `types.hpp` 和路径后处理头文件 | 共用位姿归 `nav_types`，共用碰撞接口归 `collision_checker` |
 
 因此，第一步不仅是把 `navigator/` 分成两个子目录，还要拆出被多个模块使用的数据和碰撞职责。
 
@@ -73,9 +75,9 @@ FAST-LIO2 底层文件虽然位于 `mini_nav_core/src/localization/fastlio2/`，
 
 | 文件 | 当前职责 | 目标位置 |
 |---|---|---|
-| [collision_map.hpp](../../mini_nav_nodes/include/mini_nav_nodes/collision_map.hpp) | `DecodeCollisionMap` 校验 ROS 碰撞快照，解码原始栅格和连续障碍点 | `include/mini_nav_nodes/map_manager/` |
-| [cloud_validation.hpp](../../mini_nav_nodes/include/mini_nav_nodes/cloud_validation.hpp) | `ValidCollisionCloud` 校验 PointCloud2 的布局、字段和数据大小 | 同上 |
-| [costmap_display.hpp](../../mini_nav_nodes/include/mini_nav_nodes/costmap_display.hpp) | `CostToOccupancyValue` 将内部代价值转换为 ROS/RViz 占据显示值 | 同上 |
+| `collision_map.hpp`（留档路径 `mini_nav_nodes/include/mini_nav_nodes/collision_map.hpp`） | `DecodeCollisionMap` 校验 ROS 碰撞快照，解码原始栅格和连续障碍点 | `include/mini_nav_nodes/map_manager/` |
+| `cloud_validation.hpp`（留档路径 `mini_nav_nodes/include/mini_nav_nodes/cloud_validation.hpp`） | `ValidCollisionCloud` 校验 PointCloud2 的布局、字段和数据大小 | 同上 |
+| `costmap_display.hpp`（留档路径 `mini_nav_nodes/include/mini_nav_nodes/costmap_display.hpp`） | `CostToOccupancyValue` 将内部代价值转换为 ROS/RViz 占据显示值 | 同上 |
 
 这些文件处理地图相关的 ROS 数据语义。它们不等同于 core 的车体碰撞算法。路径跟踪节点可以引用 `map_manager/collision_map.hpp`，目录归属不表示只有地图节点可以使用它。
 
@@ -83,7 +85,7 @@ FAST-LIO2 底层文件虽然位于 `mini_nav_core/src/localization/fastlio2/`，
 
 ### 2.5 FAST-LIO2 目前只完成了部分分离
 
-当前目录与构建说明见 [localization_backends.md](../../docs/localization_backends.md)、[计算内核说明](../../mini_nav_core/src/localization/fastlio2/README.md)和 [ROS 接入说明](../../mini_nav_nodes/src/localization/fastlio2/README.md)。
+当前目录与构建说明见 [localization_backends.md](../../docs/localization_backends.md)、[计算内核说明](../../mini_nav_core/src/localization/fastlio2/README.md)和 `ROS 接入说明`（留档路径 `mini_nav_nodes/src/localization/fastlio2/README.md`）。
 
 | 部分 | 当前位置 | 调研结论 |
 |---|---|---|
@@ -94,12 +96,12 @@ FAST-LIO2 底层文件虽然位于 `mini_nav_core/src/localization/fastlio2/`，
 
 混合情况有明确的源码依据：
 
-- [laserMapping.cpp](../../mini_nav_nodes/src/localization/fastlio2/fast_lio/src/laserMapping.cpp)：包含 `h_share_model`、`LaserMappingNode`、传感器回调、滤波更新和 ROS 输出。第 172 行是点面观测相关函数，第 294 行定义 ROS 节点，第 1201 行调用迭代滤波更新。
-- [IMU_Processing.hpp](../../mini_nav_nodes/src/localization/fastlio2/fast_lio/src/IMU_Processing.hpp)：执行初始化、预测和点云去畸变，同时直接保存 ROS IMU 消息，并用 `rclcpp::Time` 读取时间。
-- [preprocess.h](../../mini_nav_nodes/src/localization/fastlio2/fast_lio/src/preprocess.h)：第 144–145 行的处理接口直接接收 Livox 或 PointCloud2 消息。
-- [common_lib.h](../../mini_nav_nodes/src/localization/fastlio2/fast_lio/include/common_lib.h)：混合算法类型与 ROS 类型；`MeasureGroup` 内部保存 `sensor_msgs::msg::Imu` 指针，`Pose6D` 使用 ROS 生成消息。
+- `laserMapping.cpp`（留档路径 `mini_nav_nodes/src/localization/fastlio2/fast_lio/src/laserMapping.cpp`）：包含 `h_share_model`、`LaserMappingNode`、传感器回调、滤波更新和 ROS 输出。第 172 行是点面观测相关函数，第 294 行定义 ROS 节点，第 1201 行调用迭代滤波更新。
+- `IMU_Processing.hpp`（留档路径 `mini_nav_nodes/src/localization/fastlio2/fast_lio/src/IMU_Processing.hpp`）：执行初始化、预测和点云去畸变，同时直接保存 ROS IMU 消息，并用 `rclcpp::Time` 读取时间。
+- `preprocess.h`（留档路径 `mini_nav_nodes/src/localization/fastlio2/fast_lio/src/preprocess.h`）：第 144–145 行的处理接口直接接收 Livox 或 PointCloud2 消息。
+- `common_lib.h`（留档路径 `mini_nav_nodes/src/localization/fastlio2/fast_lio/include/common_lib.h`）：混合算法类型与 ROS 类型；`MeasureGroup` 内部保存 `sensor_msgs::msg::Imu` 指针，`Pose6D` 使用 ROS 生成消息。
 
-[fast_lio/CMakeLists.txt](../../mini_nav_nodes/src/localization/fastlio2/fast_lio/CMakeLists.txt) 第 101–108 行通过相对路径定位 core 中的 FAST-LIO2 文件，再把 `ikd_Tree.cpp` 直接编入 `fastlio_mapping`。目前不存在供这个节点单独链接的完整 FAST-LIO2 算法库接口。
+`fast_lio/CMakeLists.txt`（留档路径 `mini_nav_nodes/src/localization/fastlio2/fast_lio/CMakeLists.txt`） 第 101–108 行通过相对路径定位 core 中的 FAST-LIO2 文件，再把 `ikd_Tree.cpp` 直接编入 `fastlio_mapping`。目前不存在供这个节点单独链接的完整 FAST-LIO2 算法库接口。
 
 因此，不能把当前情况描述为“完整算法已在 core，nodes 只负责 ROS”。但这些三维依赖也没有进入基础二维导航库。
 

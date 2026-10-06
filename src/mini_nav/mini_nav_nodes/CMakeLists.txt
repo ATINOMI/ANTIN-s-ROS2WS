@@ -29,19 +29,19 @@ rosidl_get_typesupport_target(collision_typesupport ${PROJECT_NAME} rosidl_types
 
 add_executable(costmap_publisher_node
   src/main.cpp
-  src/costmap_publisher.cpp
+  src/map_manager/costmap_publisher.cpp
 )
 
 target_compile_definitions(costmap_publisher_node PRIVATE MINI_NAV_BUILD_COSTMAP=1)
 
 add_executable(mini_nav_amcl_node
   src/main.cpp
-  src/amcl_node.cpp
+  src/amcl/amcl_node.cpp
 )
 
 add_executable(local_costmap_node
   src/main.cpp
-  src/local_costmap_node.cpp
+  src/map_manager/local_costmap_node.cpp
 )
 target_compile_definitions(local_costmap_node PRIVATE MINI_NAV_BUILD_LOCAL_COSTMAP=1)
 target_compile_features(local_costmap_node PUBLIC cxx_std_17)
@@ -54,7 +54,7 @@ target_link_libraries(local_costmap_node "${collision_typesupport}")
 
 add_executable(path_follower_node
   src/main.cpp
-  src/path_follower_node.cpp
+  src/tracker_manager/path_follower_node.cpp
 )
 target_compile_definitions(path_follower_node PRIVATE MINI_NAV_BUILD_PATH_FOLLOWER=1)
 target_compile_features(path_follower_node PUBLIC cxx_std_17)
@@ -126,7 +126,12 @@ install(TARGETS path_follower_node
 
 foreach(component navigation_manager velocity_guard)
   string(TOUPPER ${component} component_upper)
-  add_executable(${component}_node src/main.cpp src/${component}_node.cpp)
+  if(component STREQUAL "navigation_manager")
+    set(component_directory navigation_task_manager)
+  else()
+    set(component_directory velocity_guard)
+  endif()
+  add_executable(${component}_node src/main.cpp src/${component_directory}/${component}_node.cpp)
   target_compile_definitions(${component}_node PRIVATE MINI_NAV_BUILD_${component_upper}=1)
   target_compile_features(${component}_node PUBLIC cxx_std_17)
   target_include_directories(${component}_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -146,7 +151,7 @@ if(BUILD_TESTING)
     ENVIRONMENT "ROS_DOMAIN_ID=217;RMW_IMPLEMENTATION=rmw_cyclonedds_cpp")
 
   ament_add_gtest(test_planner_dynamic_obstacles
-    test/test_planner_dynamic_obstacles.cpp src/costmap_publisher.cpp)
+    test/test_planner_dynamic_obstacles.cpp src/map_manager/costmap_publisher.cpp)
   target_compile_features(test_planner_dynamic_obstacles PUBLIC cxx_std_17)
   target_include_directories(test_planner_dynamic_obstacles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_target_dependencies(test_planner_dynamic_obstacles geometry_msgs nav_msgs nav2_msgs sensor_msgs
@@ -156,7 +161,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_amcl_tf_cache
     test/test_amcl_tf_cache.cpp
-    src/amcl_node.cpp
+    src/amcl/amcl_node.cpp
   )
   if(TARGET test_amcl_tf_cache)
     target_compile_features(test_amcl_tf_cache PUBLIC cxx_std_17)

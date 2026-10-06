@@ -11,10 +11,10 @@
 #include <limits>
 #include <stdexcept>
 
-#include "mini_nav_core/navigator/path_postprocessor.hpp"
-#include "mini_nav_core/navigator/path_tracker.hpp"
+#include "mini_nav_core/navigator/planner/path_postprocessor.hpp"
+#include "mini_nav_core/navigator/controller/path_tracker.hpp"
 
-#include "mini_nav_core/navigator/astar_navigator.hpp"
+#include "mini_nav_core/navigator/planner/astar_navigator.hpp"
 
 /* Type aliases ------------------------------------------------------------*/
 using mini_nav_core::AStarPlanner;
@@ -206,7 +206,7 @@ TEST(AStarPlanner, ReplacementEndpointIsAcceptedAsReachedByTracker)
     parameters.max_angular_speed = 0.55;
     mini_nav_core::PathTracker tracker(parameters);
     tracker.SetPath(points, 0.7);
-    const mini_nav_core::localization::Pose2D pose{points.back().x, points.back().y, 0.7};
+    const mini_nav_core::nav_types::Pose2D pose{points.back().x, points.back().y, 0.7};
     const auto command = tracker.Step(pose, pose, {0.0, 0.0, 0.0}, map, map, 0.0);
     EXPECT_EQ(command.status, mini_nav_core::TrackingStatus::kGoalReached);
     EXPECT_DOUBLE_EQ(command.linear_x, 0.0);

@@ -6,6 +6,8 @@
 该节点不修改 `/map` 或全局规划图，
 固定墙体仍由静态规划代价地图约束。
 
+模块归属：滚动观测算法在 core 的 `map/rolling_obstacle_grid`，共用点类型在 `nav_types/`；ROS 接入在 nodes 的 `map_manager/local_costmap_node`。同目录的 `collision_map.hpp`、`cloud_validation.hpp` 和 `costmap_display.hpp` 负责消息校验与显示转换；连续车体扫掠由 core 的 `collision_checker/` 执行。完整目录见 [架构说明](architecture.md)。
+
 每帧扫描在扫描时间查询 `odom <- base_footprint` 和 `odom <- 扫描坐标系` 的 TF。
 所有有效射线先清除空闲格，再标记有限距离的障碍端点，以免相邻射线擦除命中点。
 随后使用与全局图相同的 Nav2 1.3.12 膨胀核：按格中心距离分组传播，

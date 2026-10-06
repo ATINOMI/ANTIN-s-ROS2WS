@@ -10,7 +10,7 @@
  * @date 2026-09-21
  */
 
-#include "mini_nav_core/localization/localization_map.hpp"
+#include "mini_nav_core/localization/amcl/localization_map.hpp"
 
 #include <algorithm>
 #include <array>

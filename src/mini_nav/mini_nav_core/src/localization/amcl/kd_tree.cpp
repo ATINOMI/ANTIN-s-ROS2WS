@@ -36,7 +36,7 @@
  */
 
 /* Includes ----------------------------------------------------------------*/
-#include "mini_nav_core/localization/kd_tree.hpp"
+#include "mini_nav_core/localization/amcl/kd_tree.hpp"
 
 #include <cmath>
 #include <limits>

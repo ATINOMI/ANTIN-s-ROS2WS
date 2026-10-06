@@ -4,25 +4,26 @@
 
 目标平台：ROS 2 Jazzy / TurtleBot3 Waffle
 
-本文描述当前源码的模块职责、数据流和安全接口。阶段记录与各日期验收见 [项目状态](project_status.md)；具体任务操作见 [单目标导航任务](navigation_tasks.md)。当前实现以源码、实际 launch 和日志为准，旧调研方案不直接等同于已实现能力。本次仅更新文档，没有重新构建或运行仿真。
+本文描述当前源码的模块职责、数据流和安全接口。阶段记录与各日期验收见 [项目状态](project_status.md)；具体任务操作见 [单目标导航任务](navigation_tasks.md)。当前实现以源码、实际 launch 和日志为准，旧调研方案不直接等同于已实现能力。2026-10-06 的 core/nodes 重构以 Git 留档 `f2218c9` 为基线；改动与本轮验证见 [重构实施记录](../logs/26-10-6/core_node_module_partition_implementation.md)。
 
 ## 1. 项目定位与依赖边界
 
 `mini_nav` 已具备基础单目标导航闭环：定位、八邻域 A*、路径后处理、差分路径跟踪、局部障碍处理、重规划、取消/抢占和失联停车。规划、跟踪及默认 AMCL 核心为项目自研实现；FAST-LIVO2 / FAST-LIO2 使用归档或独立部署的上游算法，经项目适配后复用同一导航链。
 
-基础依赖方向为 `mini_nav_bringup → mini_nav_nodes → mini_nav_core`。核心库不依赖 ROS 消息、节点、TF、PCL 或三维前端。节点负责 ROS 适配，bringup 负责配置和运行编排。RViz 插件是观察和操作入口，不承担控制算法。
+基础依赖方向为 `mini_nav_bringup → mini_nav_nodes → mini_nav_core`。核心计算不依赖 ROS 消息、节点或 TF。默认二维库不依赖 PCL；可选 `mini_nav_fastlio2_core` 依赖 Eigen/PCL/OpenMP，通过 `MINI_NAV_BUILD_FASTLIO2=ON` 在独立 overlay 构建。节点负责 ROS 适配，bringup 负责配置和运行编排。RViz 插件是观察和操作入口，不承担控制算法。
 
 系统复用安装的 Nav2 地图服务、生命周期管理和 `nav2_msgs` Action 类型，复用 Waffle、Gazebo、桥接及机器人状态发布。标准 Action 接口不意味着已经实现 Nav2 全套行为树、插件或恢复行为。`nav2_learning`、教程包及 `reference/` 中的固定源码快照用于学习和对照，生产代码不依赖它们的私有文件。
 
 ```mermaid
 flowchart TD
   Bringup["mini_nav_bringup：launch / config / maps"] --> Nodes["mini_nav_nodes：ROS 适配与任务编排"]
-  Nodes --> Core["mini_nav_core：二维算法与自研 AMCL"]
+  Nodes --> Core["mini_nav_core：二维算法 / AMCL / 可选 FAST-LIO2 计算"]
   Panel["mini_nav_rviz_plugins"] -->|Action / 状态接口| Nodes
   Livo["mini_nav_fastlivo：地图资产与旧图定位"] -->|TF / 定位质量| Nodes
   Livo --> Frontend["独立 FAST-LIVO2 / small_gicp"]
   Lio["scurm_sim / FAST-LIO2 适配"] -->|TF / 定位质量| Nodes
-  Lio --> Vendor["归档 FAST-LIO2 / ICP 内核"]
+  Lio --> Core
+  Lio --> Vendor["独立 ICP 初值配准包"]
 ```
 
 ## 2. 目录与模块归属
@@ -33,38 +34,51 @@ flowchart TD
 mini_nav/
 ├── mini_nav_core/
 │   ├── include/mini_nav_core/
-│   │   ├── map/                         # 地图、膨胀、滚动观测
-│   │   ├── navigator/                   # A*、碰撞几何、后处理、跟踪
-│   │   └── localization/                # 自研 AMCL 的公开接口
-│   ├── src/map/
-│   ├── src/navigator/
-│   ├── src/localization/
-│   │   ├── amcl/                        # 自研粒子滤波和模型实现
-│   │   └── fastlio2/                    # 归档 IKFoM、ikd-Tree 等内核
+│   │   ├── nav_types/                   # 点、位姿、变换、路径
+│   │   ├── map/                         # 代价图、膨胀、滚动观测
+│   │   ├── collision_checker/           # 碰撞几何、圆盘连续扫掠
+│   │   ├── navigator/
+│   │   │   ├── planner/                 # A*、路径后处理
+│   │   │   └── controller/              # 路径跟踪与候选速度检查
+│   │   └── localization/
+│   │       ├── amcl/                    # 自研粒子滤波及模型接口
+│   │       └── fastlio2/                # 估计器、预处理、普通输入输出类型
+│   ├── src/                            # 对应算法目录；nav_types 为头文件
+│   │   └── localization/fastlio2/       # IMU、点面观测、IKFoM、ikd-Tree 私有实现
 │   └── test/
 ├── mini_nav_nodes/
-│   ├── include/mini_nav_nodes/           # 节点、消息校验与显示转换
-│   ├── include/costmap_publisher.hpp
+│   ├── include/mini_nav_nodes/
+│   │   ├── amcl/amcl_node.hpp
+│   │   ├── fastlio2/                    # fastlio_node.hpp、sensor_input.hpp
+│   │   ├── map_manager/                # 两个地图节点与消息校验/显示辅助
+│   │   ├── navigation_task_manager/
+│   │   ├── velocity_guard/
+│   │   └── tracker_manager/
+│   ├── src/
+│   │   ├── amcl/amcl_node.cpp
+│   │   ├── fastlio2/
+│   │   │   ├── fast_lio/src/            # 独立 ROS 包，main.cpp 与 node/*.cpp
+│   │   │   ├── icp_relocalization/      # 独立 ICP ROS 包
+│   │   │   └── adapter/                 # TF、质量、初值、会话管理
+│   │   ├── map_manager/                # costmap_publisher.cpp、local_costmap_node.cpp
+│   │   ├── navigation_task_manager/navigation_manager_node.cpp
+│   │   ├── velocity_guard/velocity_guard_node.cpp
+│   │   ├── tracker_manager/path_follower_node.cpp
+│   │   └── main.cpp                     # 六个基础 C++ 节点复用入口
 │   ├── msg/CollisionMap.msg
-│   ├── src/main.cpp                     # C++ 节点进程统一入口
-│   ├── src/*_node.cpp / costmap_publisher.cpp
-│   ├── src/localization/fastlio2/
-│   │   ├── fast_lio/                    # 独立 ROS 包
-│   │   ├── icp_relocalization/           # 独立 ROS 包
-│   │   └── adapter/                     # TF、质量、初始化与会话管理
 │   └── test/
-├── mini_nav_bringup/                     # launch / config / maps / rviz
-├── mini_nav_rviz_plugins/                # 导航状态、反馈与取消面板
-├── mini_nav_fastlivo/                    # 地图包、建图、配准与离线重放
-├── mini_nav_fastlio/                     # scurm_sim、构建工具与源文件清单
-├── mini_nav_pf_debug/                    # 粒子滤波调试工具
-├── scripts/                             # 环境及独立 A* 演示入口
+├── mini_nav_bringup/                    # launch / config / maps / rviz
+├── mini_nav_rviz_plugins/               # 导航任务面板
+├── mini_nav_fastlivo/                   # 地图资产与独立 FAST-LIVO2 部署
+├── mini_nav_fastlio/                    # scurm_sim、构建工具与源文件清单
+├── mini_nav_pf_debug/
+├── scripts/
 ├── docs/
-├── logs/                                # 按日期保存的报告与复现证据
-└── reference/                           # 隔离的官方源码对照
+├── logs/                               # 按日期保存的报告
+└── reference/                          # 隔离的官方源码对照
 ```
 
-`mini_nav_nodes` 的六个 C++ 可执行程序都由 [main.cpp](../mini_nav_nodes/src/main.cpp) 按构建宏选择节点；AMCL 没有另设 `amcl_main.cpp`。FAST-LIO2 目录中的独立包使用自身入口，它们不加入基础核心库。
+`mini_nav_nodes` 的六个 C++ 可执行程序都由 [main.cpp](../mini_nav_nodes/src/main.cpp) 按构建宏选择节点；AMCL 没有另设 `amcl_main.cpp`。FAST-LIO2 目录中的独立包使用自身入口，FAST-LIO2 节点链接可选计算库，ICP 包保留自己的入口；它们不加入默认二维核心库。
 
 `mini_nav_fastlio/COLCON_IGNORE` 隔离独立三维部署，构建脚本显式指定 `--base-paths`。`src/scurm_deploy` 保留兼容链接。手柄包 `mini_nav_teleop` 位于工作区同级 [src/mini_nav_teleop](../../mini_nav_teleop/)，不在本目录内部。源文件迁移与固定版本见 [定位后端目录说明](localization_backends.md)。
 
@@ -110,17 +124,17 @@ flowchart LR
 
 [Costmap2D](../mini_nav_core/include/mini_nav_core/map/costmap_2d.hpp) 保存二维几何和格代价，负责边界、容量、有限数与坐标转换校验。静态占用输入转换后，自由格为 0、致命障碍为 254、未知为 255；显示/规划膨胀另行生成，定位用原图保持不变。
 
-[InflationLayer](../mini_nav_core/include/mini_nav_core/map/inflation_layer.hpp) 生成膨胀代价；[AStarPlanner](../mini_nav_core/include/mini_nav_core/navigator/astar_navigator.hpp) 使用八邻域搜索和八方向几何启发式。步长为 1 或 √2，软代价按 `步长 × (1 + cost_travel_multiplier × 目标格代价 / 252)` 累加。对角边禁止穿过侧方禁行区域。
+[InflationLayer](../mini_nav_core/include/mini_nav_core/map/inflation_layer.hpp) 生成膨胀代价；[AStarPlanner](../mini_nav_core/include/mini_nav_core/navigator/planner/astar_navigator.hpp) 使用八邻域搜索和八方向几何启发式。步长为 1 或 √2，软代价按 `步长 × (1 + cost_travel_multiplier × 目标格代价 / 252)` 累加。对角边禁止穿过侧方禁行区域。
 
 生产规划调用带 `CollisionGeometry`、真实起点、可选起点/终点专用几何的 Plan 重载。显示图提供路径偏好，连续几何决定硬安全；仅检查格代价的旧重载仍保留，不能代替完整入口的车体校验。
 
 真实起点先检查当前车体，再以安全连续连接接入所属或八邻接格中心，允许多个搜索根。原目标优先；不可达时在默认 0.5 m 目标容差内选最近可达安全格，距离相同再比较路径代价。越界目标仍失败，不通过容差放宽障碍规则。
 
-[路径后处理](../mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp) 简化、加密并有限轮平滑路径，每次改点检查相邻段，最终复查整条路径。平滑不安全时退回已经验证的原路径；原路径本身不安全则返回空。发布路径包含实际起点连接，不能凭“有 Path 消息”认定可执行。
+[路径后处理](../mini_nav_core/include/mini_nav_core/navigator/planner/path_postprocessor.hpp) 简化、加密并有限轮平滑路径，每次改点检查相邻段，最终复查整条路径。平滑不安全时退回已经验证的原路径；原路径本身不安全则返回空。发布路径包含实际起点连接，不能凭“有 Path 消息”认定可执行。
 
 ### 4.2 路径跟踪
 
-[PathTracker](../mini_nav_core/include/mini_nav_core/navigator/path_tracker.hpp) 接收连续路径和终点朝向，Step 输入 map/odom 位姿、两帧关系、静态及局部碰撞几何、稳态时间，返回速度及诊断。ROS 新鲜度和 Action 生命周期由节点处理。
+[PathTracker](../mini_nav_core/include/mini_nav_core/navigator/controller/path_tracker.hpp) 接收连续路径和终点朝向，Step 输入 map/odom 位姿、两帧关系、静态及局部碰撞几何、稳态时间，返回速度及诊断。ROS 新鲜度和 Action 生命周期由节点处理。
 
 默认名义控制采用前视点方向与差分运动约束。0.35 m 前视点的直达捷径若不安全，只有当前点至最近路径投影和原折线前段均安全时，才沿原折线逐次减半前视距离，最多 12 次。原路径受阻时仍执行原有候选检查和停车逻辑；这项修复保留了硬安全预算。
 
@@ -144,7 +158,7 @@ LaserScan 端点用扫描时间的 TF 变换，当前生产链保留真实端点
 
 ### 5.2 统一连续几何
 
-`CollisionGeometry` 位于 [path_postprocessor.hpp](../mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp)，由原始格、连续点、车体半径、观测误差和帧关系组成。它允许格和端点分别使用误差预算，把待检查运动转换到端点帧。A* 边、真实起点连接、路径后处理和控制候选共用 `IsClear` 圆盘扫掠。
+`CollisionGeometry` 位于 [collision_geometry.hpp](../mini_nav_core/include/mini_nav_core/collision_checker/collision_geometry.hpp)，由原始格、连续点、车体半径、观测误差和帧关系组成。[CollisionChecker](../mini_nav_core/include/mini_nav_core/collision_checker/collision_checker.hpp) 实现连续扫掠。它允许格和端点分别使用误差预算，把待检查运动转换到端点帧。A* 边、真实起点连接、路径后处理和控制候选共用 `IsClear` 圆盘扫掠。
 
 当前预算为：
 
@@ -176,13 +190,13 @@ string points_frame_id
 
 `grid.header` 表示格帧及观测时间；`points_frame_id` 明确端点帧，空值兼容格与点同帧。`clearance_radius` 为格使用的预算，点的独立半径由解码后的几何契约指定。格、点、预算和有效性同消息更新，避免订阅者拼接不同时刻的数据。
 
-[DecodeCollisionMap](../mini_nav_nodes/include/mini_nav_nodes/collision_map.hpp) 检查 valid、允许的格/点帧、有限正预算、分辨率、尺寸与容量、数据长度、格姿态及端点有限数。只接受 -1/0/100 的原始占用语义，拒绝把软膨胀图作为碰撞输入。节点还检查静态/局部预算是否与自身配置一致。无效或过期输入撤销运动能力。
+[DecodeCollisionMap](../mini_nav_nodes/include/mini_nav_nodes/map_manager/collision_map.hpp) 检查 valid、允许的格/点帧、有限正预算、分辨率、尺寸与容量、数据长度、格姿态及端点有限数。只接受 -1/0/100 的原始占用语义，拒绝把软膨胀图作为碰撞输入。节点还检查静态/局部预算是否与自身配置一致。无效或过期输入撤销运动能力。
 
 消息增加 `points_frame_id` 后需同步构建并完整重启各消费者；构建不会热更新已有进程。
 
 ## 6. 自研 AMCL
 
-AMCL 算法实现在 `mini_nav_core/src/localization/amcl/`，公开接口保留于 `include/mini_nav_core/localization/`。ROS 节点只传入普通 C++ 数据，不让核心直接使用 LaserScan 或 TF。
+AMCL 算法实现在 `mini_nav_core/src/localization/amcl/`，公开接口位于 `include/mini_nav_core/localization/amcl/`。ROS 节点只传入普通 C++ 数据，不让核心直接使用 LaserScan 或 TF。
 
 | 核心模块 | 职责 |
 |---|---|
@@ -191,7 +205,7 @@ AMCL 算法实现在 `mini_nav_core/src/localization/amcl/`，公开接口保留
 | `LikelihoodFieldModel` / `BeamModel` | 基于普通 `LaserScanData` 的粒子观测似然 |
 | `PoseBinIndex` | 位姿分箱、占用箱计数和连通主簇，处理 yaw 周期边界 |
 | `ParticleFilter` | 持有运动/激光模型，初始化、预测、观测、归一化、重采样及主簇估计 |
-| `pose_utils` / `types` | 普通位姿类型、角度及协方差辅助计算 |
+| `pose_utils` / `types` | AMCL 数据与协方差辅助；位姿、角度和变换复用 `nav_types` |
 
 `PoseBinIndex` 的文件名仍为 `kd_tree.hpp/cpp`；当前实现是位姿分箱索引，不能仅凭文件名解释成通用 KD-tree。`AmclNode` 通过 ParticleFilter 接口调用，不访问分箱细节。估计采用可信主簇，避免多个远离的粒子峰直接取全体平均。
 
@@ -217,7 +231,7 @@ KLD 仍为简化自适应实现，beam-skip 和位姿持久化等兼容参数不
 
 ## 8. SCURM FAST-LIO2 先验定位
 
-本入口使用归档的 `PolarisXQ/SCURM_SentryNavigation@46e6425c692ec98f8e65446fb6fdd360f44ef8e5` 源码，保留上游内核与许可。三维算法源文件存放于 core 的 fastlio2 目录，独立 fast_lio 包显式引用；不会链接进入基础二维核心库。
+本入口使用归档的 `PolarisXQ/SCURM_SentryNavigation@46e6425c692ec98f8e65446fb6fdd360f44ef8e5` 源码，保留上游内核与许可。三维估计、IMU 初始化/去畸变、点云预处理和点面观测在 core 的 fastlio2 目录，封装为独立计算库。独立 `fast_lio` 包链接导出的 CMake target，不再直接编译 core 私有文件。节点内按参数、传感器输入、估计调度和 ROS 输出分文件；不会链接进入基础二维库。
 
 正式入口 `scurm_sim/fastlio2_navigation.launch.py` 启动仿真、地图、定位适配和完整自研导航链，不启动 AMCL、LIVO2 或上游 SCURM 的 Nav2 导航插件。旧 `mini_nav_fastlio.launch.py` 保留兼容。
 
@@ -303,7 +317,9 @@ FAST-LIVO2 使用 [tools/build.sh](../mini_nav_fastlivo/tools/build.sh)及 `inst
 
 架构约束需要分层验证：核心检查几何与算法边界；真实节点检查消息、Action、取消/抢占、输入失效和守卫；隔离 Gazebo 检查实际运动、终点、停车及 TF/速度发布所有权。RViz 面板需要可用图形环境。测试数量应按当前注册用例统计，不能把历史 XML 和 CTest 包装总数当作实际用例。
 
-最新 [第二轮复发问题报告](../logs/26-10-6/recurrent_failure_02_assessment.md)记录 104 个实际用例（core 76、nodes 27、RViz 1）、原始路径真实节点回放和 6 个连续 Gazebo 目标通过；[前一轮报告](../logs/26-10-6/recurrent_failure_assessment.md)记录扫描帧预算修复、103 个用例和 7 次任务。它们表示各轮有限场景的已有验收，本次文档更新未重跑，也不能外推为全部地图、后端及噪声组合都已通过。
+本轮 [模块重构实施记录](../logs/26-10-6/core_node_module_partition_implementation.md)记录默认五包与独立三维四包构建、133 个实际用例及隔离 Gazebo 人工初值/运动中重定位/新目标到达通过；本轮没有 GUI 人工验收。
+
+此前 [第二轮复发问题报告](../logs/26-10-6/recurrent_failure_02_assessment.md)记录 104 个实际用例（core 76、nodes 27、RViz 1）、原始路径真实节点回放和 6 个连续 Gazebo 目标通过；[前一轮报告](../logs/26-10-6/recurrent_failure_assessment.md)记录扫描帧预算修复、103 个用例和 7 次任务。它们表示各轮有限场景的已有验收，历史验收不能外推为全部地图、后端及噪声组合都已通过。
 
 当前仍未实现或完成普遍验收的部分包括：
 

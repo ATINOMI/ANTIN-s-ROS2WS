@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
+#include "mini_nav_core/navigator/planner/path_postprocessor.hpp"
 #include <fstream>
 #include <limits>
-#include "mini_nav_core/navigator/astar_navigator.hpp"
-#include "mini_nav_core/navigator/path_tracker.hpp"
+#include "mini_nav_core/navigator/planner/astar_navigator.hpp"
+#include "mini_nav_core/navigator/controller/path_tracker.hpp"
 #include "mini_nav_core/map/rolling_obstacle_grid.hpp"
 
 using namespace mini_nav_core;
@@ -72,7 +73,7 @@ TEST(CollisionGeometry, DynamicEndpointsFollowClearingRollingAndExpiry) {
 
 TEST(CollisionGeometry, FrozenGazeboSceneUsesOneContinuousSafetyVerdict) {
     std::ifstream metadata(std::string(COLLISION_FIXTURE_DIR) + "/collision_risk_points.txt");
-    unsigned int w, h; double resolution, ox, oy; localization::Pose2D pose{}; std::size_t count;
+    unsigned int w, h; double resolution, ox, oy; nav_types::Pose2D pose{}; std::size_t count;
     ASSERT_TRUE(static_cast<bool>(metadata >> w >> h >> resolution >> ox >> oy >> pose.x >> pose.y >> pose.yaw >> count));
     Costmap2D raw(w, h, resolution, ox, oy, 255);
     std::ifstream cells(std::string(COLLISION_FIXTURE_DIR) + "/collision_risk_static.bin", std::ios::binary);
@@ -271,7 +272,7 @@ TEST(CollisionGeometry, AdjacentAnchorsRespectBoundaryUnknownAndCurrentPoints) {
 
 TEST(CollisionGeometry, FrozenRelativeObservationRetainsStaticAndSensorBudgets) {
     std::ifstream meta(std::string(COLLISION_FIXTURE_DIR) + "/relative_scan_geometry.txt");
-    unsigned w, h; double res, ox, oy; localization::Pose2D pose{}, from_map{}; std::size_t count;
+    unsigned w, h; double res, ox, oy; nav_types::Pose2D pose{}, from_map{}; std::size_t count;
     ASSERT_TRUE(static_cast<bool>(meta >> w >> h >> res >> ox >> oy >> pose.x >> pose.y >> pose.yaw >>
         from_map.x >> from_map.y >> from_map.yaw >> count));
     Costmap2D map(w, h, res, ox, oy, 255);
@@ -302,7 +303,7 @@ TEST(CollisionGeometry, FrozenRelativeObservationRetainsStaticAndSensorBudgets) 
         map.MapToWorld(path[i].x,path[i].y,b.x,b.y); EXPECT_TRUE(geometry.IsClear(a,b));
     }
     const double c = std::cos(from_map.yaw), s = std::sin(from_map.yaw);
-    const localization::Pose2D odom_pose{from_map.x+c*pose.x-s*pose.y,
+    const nav_types::Pose2D odom_pose{from_map.x+c*pose.x-s*pose.y,
         from_map.y+s*pose.x+c*pose.y,pose.yaw+from_map.yaw};
     Costmap2D coverage(200,200,.05,-5.,-5.,0);
     CollisionGeometry local{coverage,observed,.26,.03};
@@ -339,7 +340,7 @@ TEST(CollisionGeometry, SafePolylineRequiresAVisibleLookaheadPrefix) {
     map.SetCost(60,48,254);
     const std::vector<PathPoint> empty;
     CollisionGeometry geometry{map,empty,.29};
-    localization::Pose2D pose{2.3062501673642237,.1328280512182143,3.5755223684517494};
+    nav_types::Pose2D pose{2.3062501673642237,.1328280512182143,3.5755223684517494};
     const std::vector<PathPoint> path{{2.3062478337932832, 0.13280035063198739},
         {2.3140000488013031, 0.10300003241002553},
         {2.1523604241131093, 0.016839752805824837},

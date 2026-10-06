@@ -8,12 +8,13 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME}
+  src/collision_checker/collision_checker.cpp
   src/map/costmap_2d.cpp
   src/map/inflation_layer.cpp
   src/map/rolling_obstacle_grid.cpp
-  src/navigator/astar_navigator.cpp
-  src/navigator/path_postprocessor.cpp
-  src/navigator/path_tracker.cpp
+  src/navigator/planner/astar_navigator.cpp
+  src/navigator/planner/path_postprocessor.cpp
+  src/navigator/controller/path_tracker.cpp
   src/localization/amcl/localization_map.cpp
   src/localization/amcl/differential_motion_model.cpp
   src/localization/amcl/likelihood_field_model.cpp
@@ -29,6 +30,36 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+
+option(MINI_NAV_BUILD_FASTLIO2 "Build the independent ROS-free FAST-LIO2 computation library" OFF)
+if(MINI_NAV_BUILD_FASTLIO2)
+  find_package(Eigen3 REQUIRED)
+  find_package(PCL REQUIRED COMPONENTS common io filters)
+  find_package(OpenMP REQUIRED)
+  add_library(mini_nav_fastlio2_core
+    src/localization/fastlio2/fastlio_estimator.cpp
+    src/localization/fastlio2/pointcloud_preprocess.cpp
+    src/localization/fastlio2/ikd-Tree/ikd_Tree.cpp)
+  target_compile_features(mini_nav_fastlio2_core PUBLIC cxx_std_17)
+  target_include_directories(mini_nav_fastlio2_core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${PCL_INCLUDE_DIRS})
+  target_include_directories(mini_nav_fastlio2_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/localization/fastlio2)
+  target_link_libraries(mini_nav_fastlio2_core PUBLIC Eigen3::Eigen ${PCL_LIBRARIES} OpenMP::OpenMP_CXX)
+  include(ProcessorCount)
+  ProcessorCount(FASTLIO_CPU_COUNT)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)" AND FASTLIO_CPU_COUNT GREATER 4)
+    target_compile_definitions(mini_nav_fastlio2_core PRIVATE MP_EN MP_PROC_NUM=3)
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)" AND FASTLIO_CPU_COUNT GREATER 3)
+    target_compile_definitions(mini_nav_fastlio2_core PRIVATE MP_EN MP_PROC_NUM=2)
+  endif()
+  install(TARGETS mini_nav_fastlio2_core EXPORT export_mini_nav_fastlio2_core
+    ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+  ament_export_targets(export_mini_nav_fastlio2_core HAS_LIBRARY_TARGET)
+  ament_export_dependencies(Eigen3 PCL OpenMP)
+endif()
+
 install(
   TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -41,6 +72,10 @@ install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  if(MINI_NAV_BUILD_FASTLIO2)
+    ament_add_gtest(test_fastlio_estimator test/test_fastlio_estimator.cpp)
+    target_link_libraries(test_fastlio_estimator mini_nav_fastlio2_core)
+  endif()
   ament_add_gtest(test_collision_geometry test/test_collision_geometry.cpp)
   target_link_libraries(test_collision_geometry ${PROJECT_NAME})
   target_compile_definitions(test_collision_geometry PRIVATE

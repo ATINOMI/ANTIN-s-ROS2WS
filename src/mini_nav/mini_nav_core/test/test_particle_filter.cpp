@@ -12,7 +12,7 @@
 
 #include <gtest/gtest.h>
 
-#include "mini_nav_core/localization/particle_filter.hpp"
+#include "mini_nav_core/localization/amcl/particle_filter.hpp"
 
 /* Type aliases ------------------------------------------------------------*/
 using mini_nav_core::localization::Covariance3;

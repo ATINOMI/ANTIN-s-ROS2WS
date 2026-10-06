@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(scurm_sim)
 find_package(ament_cmake REQUIRED)
 get_filename_component(FASTLIO_ADAPTER
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../mini_nav_nodes/src/localization/fastlio2/adapter"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../mini_nav_nodes/src/fastlio2/adapter"
   ABSOLUTE)
 install(DIRECTORY launch config models DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY maps DESTINATION share/${PROJECT_NAME} OPTIONAL)

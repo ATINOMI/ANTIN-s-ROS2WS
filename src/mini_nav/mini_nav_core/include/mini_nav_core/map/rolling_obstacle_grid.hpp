@@ -10,7 +10,7 @@
 
 #include "mini_nav_core/map/costmap_2d.hpp"
 #include "mini_nav_core/map/inflation_layer.hpp"
-#include "mini_nav_core/navigator/path_postprocessor.hpp"
+#include "mini_nav_core/nav_types/path.hpp"
 
 namespace mini_nav_core
 {

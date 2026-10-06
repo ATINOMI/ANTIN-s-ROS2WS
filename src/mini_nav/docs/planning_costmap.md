@@ -4,6 +4,8 @@
 `/mini_nav/map` 的原始占据信息，并另外发布 `/mini_nav/planning_costmap`。
 自研 A* 使用后者规划；AMCL 仍使用原始 `/map`。收到新地图时会重新生成规划图。
 
+2026-10-06 的模块划分中，地图和膨胀算法位于 core 的 `map/`，A* 与后处理位于 `navigator/planner/`，连续车体安全检查位于 `collision_checker/`。ROS 节点及地图消息校验位于 nodes 的 `map_manager/`。完整路径见 [架构说明](architecture.md)。
+
 ## 代价规则
 
 - 膨胀核对齐 Nav2 1.3.12 `InflationLayer` 的全图更新；原始 `/map` 不会改写。

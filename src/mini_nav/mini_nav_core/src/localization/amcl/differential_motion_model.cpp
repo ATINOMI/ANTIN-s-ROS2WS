@@ -56,8 +56,8 @@
 
 /* Includes ----------------------------------------------------------------*/
 
-#include "mini_nav_core/localization/differential_motion_model.hpp"
-#include "mini_nav_core/localization/localization_constants.hpp"
+#include "mini_nav_core/localization/amcl/differential_motion_model.hpp"
+#include "mini_nav_core/localization/amcl/localization_constants.hpp"
 
 #include <algorithm>
 #include <cmath>

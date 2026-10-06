@@ -12,7 +12,7 @@
 #include <fstream>
 #include <stdexcept>
 
-#include "mini_nav_core/navigator/path_tracker.hpp"
+#include "mini_nav_core/navigator/controller/path_tracker.hpp"
 
 namespace
 {
@@ -33,7 +33,7 @@ namespace
      * @param yaw 偏航，弧度。
      * @return 包含输入分量的位姿。
      */
-    mini_nav_core::localization::Pose2D Pose(double x, double y, double yaw = 0.0)
+    mini_nav_core::nav_types::Pose2D Pose(double x, double y, double yaw = 0.0)
     {
         return {x, y, yaw};
     }
@@ -52,7 +52,7 @@ namespace
         mini_nav_core::PathTracker & tracker,
         const mini_nav_core::Costmap2D & static_map,
         const mini_nav_core::Costmap2D & local_map,
-        mini_nav_core::localization::Pose2D pose,
+        mini_nav_core::nav_types::Pose2D pose,
         double seconds)
     {
         return tracker.Step(pose, pose, Pose(0.0, 0.0), static_map, local_map, seconds);

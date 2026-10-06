@@ -5,14 +5,14 @@
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
 
-本次依据 `logs/` 下全部 15 个日期目录（2026-08-27 至 2026-10-06）补充。下文区分调研方案、已实现能力、实际验收及撤回实验；历史记录中的参数、测试数量和未完成项只表示对应轮次。测试与仿真结果来自已有日志，本次文档整理未重新构建、测试或运行机器人。
+本次依据 `logs/` 下全部 15 个日期目录（2026-08-27 至 2026-10-06）补充。下文区分调研方案、已实现能力、实际验收及撤回实验；历史记录中的参数、测试数量和未完成项只表示对应轮次。历史章节保留各轮日志事实；2026-10-06 core/nodes 重构章节记录本轮重新构建、测试及隔离 Gazebo 的结果。
 
 ## 当前状态摘要（截至 2026-10-06）
 
 - 已形成自研基础单目标导航闭环：定位、全局规划、路径跟踪、局部障碍处理、重规划、取消/抢占、有限失败与独立失联停车。不能再把当前项目描述为只有静态路径可视化。
 - 定位有三个独立使用方向：默认自研 AMCL；FAST-LIVO2 融合前端加 GICP 旧图定位；SCURM FAST-LIO2 的 ICP 初始化和固定先验定位。后两者复用自研导航核心，均保留人工初值和质量/会话失效门控。
 - 显示膨胀已对齐 Nav2 learning；安全判定采用独立的连续车体几何。最新修复保留静态地图定位预算，同时将实时 LaserScan 端点留在 `odom` 检查相对距离，避免重复叠加绝对地图定位误差。
-- 最新日志验收为 **103 个实际用例通过**（core 75、nodes 27、RViz 1）；隔离 Gazebo 中 7 次任务成功、7 次停车后重新规划成功。该结果对应 10 月 6 日的有限场景，不代表所有定位后端、地图和长期运行均已验收。见 [复发问题评估](../logs/26-10-6/recurrent_failure_assessment.md)及[测试计数](../logs/26-10-6/recurrent_failure/current_test_counts.json)。
+- 最新模块重构验收为 **133 个实际用例通过**（基础 core 76、nodes 27、RViz 1、FAST-LIO2 接入 24、计算回归 5）；默认五包与独立三维四包构建通过，隔离 Gazebo 的人工初值、运动中重定位、旧任务停止及新目标到达通过。有限场景结果不代表全部地图、后端和长期运行。见 [重构实施记录](../logs/26-10-6/core_node_module_partition_implementation.md)。
 
 | 使用方向 | 入口 | 当前边界 |
 |---|---|---|
@@ -122,7 +122,7 @@ SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定�
 - `AmclNode` 已接入 `mini_nav_nodes`，生命周期管理集中在 `amcl_node.cpp`，`main.cpp` 只保留 ROS 初始化、节点构造和 spin。
 - 自研入口复用官方仿真和地图，只替换 AMCL；官方入口单独保留用于对照。
 - 修复定位回调组未加入 executor 的问题：`MutuallyExclusiveCallbackGroup` 已设置为自动加入 executor，地图、初始位姿和激光回调可以被普通 `rclcpp::spin()` 调度。
-- 已在修改前创建 `mini_nav_nodes/src/amcl_node.cpp.orig` 原样备份；修改后重新构建三包，生命周期 configure/activate 验证通过，`colcon test-result --verbose` 为 26 项测试、0 错误、0 失败、0 跳过。
+- 已在修改前创建 `mini_nav_nodes/src/amcl/amcl_node.cpp.orig` 原样备份；修改后重新构建三包，生命周期 configure/activate 验证通过，`colcon test-result --verbose` 为 26 项测试、0 错误、0 失败、0 跳过。
 - 重启 `mini_localization_astar.launch.py` 后，已确认自研 AMCL 能接收初始位姿并发布 `/amcl_pose`、`/particle_cloud` 和动态 `map -> odom`。
 - 基础定位链路已验证；Gazebo 中长时间运动、定位收敛指标和官方对照尚未完成。
 
@@ -266,6 +266,12 @@ SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定�
 终点另加 0.12 m 停车圆盘约束，显示膨胀值保持 10 月 5 日 learning 对齐结果。该预算针对当前仿真，观测 0.03 m 来源于 1 cm Gaussian 噪声的三倍标准差，并非绝对噪声界。
 
 四包构建及 13 个当前注册 CTest 目标通过，共 **103 个实际用例**。冻结完整地图得到安全 12 格路径；无底盘真实规划/控制节点成功，注入真正危险端点仍 `collision_risk` 并输出零速。独立域 228 Gazebo 复建物理位置后 **7 次任务及 7 次停车后规划全部成功**。2181 个真值样本的保守几何审计中，中心到柱/墙表面的距离下界分别为 0.326228 / 0.504675 m，均大于 0.26 m；最大定位误差 0.037688 m。测试环境已清理，用户现场保留；没有复现用户五小时运行的全部历史，也没有证明任意障碍和误差下都能通行。
+
+### 2026-10-06：core 与 node 模块重构
+
+重构前源码和讨论留档于 `f2218c9`。core 分为 `nav_types`、`map`、`collision_checker`、`navigator/planner`、`navigator/controller`、`localization/amcl|fastlio2`；nodes 按定位接入、地图管理、任务管理、速度保护和跟踪管理组织，头文件同组。
+
+FAST-LIO2 的估计、IMU 和点云预处理进入可选 ROS 无关计算库，节点保留参数、队列/同步及 ROS 输出。默认二维构建不开启三维依赖。双实例及失效输入回归通过；133 个实际用例、两套构建与隔离 Gazebo 重定位/新目标验收通过。ICP 内部本轮未拆分；具体目录、构建、修复和限制见 [实施记录](../logs/26-10-6/core_node_module_partition_implementation.md)。
 
 ## 当前边界
 

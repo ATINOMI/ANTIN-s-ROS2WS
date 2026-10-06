@@ -2,6 +2,8 @@
 
 `mini_localization_astar.launch.py` 现在启动自研任务节点、规划器、跟踪器和独立速度看门狗。算法仍属于 `mini_nav_core`，三个 Action 复用 Jazzy 安装的 `nav2_msgs` 接口。
 
+任务编排、速度保护和跟踪 ROS 接入分别在 nodes 的 `navigation_task_manager/`、`velocity_guard/`、`tracker_manager/`；规划 Action 由 `map_manager/` 节点提供。core 的 `navigator/planner/` 和 `navigator/controller/` 处理算法，共用 `nav_types/` 与 `collision_checker/`。任务管理器与速度保护器不放入 core。完整划分见 [架构说明](architecture.md)。
+
 ```mermaid
 flowchart LR
   RViz[RViz 2D Goal Pose] --> Task[NavigateToPose 任务节点]

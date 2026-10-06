@@ -1,6 +1,6 @@
 # mini_nav 贡献指南
 
-最后更新：2026-08-27
+最后更新：2026-10-06
 
 ## 1. 开始之前
 
@@ -16,10 +16,15 @@
 
 | 要修改的内容 | 应放在哪里 | 不应放在哪里 |
 |---|---|---|
-| 地图数据结构、坐标转换、A* 搜索 | `mini_nav_core` | ROS 节点回调或 launch 文件 |
+| 共享点、位姿、路径和变换 | `mini_nav_core/nav_types` | AMCL 私有数据或路径后处理 |
+| 地图数据结构、膨胀、滚动观测 | `mini_nav_core/map` | ROS 节点回调或 launch 文件 |
+| 碰撞几何与连续扫掠 | `mini_nav_core/collision_checker` | 路径后处理私有实现 |
+| A* 与路径后处理、路径控制 | `mini_nav_core/navigator/planner`、`controller` | 地图算法或任务回调 |
+| AMCL、FAST-LIO2 计算 | `mini_nav_core/localization/amcl`、`fastlio2` | ROS 消息解码 |
+| 地图管理、任务编排、速度保护、路径跟踪接入 | nodes 对应职责目录 | 把 node 目录复制成 core 的算法目录 |
 | ROS 消息、参数、QoS、TF、RViz 交互 | `mini_nav_nodes` | `mini_nav_core` |
 | Gazebo、Nav2、AMCL、节点组合和默认资源 | `mini_nav_bringup` | 算法实现 |
-| RViz 配置 | `src/mini_nav/rviz/` | `mini_nav_bringup/rviz/` 的重复副本 |
+| RViz 配置 | `mini_nav_bringup/rviz/` 或独立后端 config | core 算法目录 |
 | 项目说明、里程碑、设计决策 | `src/mini_nav/docs/` | 代码注释替代正式文档 |
 
 依赖方向保持为：
@@ -80,13 +85,16 @@ ROS 代码要求：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup
+colcon build --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup \
+  --cmake-args -DMINI_NAV_BUILD_FASTLIO2=OFF
 source install/setup.bash
 
 colcon test --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup \
   --event-handlers console_cohesion+
 colcon test-result --verbose
 ```
+
+FAST-LIO2 使用独立构建脚本与 overlay，开启 `MINI_NAV_BUILD_FASTLIO2=ON`，并运行 core 的 `test_fastlio_estimator` 及 `scurm_sim` 的接入测试。步骤见 [定位后端说明](localization_backends.md)。
 
 修改 launch 后至少执行：
 

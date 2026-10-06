@@ -11,10 +11,10 @@
 
 #include <gtest/gtest.h>
 
-#include "mini_nav_core/localization/beam_model.hpp"
-#include "mini_nav_core/localization/kd_tree.hpp"
-#include "mini_nav_core/localization/localization_constants.hpp"
-#include "mini_nav_core/localization/localization_map.hpp"
+#include "mini_nav_core/localization/amcl/beam_model.hpp"
+#include "mini_nav_core/localization/amcl/kd_tree.hpp"
+#include "mini_nav_core/localization/amcl/localization_constants.hpp"
+#include "mini_nav_core/localization/amcl/localization_map.hpp"
 
 using mini_nav_core::Costmap2D;
 using mini_nav_core::localization::GridCell;

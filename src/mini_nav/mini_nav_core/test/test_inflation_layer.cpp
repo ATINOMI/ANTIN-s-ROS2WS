@@ -14,7 +14,7 @@
 #include "mini_nav_core/map/inflation_layer.hpp"
 #include "nav2_costmap_2d/inflation_layer.hpp"
 #include "nav2_costmap_2d/footprint.hpp"
-#include "mini_nav_core/navigator/astar_navigator.hpp"
+#include "mini_nav_core/navigator/planner/astar_navigator.hpp"
 #include "nav2_util/lifecycle_node.hpp"
 #include "tf2_ros/buffer.h"
 

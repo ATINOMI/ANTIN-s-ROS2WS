@@ -8,7 +8,7 @@ from geometry_msgs.msg import Pose
 from nav_msgs.msg import Odometry
 from scipy.spatial.transform import Rotation
 
-spec = importlib.util.spec_from_file_location('scurm_adapter', Path(__file__).parents[3] / 'mini_nav_nodes/src/localization/fastlio2/adapter/adapter.py')
+spec = importlib.util.spec_from_file_location('scurm_adapter', Path(__file__).parents[3] / 'mini_nav_nodes/src/fastlio2/adapter/adapter.py')
 adapter = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adapter)
 

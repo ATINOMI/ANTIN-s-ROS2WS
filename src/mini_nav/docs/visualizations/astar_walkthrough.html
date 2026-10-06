@@ -50,9 +50,9 @@
 </section>
 <section class="understand" aria-label="三个关键理解"><article><span class="number">01 / 选择</span><h3>选全局最小的 f，不是最近的邻居</h3><p>开放队列保存所有已发现、还未展开的格子。每次重新取最小 f，所以搜索前沿可以跳到地图另一处；机器人并没有跟着跳。</p></article><article><span class="number">02 / 更新</span><h3>发现更便宜的走法，才改 parent</h3><p>新 g = 当前 g + 本步代价。比原记录更小，且整段车体扫掠安全，才记录“从当前格来”。parent 保存当前最优的到达方式。</p></article><article><span class="number">03 / 回溯</span><h3>从终点倒着找，最后把顺序反过来</h3><p>搜索树有许多分支，最终路径只有一条。终点 → parent → … → S，反转之后才是机器人需要的 S → 终点。</p></article></section>
 <details><summary>对照 mini_nav 源码：这份演示实现了什么？</summary>
-<p>依据 <a href="../../mini_nav_core/src/navigator/astar_navigator.cpp">astar_navigator.cpp / PlanImpl</a> 的安全重载：八邻域、最小 f 队列、禁止斜向穿角、非负软代价、逐边圆盘扫掠，以及原目标优先的容差终点选择。界面把一次展开拆成“出队 + 八次邻居检查”，方便观察；源码在一个循环里完成这些检查。</p>
+<p>依据 <a href="../../mini_nav_core/src/navigator/planner/astar_navigator.cpp">astar_navigator.cpp / PlanImpl</a> 的安全重载：八邻域、最小 f 队列、禁止斜向穿角、非负软代价、逐边圆盘扫掠，以及原目标优先的容差终点选择。界面把一次展开拆成“出队 + 八次邻居检查”，方便观察；源码在一个循环里完成这些检查。</p>
 <p><code>step = L × (1 + w × c / 252)</code>，L 为 1 或 √2，c 是进入格的代价。<code>h = max(dx,dy) + (√2−1) × min(dx,dy)</code>，忽略障碍和软代价，因此是剩余代价下界。g、h 按格计；容差按米计。253、254、255 均禁行。</p>
-<p>规划图来自 <a href="../../mini_nav_core/src/map/inflation_layer.cpp">InflateCostmap</a>；扫掠对应 <a href="../../mini_nav_core/src/navigator/path_postprocessor.cpp">IsCircularSweepClear</a>。普通场景采用半径 0.26 m、膨胀半径 0.45 m、衰减 10 /m；穿角场景用 0.06 m 小圆盘，单独突出穿角规则。参数参考 <a href="../../mini_nav_bringup/config/planning_costmap.yaml">planning_costmap.yaml</a>。</p>
+<p>规划图来自 <a href="../../mini_nav_core/src/map/inflation_layer.cpp">InflateCostmap</a>；扫掠对应 <a href="../../mini_nav_core/src/collision_checker/collision_checker.cpp">IsCircularSweepClear</a>。普通场景采用半径 0.26 m、膨胀半径 0.45 m、衰减 10 /m；穿角场景用 0.06 m 小圆盘，单独突出穿角规则。参数参考 <a href="../../mini_nav_bringup/config/planning_costmap.yaml">planning_costmap.yaml</a>。</p>
 <p>这是 16 × 12 的教学地图与 JavaScript 重现，不运行 ROS。只显示 A* 原始格中心路径，不模拟路径平滑或机器人跟踪。队列表按格去重，只列前五名；C++ 堆保留重复项，出队时跳过已展开格。同 f 时演示按入队顺序排列，C++ 未指定同分顺序，等价路线和展开次序可能不同。</p>
 <p>容差不是“进入圆圈就停”：原目标不可达时，要搜完可达区域，再选容差内距离原目标最近的已展开安全格，同距离再比 g。参数只改变本页。</p>
 </details>

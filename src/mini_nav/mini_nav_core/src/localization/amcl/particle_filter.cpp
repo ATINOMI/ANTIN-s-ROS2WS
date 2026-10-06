@@ -11,7 +11,7 @@
 
 /* Includes ----------------------------------------------------------------*/
 
-#include "mini_nav_core/localization/particle_filter.hpp"
+#include "mini_nav_core/localization/amcl/particle_filter.hpp"
 
 #include <algorithm>
 #include <cmath>

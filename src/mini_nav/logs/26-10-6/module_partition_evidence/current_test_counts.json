@@ -1,0 +1,26 @@
+{
+  "method": "Current registered gtest XML plus current Python node integration output. Historical XML and CTest wrapper counts excluded.",
+  "packages": {
+    "mini_nav_core": {
+      "actual_cases": 76,
+      "ctest_targets": 8
+    },
+    "mini_nav_nodes": {
+      "actual_cases": 27,
+      "ctest_targets": 4
+    },
+    "mini_nav_rviz_plugins": {
+      "actual_cases": 1,
+      "ctest_targets": 1
+    },
+    "scurm_sim": {
+      "actual_cases": 24,
+      "ctest_targets": 3
+    },
+    "fastlio_estimator": {
+      "actual_cases": 5,
+      "ctest_targets": 1
+    }
+  },
+  "total_actual_cases": 133
+}

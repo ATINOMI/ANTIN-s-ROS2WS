@@ -6,7 +6,7 @@
  */
 #include <gtest/gtest.h>
 
-#include "mini_nav_nodes/amcl_node.hpp"
+#include "mini_nav_nodes/amcl/amcl_node.hpp"
 
 namespace mini_nav_nodes
 {
