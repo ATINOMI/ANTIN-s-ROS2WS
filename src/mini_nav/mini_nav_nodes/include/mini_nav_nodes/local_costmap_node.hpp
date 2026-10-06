@@ -19,6 +19,7 @@
 #include "tf2_ros/transform_listener.h"
 
 #include "mini_nav_core/map/rolling_obstacle_grid.hpp"
+#include "mini_nav_nodes/msg/collision_map.hpp"
 
 namespace mini_nav_nodes
 {
@@ -57,10 +58,15 @@ namespace mini_nav_nodes
         void invalidate(const char * reason);
 
         std::unique_ptr<mini_nav_core::RollingObstacleGrid> grid_;
+        mini_nav_core::InflationParameters safety_inflation_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
         rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
         rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
+        rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr safety_map_publisher_;
+        rclcpp::Publisher<msg::CollisionMap>::SharedPtr collision_publisher_;
+        double observation_uncertainty_{0.03};
+        std::optional<rclcpp::Time> integrated_cloud_stamp_;
         rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr valid_publisher_;
         rclcpp::TimerBase::SharedPtr timer_;
         std::string odom_frame_id_;

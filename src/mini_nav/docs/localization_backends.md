@@ -45,16 +45,31 @@ FAST-LIO2 先验定位：
 ```bash
 cd /home/a/ros2_ws
 bash src/mini_nav/mini_nav_fastlio/scripts/build_localization.sh
-bash src/mini_nav/mini_nav_fastlio/scripts/run_localization.sh
+source install_mini_nav_fastlio/setup.bash
+ros2 launch scurm_sim fastlio2_navigation.launch.py
 ```
 
 默认 PCD 与二维地图沿用既有文件；构建脚本第一个参数可指定同场景 PCD。正常构建直接使用已归档的源码、仿真模型与配置，不克隆或重新施加补丁。已有 `install_fastlivo` overlay 只提供 Livox 消息构建依赖，运行不启动 LIVO2 节点。
 
-三维后端使用 `build_mini_nav_fastlio` / `install_mini_nav_fastlio`，运行日志继续写入 `log_scurm`。原 `build_scurm` / `install_scurm` 保留，迁移时不覆盖正在运行的二进制。`mini_nav_fastlio/COLCON_IGNORE` 防止主工作区自动发现此独立部署；脚本通过 `--base-paths` 显式发现两个节点包和 `scurm_sim`。
+三维后端使用 `build_mini_nav_fastlio` / `install_mini_nav_fastlio`，构建日志写入 `log_scurm`；直接 launch 的运行日志由 `ROS_LOG_DIR` 控制，未设置时使用 ROS 默认日志目录。原 `build_scurm` / `install_scurm` 保留，迁移时不覆盖正在运行的二进制。`mini_nav_fastlio/COLCON_IGNORE` 防止主工作区自动发现此独立部署；构建通过 `--base-paths` 显式发现两个节点包和 `scurm_sim`。
 
-`src/scurm_deploy` 保留为指向 `mini_nav/mini_nav_fastlio` 的兼容链接，原 shell 命令仍有效。ROS 包名 `fast_lio`、`icp_relocalization`、`scurm_sim`，原 launch 名称和 ROS 接口保持不变。
+`src/scurm_deploy` 保留为指向 `mini_nav/mini_nav_fastlio` 的兼容链接，原 shell 命令仍有效。ROS 包名 `fast_lio`、`icp_relocalization`、`scurm_sim` 和 ROS 接口保持不变。正式导航入口为 `scurm_sim/fastlio2_navigation.launch.py`；原 `mini_nav_fastlio.launch.py` 作为兼容入口包含它。
 
 建图运行工具为 `build_fastlio.sh` / `run_fastlio.sh`，保存地图为 `save_pcd.sh`。它们与定位入口共享归档源码。`prepare.py` / `configure.py` / `build.sh` / `run_sim.sh` 及忽略的 `upstream/` 是此前整套上游 Nav2 实验工具；当前 mini_nav 定位入口不调用这些准备工具。
+
+## 直接 launch 参数
+
+新入口设置全部子进程的 ROS / Gazebo 环境，启动不需要 `run_localization.sh`，也不需要提前 export 域或分区。`install_mini_nav_fastlio/setup.bash` 已串联 Jazzy、Livox 消息依赖和主工作区环境。默认 `ros_domain_id:=227`、`gz_partition:=scurm_mini_nav`、`rmw_implementation:=rmw_cyclonedds_cpp`、`gui:=true`、`rviz:=true`。同域同分区已有实例时，先关闭原 launch；Ctrl+C 关闭新 launch 及其后端子进程。
+
+隔离运行示例：
+
+```bash
+ros2 launch scurm_sim fastlio2_navigation.launch.py \
+  ros_domain_id:=226 gz_partition:=mini_nav_fastlio_direct_launch \
+  gui:=false rviz:=false
+```
+
+原入口沿用已有环境值作为隔离参数默认值；新入口用上面的固定默认值，并允许显式覆盖。
 
 ## 初始化与边界
 

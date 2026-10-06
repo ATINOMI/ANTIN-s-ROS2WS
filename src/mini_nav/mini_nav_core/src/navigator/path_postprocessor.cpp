@@ -159,7 +159,7 @@ namespace mini_nav_core {
          * @return 全部扫掠严格在图内且不接触所选禁行格时为 true。
          */
         bool SweepIsClear(const Costmap2D &source, const PathPoint &first, const PathPoint &second,
-                          double radius, bool include_unknown_clearance) {
+                          double radius, bool include_unknown_clearance, CollisionConflict * conflict = nullptr) {
             const double origin_x = source.GetOriginX();
             const double origin_y = source.GetOriginY();
             const double resolution = source.GetResolution();
@@ -172,6 +172,11 @@ namespace mini_nav_core {
             };
             // 收缩后的地图是凸集；两个端点在内即可保证整条中心线不越界。
             if (!inside(first) || !inside(second)) {
+                if (conflict) {
+                    const auto point = !inside(first) ? first : second;
+                    *conflict = {"boundary", point, std::min({point.x-origin_x, max_x-point.x,
+                        point.y-origin_y, max_y-point.y}), radius, false};
+                }
                 return false;
             }
 
@@ -196,9 +201,12 @@ namespace mini_nav_core {
                     }
                     const double cell_min_x = origin_x + x * resolution;
                     const double cell_min_y = origin_y + y * resolution;
-                    if (SegmentToRectangleSquared(
-                            first, second, cell_min_x, cell_min_y, cell_min_x + resolution,
-                            cell_min_y + resolution) <= radius_squared + kEpsilon) {
+                    const double distance_squared = SegmentToRectangleSquared(
+                        first, second, cell_min_x, cell_min_y, cell_min_x + resolution, cell_min_y + resolution);
+                    if (distance_squared <= radius_squared + kEpsilon) {
+                        if (conflict) *conflict = {cost == kUnknownCost ? "unknown_cell" : "occupied_cell",
+                            {cell_min_x + resolution*.5, cell_min_y + resolution*.5},
+                            std::sqrt(distance_squared), radius, false};
                         return false;
                     }
                 }
@@ -225,7 +233,8 @@ namespace mini_nav_core {
         SegmentResult EvaluateSegment(const Costmap2D &source, const Costmap2D &planning,
                                       const PathPoint &first, const PathPoint &second,
                                       double radius, double multiplier,
-                                      bool include_unknown_clearance) {
+                                      bool include_unknown_clearance,
+                                      const CollisionGeometry * geometry = nullptr) {
             const SegmentResult invalid{false, std::numeric_limits<double>::infinity()};
             if (!std::isfinite(first.x) || !std::isfinite(first.y) || !std::isfinite(second.x) ||
                 !std::isfinite(second.y)) {
@@ -256,7 +265,8 @@ namespace mini_nav_core {
                 return x >= 0 && y >= 0 &&
                        planning.IsInBounds(static_cast<unsigned int>(x),
                                            static_cast<unsigned int>(y)) &&
-                       planning.GetCost(x, y) < kBlockedCost;
+                       (geometry ? source.GetCost(x, y) < kBlockedCost :
+                                   planning.GetCost(x, y) < kBlockedCost);
             };
             const auto safe_point_cells = [&](double x, double y) {
                 const int base_x = static_cast<int>(std::floor(x));
@@ -310,7 +320,8 @@ namespace mini_nav_core {
                 }
                 t = next_t;
             }
-            return SweepIsClear(source, first, second, radius, include_unknown_clearance)
+            return (geometry ? geometry->IsClear(first, second) :
+                    SweepIsClear(source, first, second, radius, include_unknown_clearance))
                        ? SegmentResult{true, total} : invalid;
         }
     } // namespace
@@ -332,6 +343,39 @@ namespace mini_nav_core {
                SweepIsClear(source, first, second, clearance_radius, include_unknown_clearance);
     }
 
+    bool CollisionGeometry::IsClear(const PathPoint & first, const PathPoint & second,
+                                    double extra_radius, CollisionConflict * conflict) const {
+        if (conflict) *conflict = {"invalid_geometry", first, 0.0, radius, false};
+        if (!std::isfinite(radius) || radius <= 0.0 ||
+            !std::isfinite(observation_uncertainty) || observation_uncertainty < 0.0 ||
+            !std::isfinite(extra_radius) || extra_radius < 0.0 ||
+            !SweepIsClear(grid, first, second, radius + extra_radius, include_unknown, conflict)) {
+            return false;
+        }
+        if (!std::isfinite(point_radius) || point_radius < 0.0 ||
+            !std::isfinite(points_from_grid_translation.x) ||
+            !std::isfinite(points_from_grid_translation.y) ||
+            !std::isfinite(points_from_grid_yaw)) return false;
+        const double bound = (point_radius > 0.0 ? point_radius : radius) + extra_radius + observation_uncertainty;
+        if (!std::isfinite(bound)) return false;
+        const double c = std::cos(points_from_grid_yaw), s = std::sin(points_from_grid_yaw);
+        const auto in_points_frame = [&](const PathPoint & point) {
+            return PathPoint{points_from_grid_translation.x + c * point.x - s * point.y,
+                points_from_grid_translation.y + s * point.x + c * point.y};
+        };
+        const auto points_first = in_points_frame(first), points_second = in_points_frame(second);
+        for (const auto & point : points) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+                PointToSegmentSquared(point, points_first, points_second) <= bound * bound) {
+                if (conflict) *conflict = {"dynamic_point", point,
+                    std::sqrt(PointToSegmentSquared(point, points_first, points_second)), bound, false};
+                return false;
+            }
+        }
+        if (conflict) *conflict = {};
+        return true;
+    }
+
     /**
      * @brief 简化并平滑栅格路径，逐段检查硬禁行、扫掠和积分软代价。
      *
@@ -351,7 +395,8 @@ namespace mini_nav_core {
                                                  const std::vector<MapLocation> &raw_path,
                                                  double clearance_radius,
                                                  double cost_travel_multiplier,
-                                                 bool include_unknown_clearance) {
+                                                 bool include_unknown_clearance,
+                                                 const CollisionGeometry * geometry) {
         if (!std::isfinite(clearance_radius) || clearance_radius <= 0.0 ||
             !std::isfinite(cost_travel_multiplier) || cost_travel_multiplier < 0.0 ||
             source.GetSizeInCellsX() != planning.GetSizeInCellsX() ||
@@ -377,8 +422,9 @@ namespace mini_nav_core {
             raw.push_back(point);
         }
         const auto evaluate = [&](const PathPoint &first, const PathPoint &second) {
-            return EvaluateSegment(source, planning, first, second, clearance_radius,
-                                   cost_travel_multiplier, include_unknown_clearance);
+            auto result = EvaluateSegment(source, planning, first, second, clearance_radius,
+                                   cost_travel_multiplier, include_unknown_clearance, geometry);
+            return result;
         };
 
         // 原始路径也必须连续安全；栅格中心安全不等于车体沿两中心运动安全。

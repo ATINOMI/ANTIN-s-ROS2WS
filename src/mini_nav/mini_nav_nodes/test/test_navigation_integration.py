@@ -17,8 +17,9 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
-from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped
+from geometry_msgs.msg import Point, PoseStamped, TransformStamped, TwistStamped
 from nav_msgs.msg import OccupancyGrid, Path
+from mini_nav_nodes.msg import CollisionMap
 from nav2_msgs.action import NavigateToPose
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool
@@ -57,6 +58,7 @@ class NavigationIntegration(unittest.TestCase):
         self.command = (0.0, 0.0)
         self.quality = True
         self.obstacle = None
+        self.collision_radius = .26
         self.states = []
         self.guard_states = []
         self.paths = []
@@ -65,6 +67,7 @@ class NavigationIntegration(unittest.TestCase):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.map_pub = self.node.create_publisher(OccupancyGrid, '/map', latched)
         self.local_pub = self.node.create_publisher(OccupancyGrid, '/mini_nav/local_costmap', 1)
+        self.local_collision_pub = self.node.create_publisher(CollisionMap, '/mini_nav/local_collision_map', 1)
         self.scan_pub = self.node.create_publisher(LaserScan, "/scan", 10)
         self.valid_pub = self.node.create_publisher(Bool, '/mini_nav/local_costmap_valid', 1)
         self.quality_pub = self.node.create_publisher(Bool, '/mini_nav/localization_valid', 1)
@@ -80,10 +83,13 @@ class NavigationIntegration(unittest.TestCase):
         self.assertEqual(self.node.count_publishers('/cmd_vel'), 0, 'Domain 217 is occupied; refusing to send commands')
         common = ['--ros-args']
         args = {
-            'costmap_publisher': ['-p', 'enable_topic_goals:=false', '-p', 'fuse_local_obstacles:=true', '-p', 'publish_period_ms:=100'],
+            'costmap_publisher': ['-p', 'enable_topic_goals:=false', '-p', 'fuse_local_obstacles:=true', '-p', 'publish_period_ms:=100', '-p', 'planning.dynamic_policy:=static_then_stable'],
             'path_follower': ['-p', 'action_mode:=true', '-p', 'require_localization_quality:=true', '-p', 'cmd_vel_topic:=/mini_nav/cmd_vel_raw'],
             'navigation_manager': ['-p', 'blocked_timeout:=2.5', '-p', 'replan_interval:=0.4', '-p', 'task_timeout:=40.0'],
             'velocity_guard': []}
+        if self._testMethodName == 'test_persistent_obstacle_has_finite_failure':
+            # 局部绕行含有效转向进展；用任务总期限验证持续阻挡仍有有限失败。
+            args['navigation_manager'][-1] = 'task_timeout:=6.0'
         for name, options in args.items():
             log = open(f'/tmp/mini_nav_integration_{self._testMethodName}_{name}.log', 'w')
             self.files.append(log)
@@ -178,9 +184,6 @@ class NavigationIntegration(unittest.TestCase):
                     wx, wy = -2.5 + (x + 0.5) * 0.05, -2.5 + (y + 0.5) * 0.05
                     if xmin <= wx <= xmax and ymin <= wy <= ymax:
                         grid.data[y * 100 + x] = 100
-                    # Match the production local map's circular inscribed band (not soft costs).
-                    elif math.hypot(max(xmin - wx, 0.0, wx - xmax), max(ymin - wy, 0.0, wy - ymax)) <= 0.28:
-                        grid.data[y * 100 + x] = 99
         scan = LaserScan()
         scan.header.frame_id = 'base_footprint'
         scan.header.stamp = stamp
@@ -209,6 +212,14 @@ class NavigationIntegration(unittest.TestCase):
         scan.ranges = ranges
         self.scan_pub.publish(scan)
         self.local_pub.publish(grid)
+        collision_grid = self.grid('odom', 100, -2.5, -2.5)
+        points = []
+        for index, distance in enumerate(ranges):
+            if math.isfinite(distance) and 0 < distance < 2.5:
+                angle = self.yaw - math.pi + index * 2 * math.pi / 360
+                points.append(Point(x=self.x + distance * math.cos(angle), y=self.y + distance * math.sin(angle)))
+        self.local_collision_pub.publish(CollisionMap(grid=collision_grid, points=points,
+            observation_uncertainty=.03, clearance_radius=self.collision_radius, valid=True))
         self.valid_pub.publish(Bool(data=True))
         self.quality_pub.publish(Bool(data=self.quality))
 
@@ -388,8 +399,21 @@ class NavigationIntegration(unittest.TestCase):
         _, result = self.send(1.2)
         self.wait(result.done, 7)
         self.assertEqual(result.result().status, 6)
-        self.assertIn(result.result().result.error_msg, ['no_progress', 'blocked_timeout'])
+        self.assertIn(result.result().result.error_msg, ['no_progress', 'blocked_timeout', 'task_timeout'])
+        self.wait(lambda: self.command == (0.0, 0.0), .15)
         self.assertEqual(self.command, (0.0, 0.0))
+
+    def test_mismatched_collision_radius_stops_and_requires_new_task(self):
+        """原始几何消息的车体半径不一致时必须停车，修正后不续跑失败任务。"""
+        _, result = self.send(.8)
+        self.wait(lambda: self.command[0] > .02)
+        self.collision_radius = .20
+        self.wait(lambda: self.command == (0., 0.), .5)
+        self.wait(result.done, 5)
+        self.assertEqual(result.result().status, 6)
+        self.collision_radius = .26
+        self.spin_for(.5)
+        self.assertEqual(self.command, (0., 0.))
 
     def test_localization_loss_stops_and_fails(self):
         """验证定位质量丢失导致停车及任务失败。

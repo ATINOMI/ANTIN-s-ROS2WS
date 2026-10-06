@@ -9,11 +9,14 @@ local_costmap:
       height: 4.0
       resolution: 0.05
       # 与全局图共用按 Waffle 碰撞几何取整的车体半径和 0.02 m 余量。
+      observation_uncertainty: 0.03
       robot_radius: 0.24
       safety_margin: 0.02
-      inflation_radius: 0.45
-      cost_scaling_factor: 10.0
-      # 未知格始终禁行；开启后只额外传播硬安全区。
+      # 膨胀内切半径对齐 learning；跟踪器另收原始几何，车体安全半径仍为 0.26 m。
+      inscribed_radius: 0.22549849949589046
+      inflation_radius: 0.70
+      cost_scaling_factor: 3.0
+      # 对齐官方未知格接收规则；开启后未知格也作为完整膨胀源。
       inflate_around_unknown: false
       obstacle_max_range: 2.5
       raytrace_max_range: 3.0

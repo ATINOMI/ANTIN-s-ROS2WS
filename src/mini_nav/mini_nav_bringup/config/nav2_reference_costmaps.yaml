@@ -40,7 +40,7 @@ nav2_reference_global:
         inflate_unknown: false
         inflate_around_unknown: false
 
-# 与自研规划图使用相同的静态地图、硬安全半径和软膨胀参数。
+# 与自研规划图使用相同的静态地图和 learning 官方膨胀参数。
 # 这张图不叠加扫描障碍，用来单独观察官方与自研膨胀算法的差别。
 nav2_reference_matched:
   costmap:
@@ -50,8 +50,8 @@ nav2_reference_matched:
       update_frequency: 1.0
       publish_frequency: 1.0
       resolution: 0.05
-      robot_radius: 0.26
-      footprint_padding: 0.0
+      robot_radius: 0.22
+      footprint_padding: 0.01
       rolling_window: false
       track_unknown_space: true
       always_send_full_costmap: true
@@ -62,8 +62,8 @@ nav2_reference_matched:
         map_subscribe_transient_local: true
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
-        cost_scaling_factor: 10.0
-        inflation_radius: 0.45
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.70
         inflate_unknown: false
         inflate_around_unknown: false
 

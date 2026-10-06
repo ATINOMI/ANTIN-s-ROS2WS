@@ -1,6 +1,6 @@
 /**
  * @file path_tracker.hpp
- * @brief 低速路径跟踪、双安全图连续碰撞检查及进展期限。
+ * @brief 低速路径跟踪、双原始几何连续碰撞检查及进展期限。
  * @author Antinomy
  * @date 2026-10-01
  */
@@ -24,7 +24,8 @@ namespace mini_nav_core
         kOffPath,
         kCollisionRisk,
         kProgressTimeout,
-        kInvalidPose
+        kInvalidPose,
+        kAvoidingObstacle
     };
 
     /**
@@ -61,7 +62,21 @@ namespace mini_nav_core
         double command_reaction_time{0.35};
     };
 
-    /** ROS 无关的低速路径跟踪、禁行区检查和进展判断。地图已包含车体膨胀层。 */
+    /** 硬安全检查和评分结果；clearance 是通过扩张检查得到的额外余量下界。 */
+    struct CandidateEvaluation {
+        VelocityCommand command;
+        bool safe{false};
+        double clearance{0.0};
+        double score{0.0};
+        CollisionConflict conflict;
+    };
+
+    /** 一次控制周期的实际被检查候选，顺序首项为名义速度或锁存的失败速度。 */
+    struct TrackingDiagnostics {
+        std::vector<CandidateEvaluation> candidates;
+    };
+
+    /** ROS 无关的低速路径跟踪、原始几何碰撞检查和进展判断。 */
     class PathTracker
     {
     public:
@@ -123,6 +138,15 @@ namespace mini_nav_core
             const Costmap2D & local_safety_map,
             double steady_seconds);
 
+        /** 原始静态格和连续动态端点的生产入口，所有输出均按完整圆盘检查。 */
+        VelocityCommand Step(
+            const localization::Pose2D & map_pose,
+            const localization::Pose2D & odom_pose,
+            const localization::Pose2D & odom_from_map,
+            const CollisionGeometry & static_geometry,
+            const CollisionGeometry & local_geometry,
+            double steady_seconds, TrackingDiagnostics * diagnostics = nullptr);
+
     private:
         /**
          * @brief 从机器人到折线的最近投影处沿路径弧长寻找前视点。
@@ -133,7 +157,7 @@ namespace mini_nav_core
          * @param distance_to_path 输出到最近线段的欧氏距离，单位为米。
          * @return 前视点；剩余路径不足前视距离时为末点。
          */
-        PathPoint Lookahead(const PathPoint & robot, double & distance_to_path) const;
+        PathPoint Lookahead(const PathPoint & robot, double & distance_to_path, double lookahead_distance, std::vector<PathPoint> * prefix = nullptr) const;
         /**
          * @brief 用 odom 位移或转角判断候选运动是否持续取得进展。
          *
@@ -160,5 +184,9 @@ namespace mini_nav_core
         double command_time_{0.0};
         bool have_command_{false};
         VelocityCommand previous_command_;
+        bool blocked_{false};
+        VelocityCommand blocked_command_;
+        double blocked_time_{0.0};
+        double recovery_started_{-1.0};
     };
 }

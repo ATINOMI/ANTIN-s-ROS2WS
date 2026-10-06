@@ -76,6 +76,12 @@
  */
 
 
+/**
+ * @file SubManifold.hpp
+ * @brief 为子流形附加误差空间 IDX 和过程表示空间 DIM 起始偏移。此处 DIM 表示偏移，不是子类型的维数。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef SUBMANIFOLD_HPP_
 #define SUBMANIFOLD_HPP_
 
@@ -96,6 +102,10 @@ namespace MTK {
  * @tparam T   The manifold type of the sub-type
  * @tparam idx The index of the sub-type within the compound manifold
  */
+/**
+ * @brief 继承子流形并记录其在组合状态中的双重偏移。
+ * @note IDX=idx 指向 DOF 误差片段，DIM=dim 指向过程表示片段；不能把两者当成相同索引。
+ */
 template<class T, int idx, int dim>
 struct SubManifold : public T 
 {
@@ -104,12 +114,20 @@ struct SubManifold : public T
 	typedef T type;
 	
 	//! Construct from derived type
+	/**
+	 * @brief 用输入值构造底层流形，保留编译期索引。
+	 * @param t 可构造 T 的值；构造/归一化行为由 T 决定。
+	 */
 	template<class X>
 	explicit
 	SubManifold(const X& t) : T(t) {};
 	
 	//! Construct from internal type
 	//explicit
+	/**
+	 * @brief 用输入值构造底层流形，保留编译期索引。
+	 * @param t 可构造 T 的值；构造/归一化行为由 T 决定。
+	 */
 	SubManifold(const T& t) : T(t) {};
 	
 	//! inherit assignment operator

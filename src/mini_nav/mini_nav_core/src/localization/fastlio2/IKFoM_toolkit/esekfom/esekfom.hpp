@@ -32,6 +32,12 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @file esekfom.hpp
+ * @brief 在欧氏向量、SO3 和 S2 组合流形上执行预测及迭代误差状态观测更新。DIM 是过程导数维度，DOF 是协方差维度。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef ESEKFOM_EKF_HPP
 #define ESEKFOM_EKF_HPP
 
@@ -62,6 +68,10 @@ using namespace Eigen;
 //used for iterated error state EKF update
 //for the aim to calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
 //applied for measurement as a manifold.
+/**
+ * @brief 固定流形观测的共享计算结果。
+ * @note 回调填写 z、h_x、h_v、R；valid 控制本轮能否更新，converge 由滤波器传递上轮收敛状态。
+ */
 template<typename S, typename M, int measurement_noise_dof = M::DOF>
 struct share_datastruct
 {
@@ -76,6 +86,10 @@ struct share_datastruct
 //used for iterated error state EKF update
 //for the aim to calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
 //applied for measurement as an Eigen matrix whose dimension is changing
+/**
+ * @brief 动态欧氏观测的共享计算结果。
+ * @note 一般更新使用 z-h；modified 版本把 h 当成已计算创新，h_x 限为前 12 个状态列，不能混用两种回调约定。
+ */
 template<typename T>
 struct dyn_share_datastruct
 {
@@ -91,6 +105,10 @@ struct dyn_share_datastruct
 //used for iterated error state EKF update
 //for the aim to calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
 //applied for measurement as a dynamic manifold whose dimension or type is changing
+/**
+ * @brief 运行时流形观测的共享雅可比与噪声结果。
+ * @note 观测由函数参数提供，预测观测由回调返回；结构中不存 z/h。
+ */
 template<typename T>
 struct dyn_runtime_share_datastruct
 {
@@ -102,6 +120,10 @@ struct dyn_runtime_share_datastruct
 	Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> R;
 };
 
+/**
+ * @brief 对组合流形执行误差状态预测和迭代 EKF 更新。
+ * @note n=DOF、m=DIM；旋转和球面协方差在局部切空间表示。使用前必须初始化匹配的回调，构造函数本身不设置回调或收敛阈值。
+ */
 template<typename state, int process_noise_dof, typename input = state, typename measurement=state, int measurement_noise_dof=0>
 class esekf{
 
@@ -134,6 +156,12 @@ public:
 	typedef Eigen::Matrix<scalar_type, measurement_noise_dof, measurement_noise_dof> measurementnoisecovariance;
 	typedef Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> measurementnoisecovariance_dyn;
 
+	/**
+	 * @brief 以初始状态和误差协方差构造滤波器。
+	 * @param x 初始流形状态，默认由 state() 构造。
+	 * @param P n×n 误差协方差，默认为单位阵。
+	 * @note 仍需调用匹配的 init 系列设置回调、索引表与收敛阈值。
+	 */
 	esekf(const state &x = state(),
 		const cov  &P = cov::Identity()): x_(x), P_(P){
 	#ifdef USE_sparse
@@ -147,6 +175,18 @@ public:
 
 	//receive system-specific models and their differentions.
 	//for measurement as a manifold.
+	/**
+	 * @brief 配置固定流形观测及独立雅可比使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param h_in 观测预测回调，观测布局由当前 init 变体决定。
+	 * @param h_x_in 观测对状态局部误差的雅可比回调。
+	 * @param h_v_in 观测对噪声的雅可比回调。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel h_in, measurementMatrix1 h_x_in, measurementMatrix2 h_v_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -169,6 +209,18 @@ public:
 
 	//receive system-specific models and their differentions.
 	//for measurement as an Eigen matrix whose dimention is chaing.
+	/**
+	 * @brief 配置动态欧氏观测及独立雅可比使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param h_in 观测预测回调，观测布局由当前 init 变体决定。
+	 * @param h_x_in 观测对状态局部误差的雅可比回调。
+	 * @param h_v_in 观测对噪声的雅可比回调。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init_dyn(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel_dyn h_in, measurementMatrix1_dyn h_x_in, measurementMatrix2_dyn h_v_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -192,6 +244,17 @@ public:
 
 	//receive system-specific models and their differentions.
 	//for measurement as a dynamic manifold whose dimension or type is changing.
+	/**
+	 * @brief 配置运行时流形观测及独立雅可比使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param h_x_in 观测对状态局部误差的雅可比回调。
+	 * @param h_v_in 观测对噪声的雅可比回调。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init_dyn_runtime(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementMatrix1_dyn h_x_in, measurementMatrix2_dyn h_v_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -214,6 +277,16 @@ public:
 	//receive system-specific models and their differentions
 	//for measurement as a manifold.
 	//calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function (h_share_in).
+	/**
+	 * @brief 配置固定流形共享观测使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param h_share_in 固定流形共享观测回调，返回预测值并填写共享观测信息。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel_share h_share_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -235,6 +308,16 @@ public:
 	//receive system-specific models and their differentions
 	//for measurement as an Eigen matrix whose dimension is changing.
 	//calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function (h_dyn_share_in).
+	/**
+	 * @brief 配置动态欧氏共享观测使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param h_dyn_share_in 动态共享观测回调；一般更新填写 z/h/R，modified 更新填写创新 h 和 12 列 h_x。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init_dyn_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel_dyn_share h_dyn_share_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -258,6 +341,15 @@ public:
 	//for measurement as a dynamic manifold whose dimension  or type is changing.
 	//calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function (h_dyn_share_in).
 	//for any scenarios where it is needed
+	/**
+	 * @brief 配置运行时流形共享观测使用的过程模型与迭代条件。
+	 * @param f_in 连续过程导数回调，返回 DIM 维导数。
+	 * @param f_x_in 过程对 DOF 维状态误差的 DIM×DOF 雅可比回调。
+	 * @param f_w_in 过程对 process_noise_dof 维噪声的雅可比回调。
+	 * @param maximum_iteration 迭代上界；更新循环从 -1 开始，实际最多尝试 maximum_iteration+1 轮。
+	 * @param limit_vector 长度为 n 的各误差分量收敛阈值，单位与状态局部误差一致。
+	 * @note 参数未作数值/空指针校验；build_*_state 向索引表追加元素，不应在同一非空状态上反复调用初始化。
+	 */
 	void init_dyn_runtime_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
 		f = f_in;
@@ -276,7 +368,15 @@ public:
 	}
 
 	// iterated error state EKF propogation
+	/**
+	 * @brief 将过程模型积分并传播局部误差协方差。
+	 * @param dt 积分时间步长（s），接口为引用但当前不修改。
+	 * @param Q 过程噪声协方差；接口为引用但当前不修改。
+	 * @param i_in 过程输入，例如 IMU 角速度与加速度。
+	 * @note 先使用 DIM 维 oplus 更新状态，再转换为 DOF 维协方差传播；Q 项实际为 (dt·G)Q(dt·G)ᵀ，不能按此接口假设 Q 已乘 dt。
+	 */
 	void predict(double &dt, processnoisecovariance &Q, const input &i_in){
+		/* 过程模型输出按 DIM 排列，协方差按 DOF 排列。S2 占 3 行导数但只有 2 维误差，不能直接用原始雅可比传播 P。 */
 		flatted_state f_ = f(x_, i_in);
 		cov_ f_x_ = f_x(x_, i_in);
 		cov f_x_final;
@@ -309,6 +409,7 @@ public:
 				seg_SO3(i) = -1 * f_(dim + i) * dt;
 			}
 			MTK::SO3<scalar_type> res;
+			/* 现有 scalar_type(1/2) 先做整数除法得到 0；这里未改变代码，不能将此项注释为正确的半角旋转。 */
 			res.w() = MTK::exp<scalar_type, 3>(res.vec(), seg_SO3, scalar_type(1/2));
 		#ifdef USE_sparse
 			res_temp_SO3 = res.toRotationMatrix();
@@ -341,6 +442,7 @@ public:
 			}
 			MTK::vect<2, scalar_type> vec = MTK::vect<2, scalar_type>::Zero();
 			MTK::SO3<scalar_type> res;
+			/* 此处同样存在整数 1/2 转为 0 的行为；与 S2/SO3 正确的 scale/2 形式需区分。 */
 			res.w() = MTK::exp<scalar_type, 3>(res.vec(), seg_S2, scalar_type(1/2));
 			Eigen::Matrix<scalar_type, 2, 3> Nx;
 			Eigen::Matrix<scalar_type, 3, 2> Mx;
@@ -383,6 +485,13 @@ public:
 	}
 
 	//iterated error state EKF update for measurement as a manifold.
+	/**
+	 * @brief 使用固定流形观测执行迭代误差状态更新。
+	 * @param z 本次观测，流形版本用 boxminus 构造创新，欧氏版本使用 z-h。
+	 * @param R 观测噪声协方差，维数须与 h_v 的噪声列一致。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	void update_iterated(measurement& z, measurementnoisecovariance &R) {
 		
 		if(!(is_same<typename measurement::scalar, scalar_type>())){
@@ -413,6 +522,7 @@ public:
 				continue; 
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
@@ -459,6 +569,7 @@ public:
 			}
 
 			Matrix<scalar_type, n, l> K_;
+			/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 			if(n > l)
 			{
 			#ifdef USE_sparse
@@ -521,6 +632,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 					if(n > l)
 					{
 						for(int i = 0; i < l; i++){
@@ -557,6 +669,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 					if(n > l)
 					{
 						for(int i = 0; i < l; i++){
@@ -574,6 +687,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 				if(n > l)
 				{
 					P_ = L_ - K_ * h_x_ * P_;
@@ -589,6 +703,11 @@ public:
 
 	//iterated error state EKF update for measurement as a manifold.
 	//calculate measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
+	/**
+	 * @brief 使用固定流形共享观测执行迭代误差状态更新。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	void update_iterated_share() {
 		
 		if(!(is_same<typename measurement::scalar, scalar_type>())){
@@ -624,6 +743,7 @@ public:
 				continue; 
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
@@ -670,6 +790,7 @@ public:
 			}
 
 			Matrix<scalar_type, n, l> K_;
+			/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 			if(n > l)
 			{
 			#ifdef USE_sparse
@@ -732,6 +853,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 					if(n > l)
 					{
 						for(int i = 0; i < l; i++){
@@ -768,6 +890,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 					if(n > l)
 					{
 						for(int i = 0; i < l; i++){
@@ -785,6 +908,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 观测维数较小时逆观测空间矩阵，否则使用状态空间信息形式；两种公式依赖噪声及先验可逆。 */
 				if(n > l)
 				{
 					P_ = L_ - K_ * h_x_ * P_;
@@ -799,6 +923,13 @@ public:
 	}
 
 	//iterated error state EKF update for measurement as an Eigen matrix whose dimension is changing.
+	/**
+	 * @brief 使用动态欧氏观测执行迭代误差状态更新。
+	 * @param z 本次观测，流形版本用 boxminus 构造创新，欧氏版本使用 z-h。
+	 * @param R 观测噪声协方差，维数须与 h_v 的噪声列一致。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	void update_iterated_dyn(Eigen::Matrix<scalar_type, Eigen::Dynamic, 1> z, measurementnoisecovariance_dyn R) {
 	
 		int t = 0;
@@ -829,6 +960,7 @@ public:
 				continue; 
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
 			MTK::vect<3, scalar_type> seg_SO3;
@@ -873,6 +1005,7 @@ public:
 			}
 
 			Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
+			/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 			if(n > dof_Measurement)
 			{
 				#ifdef USE_sparse
@@ -931,6 +1064,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -967,6 +1101,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -984,6 +1119,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 				if(n > dof_Measurement)
 				{
 					P_ = L_ - K_*h_x_*P_;
@@ -998,10 +1134,16 @@ public:
 	}
 	//iterated error state EKF update for measurement as an Eigen matrix whose dimension is changing.
 	//calculate measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
+	/**
+	 * @brief 使用动态欧氏共享观测执行迭代误差状态更新。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	void update_iterated_dyn_share() {
 		
 		int t = 0;
 		dyn_share_datastruct<scalar_type> dyn_share;
+		/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 		dyn_share.valid = true;
 		dyn_share.converge = true;
 		state x_propagated = x_;
@@ -1010,6 +1152,7 @@ public:
 		int dof_Measurement_noise;
 		for(int i=-1; i<maximum_iter; i++)
 		{
+			/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 			dyn_share.valid = true;
 			h_dyn_share (x_,  dyn_share);
 			//Matrix<scalar_type, Eigen::Dynamic, 1> h = h_dyn_share (x_,  dyn_share);
@@ -1034,6 +1177,7 @@ public:
 				continue;
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
 			MTK::vect<3, scalar_type> seg_SO3;
@@ -1078,6 +1222,7 @@ public:
 			}
 
 			Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
+			/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 			if(n > dof_Measurement)
 			{
 			#ifdef USE_sparse
@@ -1137,6 +1282,7 @@ public:
 					for(int i = 0; i < int(n); i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1173,6 +1319,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1190,6 +1337,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 				if(n > dof_Measurement)
 				{
 					P_ = L_ - K_*h_x*P_;
@@ -1205,6 +1353,14 @@ public:
 
 	//iterated error state EKF update for measurement as a dynamic manifold, whose dimension or type is changing.
 	//the measurement and the measurement model are received in a dynamic manner.
+	/**
+	 * @brief 使用运行时流形观测执行迭代误差状态更新。
+	 * @param z 本次观测，流形版本用 boxminus 构造创新，欧氏版本使用 z-h。
+	 * @param R 观测噪声协方差，维数须与 h_v 的噪声列一致。
+	 * @param h_runtime 运行时流形预测回调，其返回类型须与 z 一致。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	template<typename measurement_runtime, typename measurementModel_runtime>
 	void update_iterated_dyn_runtime(measurement_runtime z, measurementnoisecovariance_dyn R, measurementModel_runtime h_runtime) {
 	
@@ -1237,6 +1393,7 @@ public:
 				continue; 
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
 			MTK::vect<3, scalar_type> seg_SO3;
@@ -1281,6 +1438,7 @@ public:
 			}
 
 			Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
+			/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 			if(n > dof_Measurement)
 			{
 			#ifdef USE_sparse
@@ -1341,6 +1499,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1377,6 +1536,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1394,6 +1554,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 				if(n > dof_Measurement)
 				{
 					P_ = L_ - K_*h_x_*P_;
@@ -1410,11 +1571,19 @@ public:
 	//iterated error state EKF update for measurement as a dynamic manifold, whose dimension or type is changing.
 	//the measurement and the measurement model are received in a dynamic manner.
 	//calculate measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function.
+	/**
+	 * @brief 使用运行时流形共享观测执行迭代误差状态更新。
+	 * @param z 本次观测，流形版本用 boxminus 构造创新，欧氏版本使用 z-h。
+	 * @param h 运行时共享预测回调，返回预测观测并填写 h_x/h_v/R。
+	 * @note 必须先配置匹配的 init 变体；回调判定无效时跳过本轮。每轮重新线性化同一预测先验，通过 SO3/S2 基变换运输协方差。
+	 * @note 收敛计数累计两次满足各分量阈值即退出，不要求连续；达到最后一轮也完成更新。矩阵维数、可逆性由调用方保证。
+	 */
 	template<typename measurement_runtime, typename measurementModel_dyn_runtime_share>
 	void update_iterated_dyn_runtime_share(measurement_runtime z, measurementModel_dyn_runtime_share h) {
 		
 		int t = 0;
 		dyn_runtime_share_datastruct<scalar_type> dyn_share;
+		/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 		dyn_share.valid = true;
 		dyn_share.converge = true;
 		state x_propagated = x_;
@@ -1423,6 +1592,7 @@ public:
 		int dof_Measurement_noise;
 		for(int i=-1; i<maximum_iter; i++)
 		{
+			/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 			dyn_share.valid = true;
 			measurement_runtime h_ = h(x_,  dyn_share); 
 			//measurement_runtime z = dyn_share.z;
@@ -1445,6 +1615,7 @@ public:
 				continue;
 			}
 
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
 			MTK::vect<3, scalar_type> seg_SO3;
@@ -1489,6 +1660,7 @@ public:
 			}
 
 			Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
+			/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 			if(n > dof_Measurement)
 			{
 			#ifdef USE_sparse
@@ -1549,6 +1721,7 @@ public:
 					for(int i = 0; i < int(n); i++){
 						L_. template block<3, 1>(idx, i) = res_temp_SO3 * (P_. template block<3, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1585,6 +1758,7 @@ public:
 					for(int i = 0; i < n; i++){
 						L_. template block<2, 1>(idx, i) = res_temp_S2 * (P_. template block<2, 1>(idx, i)); 
 					}
+					/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 					if(n > dof_Measurement)
 					{
 						for(int i = 0; i < dof_Measurement; i++){
@@ -1602,6 +1776,7 @@ public:
 						P_. template block<1, 2>(i, idx) = (P_. template block<1, 2>(i, idx)) * res_temp_S2.transpose();
 					}
 				}
+				/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 				if(n > dof_Measurement)
 				{
 					P_ = L_ - K_*h_x * P_;
@@ -1616,9 +1791,17 @@ public:
 	}
 	
 	//iterated error state EKF update modified for one specific system.
+	/**
+	 * @brief 使用前 12 个状态列的共享观测执行 FAST-LIO2 专用更新。
+	 * @param R 所有观测统一使用的标量噪声方差，须大于零。
+	 * @param solve_time 累计线性代数求解时间（s），以 += 写入，不包含回调时间。
+	 * @note h_dyn_share 必须提供已经计算的创新 dyn_share.h 和行数匹配的 12 列 h_x；这里不计算 z-h，也不使用共享 R/h_v。状态 DOF 至少为 12。
+	 * @note 当前 USE_sparse 分支含未定义的 K_、P_inv、HTH 引用；默认未启用，不能把该分支视为可用实现。
+	 */
 	void update_iterated_dyn_share_modified(double R, double &solve_time) {
 		
 		dyn_share_datastruct<scalar_type> dyn_share;
+		/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 		dyn_share.valid = true;
 		dyn_share.converge = true;
 		int t = 0;
@@ -1632,6 +1815,7 @@ public:
 		vectorized_state dx_new = vectorized_state::Zero();
 		for(int i=-1; i<maximum_iter; i++)
 		{
+			/* valid 由回调决定本轮是否可用；converge 传回上轮状态，modified 版本还会在末轮前强制请求一次收敛状态。 */
 			dyn_share.valid = true;	
 			h_dyn_share(x_, dyn_share);
 
@@ -1654,6 +1838,7 @@ public:
 			
 			
 			
+			/* 固定同一预测先验进行再线性化，并把其切空间坐标转换到本轮状态；若直接重复融合上一轮后验，会重复使用同一观测。 */
 			P_ = P_propagated;
 			
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
@@ -1712,6 +1897,7 @@ public:
 			}
 			*/
 
+			/* 选择较小空间的线性代数形式，点数多时避免求逆大规模观测矩阵；不得改变雅可比列与误差状态的对应顺序。 */
 			if(n > dof_Measurement)
 			{
 			//#ifdef USE_sparse
@@ -1930,6 +2116,11 @@ public:
 		}
 	}
 
+	/**
+	 * @brief 替换当前流形状态。
+	 * @param input_state 新的状态，复制其数值及索引表。
+	 * @note 仅当三类索引表全部为空时构建；不会修补部分缺失或重复表，也不重置协方差。
+	 */
 	void change_x(state &input_state)
 	{
 		x_ = input_state;
@@ -1941,14 +2132,26 @@ public:
 		}
 	}
 
+	/**
+	 * @brief 替换当前局部误差协方差。
+	 * @param input_cov n×n 新协方差，直接复制，不检查对称性/正定性。
+	 */
 	void change_P(cov &input_cov)
 	{
 		P_ = input_cov;
 	}
 
+	/**
+	 * @brief 借用当前状态的只读引用。
+	 * @return 内部 x_ 引用，下次更新会改变其内容。
+	 */
 	const state& get_x() const {
 		return x_;
 	}
+	/**
+	 * @brief 借用当前误差协方差的只读引用。
+	 * @return 内部 P_ 引用，生命周期与滤波器一致。
+	 */
 	const cov& get_P() const {
 		return P_;
 	}
@@ -1981,6 +2184,12 @@ private:
 	int maximum_iter = 0;
 	scalar_type limit[n];
 	
+	/**
+	 * @brief 按现有阈值过滤异常更新向量。
+	 * @param _temp_vec 至少有 6 行的更新向量，按值传入。
+	 * @return 原副本，或在首元素 NaN、前三分量换算角度≥20°、随后三分量模长>1 时返回零向量。
+	 * @note 此私有函数当前没有调用点；分段约定与 state_ikfom 的位置在前、姿态在后的顺序不同，不能直接作为该状态的更新保护。
+	 */
 	template <typename T>
     T check_safe_update( T _temp_vec )
     {

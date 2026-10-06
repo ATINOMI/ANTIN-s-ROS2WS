@@ -74,6 +74,12 @@
  * @file mtk/startIdx.hpp 
  * @brief Tools to access sub-elements of compound manifolds.
  */
+/**
+ * @file startIdx.hpp
+ * @brief 通过成员指针和编译期偏移访问组合状态的向量片段与协方差块。返回视图共享原存储，不延长其生命周期。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef GET_START_INDEX_H_
 #define GET_START_INDEX_H_
 
@@ -101,12 +107,22 @@ namespace MTK {
 /**
  * Determine the index of a sub-variable within a compound variable.
  */
+/**
+ * @brief 查询子流形在局部误差向量中的起始偏移。
+ * @return 编译期 idx。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 int getStartIdx( MTK::SubManifold<T, idx, dim> Base::*)
 {
 	return idx;
 }
 
+/**
+ * @brief 查询子流形在过程表示向量中的起始偏移。
+ * @return 编译期 dim。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 int getStartIdx_( MTK::SubManifold<T, idx, dim> Base::*)
 {
@@ -116,11 +132,21 @@ int getStartIdx_( MTK::SubManifold<T, idx, dim> Base::*)
 /**
  * Determine the degrees of freedom of a sub-variable within a compound variable.
  */
+/**
+ * @brief 查询子流形的局部自由度。
+ * @return T::DOF。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 int getDof( MTK::SubManifold<T, idx, dim> Base::*)
 {
 	return T::DOF;
 }
+/**
+ * @brief 查询子流形的过程表示维数。
+ * @return T::DIM。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 int getDim( MTK::SubManifold<T, idx, dim> Base::*)
 {
@@ -130,6 +156,12 @@ int getDim( MTK::SubManifold<T, idx, dim> Base::*)
 /**
  * set the diagonal elements of a covariance matrix corresponding to a sub-variable
  */
+/**
+ * @brief 设置子流形对应的矩阵对角片段，保留其他元素。
+ * @param cov 待修改矩阵；普通版本按 DOF 布局，下划线版本按 DIM 布局。
+ * @param val 写入每个选定对角元素的数值，函数不检查非负性。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 void setDiagonal(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov, 
 		MTK::SubManifold<T, idx, dim> Base::*, const typename Base::scalar &val)
@@ -137,6 +169,12 @@ void setDiagonal(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov
 	cov.diagonal().template segment<T::DOF>(idx).setConstant(val);
 }
 
+/**
+ * @brief 设置子流形对应的矩阵对角片段，保留其他元素。
+ * @param cov 待修改矩阵；普通版本按 DOF 布局，下划线版本按 DIM 布局。
+ * @param val 写入每个选定对角元素的数值，函数不检查非负性。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim> 
 void setDiagonal_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &cov, 
 		MTK::SubManifold<T, idx, dim> Base::*, const typename Base::scalar &val)
@@ -153,6 +191,13 @@ void setDiagonal_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &co
  * \endcode
  * lets you modify mixed covariance entries in a bigger covariance matrix.
  */
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T1, int idx1, int dim1, class T2, int idx2, int dim2>
 typename MTK::internal::CovBlock<Base, T1, T2>::Type
 subblock(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov, 
@@ -161,6 +206,13 @@ subblock(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov,
 	return cov.template block<T1::DOF, T2::DOF>(idx1, idx2);
 }
 
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T1, int idx1,  int dim1, class T2, int idx2, int dim2>
 typename MTK::internal::CovBlock_<Base, T1, T2>::Type
 subblock_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &cov, 
@@ -169,6 +221,13 @@ subblock_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &cov,
 	return cov.template block<T1::DIM, T2::DIM>(dim1, dim2);
 }
 
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<typename Base1, typename Base2, typename T1, typename T2, int idx1, int idx2, int dim1, int dim2>
 typename MTK::internal::CrossCovBlock<Base1, Base2, T1, T2>::Type
 subblock(Eigen::Matrix<typename Base1::scalar, Base1::DOF, Base2::DOF> &cov, MTK::SubManifold<T1, idx1, dim1> Base1::*, MTK::SubManifold<T2, idx2, dim2> Base2::*)
@@ -176,6 +235,13 @@ subblock(Eigen::Matrix<typename Base1::scalar, Base1::DOF, Base2::DOF> &cov, MTK
 	return cov.template block<T1::DOF, T2::DOF>(idx1, idx2);
 }
 
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<typename Base1, typename Base2, typename T1, typename T2, int idx1, int idx2, int dim1, int dim2>
 typename MTK::internal::CrossCovBlock_<Base1, Base2, T1, T2>::Type
 subblock_(Eigen::Matrix<typename Base1::scalar, Base1::DIM, Base2::DIM> &cov, MTK::SubManifold<T1, idx1, dim1> Base1::*, MTK::SubManifold<T2, idx2, dim2> Base2::*)
@@ -190,6 +256,13 @@ subblock_(Eigen::Matrix<typename Base1::scalar, Base1::DIM, Base2::DIM> &cov, MT
  * \endcode
  * lets you modify covariance entries in a bigger covariance matrix.
  */
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 typename MTK::internal::CovBlock_<Base, T, T>::Type
 subblock_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &cov, 
@@ -198,6 +271,13 @@ subblock_(Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> &cov,
 	return cov.template block<T::DIM, T::DIM>(dim, dim);
 }
 
+/**
+ * @brief 借用矩阵中一个子流形或两个子流形交叉的块。
+ * @param cov 原矩阵；普通版本按 DOF，带下划线版本按 DIM 排列。
+ * @return 共享 cov 存储的可写 Eigen::Block；单成员指针版本取对应对角块。
+ * @note 返回块不能比 cov 活得更久。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 typename MTK::internal::CovBlock<Base, T, T>::Type
 subblock(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov, 
@@ -206,6 +286,9 @@ subblock(Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> &cov,
 	return cov.template block<T::DOF, T::DOF>(idx, idx);
 }
 
+/**
+ * @brief 根据状态 DOF 定义局部误差协方差矩阵类型。
+ */
 template<typename Base>
 class get_cov { 
 public:
@@ -213,6 +296,9 @@ public:
     typedef const Eigen::Matrix<typename Base::scalar, Base::DOF, Base::DOF> const_type;
 };
 
+/**
+ * @brief 根据状态 DIM 定义过程表示矩阵类型。
+ */
 template<typename Base>
 class get_cov_ { 
 public:
@@ -220,6 +306,9 @@ public:
     typedef const Eigen::Matrix<typename Base::scalar, Base::DIM, Base::DIM> const_type;
 };
 
+/**
+ * @brief 根据两个状态 DOF 定义交叉协方差矩阵类型。
+ */
 template<typename Base1, typename Base2>
 class get_cross_cov {
 public:
@@ -227,6 +316,9 @@ public:
     typedef const type const_type;
 };
 
+/**
+ * @brief 根据两个状态 DIM 定义交叉矩阵类型。
+ */
 template<typename Base1, typename Base2>
 class get_cross_cov_ {
 public:
@@ -235,6 +327,13 @@ public:
 };
 
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 vectview<typename Base::scalar, T::DIM>
 subvector_impl_(vectview<typename Base::scalar, Base::DIM> vec, SubManifold<T, idx, dim> Base::*)
@@ -242,6 +341,13 @@ subvector_impl_(vectview<typename Base::scalar, Base::DIM> vec, SubManifold<T, i
 	return vec.template segment<T::DIM>(dim);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 vectview<typename Base::scalar, T::DOF>
 subvector_impl(vectview<typename Base::scalar, Base::DOF> vec, SubManifold<T, idx, dim> Base::*)
@@ -252,6 +358,13 @@ subvector_impl(vectview<typename Base::scalar, Base::DOF> vec, SubManifold<T, id
 /**
  * Get the subvector corresponding to a sub-manifold from a bigger vector.
  */
+ /**
+  * @brief 取得成员对应的向量片段视图。
+  * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+  * @param ptr 子流形成员指针，推导片段偏移及长度。
+  * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+  * @note 底层向量必须连续且在使用视图期间有效。
+  */
  template<class Scalar, int BaseDIM, class Base, class T, int idx, int dim>
 vectview<Scalar, T::DIM>
 subvector_(vectview<Scalar, BaseDIM> vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -259,6 +372,13 @@ subvector_(vectview<Scalar, BaseDIM> vec, SubManifold<T, idx, dim> Base::* ptr)
 	return subvector_impl_(vec, ptr);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDOF, class Base, class T, int idx, int dim>
 vectview<Scalar, T::DOF>
 subvector(vectview<Scalar, BaseDOF> vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -269,6 +389,13 @@ subvector(vectview<Scalar, BaseDOF> vec, SubManifold<T, idx, dim> Base::* ptr)
 /**
  * @todo This should be covered already by subvector(vectview<typename Base::scalar,Base::DOF> vec,SubManifold<T,idx> Base::*)
  */
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDOF, class Base, class T, int idx, int dim>
 vectview<Scalar, T::DOF>
 subvector(Eigen::Matrix<Scalar, BaseDOF, 1>& vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -276,6 +403,13 @@ subvector(Eigen::Matrix<Scalar, BaseDOF, 1>& vec, SubManifold<T, idx, dim> Base:
 	return subvector_impl(vectview<Scalar, BaseDOF>(vec), ptr);
 }
  
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDIM, class Base, class T, int idx, int dim>
 vectview<Scalar, T::DIM>
 subvector_(Eigen::Matrix<Scalar, BaseDIM, 1>& vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -283,6 +417,13 @@ subvector_(Eigen::Matrix<Scalar, BaseDIM, 1>& vec, SubManifold<T, idx, dim> Base
 	return subvector_impl_(vectview<Scalar, BaseDIM>(vec), ptr);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDIM, class Base, class T, int idx, int dim>
 vectview<const Scalar, T::DIM>
 subvector_(const Eigen::Matrix<Scalar, BaseDIM, 1>& vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -290,6 +431,13 @@ subvector_(const Eigen::Matrix<Scalar, BaseDIM, 1>& vec, SubManifold<T, idx, dim
 	return subvector_impl_(vectview<const Scalar, BaseDIM>(vec), ptr);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param vec 原向量或视图；普通版本采用 DOF/idx，下划线版本采用 DIM/dim。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDOF, class Base, class T, int idx, int dim>
 vectview<const Scalar, T::DOF>
 subvector(const Eigen::Matrix<Scalar, BaseDOF, 1>& vec, SubManifold<T, idx, dim> Base::* ptr)
@@ -301,6 +449,13 @@ subvector(const Eigen::Matrix<Scalar, BaseDOF, 1>& vec, SubManifold<T, idx, dim>
 /**
  * const version of subvector(vectview<typename Base::scalar,Base::DOF> vec,SubManifold<T,idx> Base::*)
  */
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param cvec 原只读视图，按当前版本的 DOF 或 DIM 布局。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 vectview<const typename Base::scalar, T::DOF>
 subvector_impl(const vectview<const typename Base::scalar, Base::DOF> cvec, SubManifold<T, idx, dim> Base::*)
@@ -308,6 +463,13 @@ subvector_impl(const vectview<const typename Base::scalar, Base::DOF> cvec, SubM
 	return cvec.template segment<T::DOF>(idx);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param cvec 原只读视图，按当前版本的 DOF 或 DIM 布局。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ * @note 未命名成员指针参数用于推导子流形类型及编译期偏移，不读取对象值。
+ */
 template<class Base, class T, int idx, int dim>
 vectview<const typename Base::scalar, T::DIM>
 subvector_impl_(const vectview<const typename Base::scalar, Base::DIM> cvec, SubManifold<T, idx, dim> Base::*)
@@ -315,6 +477,13 @@ subvector_impl_(const vectview<const typename Base::scalar, Base::DIM> cvec, Sub
 	return cvec.template segment<T::DIM>(dim);
 }
 
+/**
+ * @brief 取得成员对应的向量片段视图。
+ * @param cvec 原只读视图，按当前版本的 DOF 或 DIM 布局。
+ * @param ptr 子流形成员指针，推导片段偏移及长度。
+ * @return 共享原存储的子视图；只读重载不允许通过视图修改元素。
+ * @note 底层向量必须连续且在使用视图期间有效。
+ */
 template<class Scalar, int BaseDOF, class Base, class T, int idx, int dim>
 vectview<const Scalar, T::DOF>
 subvector(const vectview<const Scalar, BaseDOF> cvec, SubManifold<T, idx, dim> Base::* ptr)

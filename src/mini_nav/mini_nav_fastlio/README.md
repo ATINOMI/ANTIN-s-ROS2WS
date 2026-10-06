@@ -77,12 +77,13 @@ python3 src/mini_nav/mini_nav_fastlio/scripts/validate_fastlio.py \
 ```bash
 cd /home/a/ros2_ws
 bash src/mini_nav/mini_nav_fastlio/scripts/build_localization.sh
-bash src/mini_nav/mini_nav_fastlio/scripts/run_localization.sh
+source install_mini_nav_fastlio/setup.bash
+ros2 launch scurm_sim fastlio2_navigation.launch.py
 ```
 
 默认使用已保存的 `maps/scurm_fastlio2/map_20261004_190840_437173/map.pcd`，二维地图来自 `src/mini_nav/mini_nav_bringup/maps/tb3_learning.yaml`。可将同一仿真初始坐标系的其他 PCD 作为构建脚本的第一个参数；脚本检查局部对齐误差并生成独立先验，不修改原地图。场景初始位置固定为 Gazebo `(-2, -0.5, 0)`，当前初始化是邻域 ICP，不能当作未知位置的全局重定位。
 
-定位导航使用 `ROS_DOMAIN_ID=227`、`GZ_PARTITION=scurm_mini_nav`；建图演示仍使用 231 / `scurm_fastlio2_demo`。先在 RViz 中用 **2D Pose Estimate** 点选位置、拖动箭头指定朝向，发送 `/initialpose`；ICP 和 FAST-LIO2 配准成功后，再用 **2D Goal Pose** 发送 `/goal_pose`，也可发送 `/navigate_to_pose` Action。刚启动该仿真时，地图中的初始位置约 `(0,0)`，朝向 `+X`。初始猜测仍需接近真实位姿。
+正式入口 `fastlio2_navigation.launch.py` 自行设置 ROS/Gazebo 环境，并默认打开 Gazebo 与 RViz。同域同分区已有仿真时先关闭原 launch，使用 Ctrl+C 退出新入口。可用 `ros_domain_id:=... gz_partition:=... gui:=false rviz:=false` 显式覆盖。定位导航使用 `ROS_DOMAIN_ID=227`、`GZ_PARTITION=scurm_mini_nav`；建图演示仍使用 231 / `scurm_fastlio2_demo`。先在 RViz 中用 **2D Pose Estimate** 点选位置、拖动箭头指定朝向，发送 `/initialpose`；ICP 和 FAST-LIO2 配准成功后，再用 **2D Goal Pose** 发送 `/goal_pose`，也可发送 `/navigate_to_pose` Action。刚启动该仿真时，地图中的初始位置约 `(0,0)`，朝向 `+X`。初始猜测仍需接近真实位姿。
 
 启动时不再预置 ICP 初值。运行中再次发送 `/initialpose` 会立即撤销旧任务，重启 ICP / FAST-LIO2 并建立新配准会话；成功后需要重新发送导航目标，不需要手工重启 Gazebo。消息类型为 `geometry_msgs/msg/PoseWithCovarianceStamped`，`header.frame_id` 必须是 `map`，位姿代表 `base_footprint`；接入层负责 IMU 外参转换。非法坐标系或四元数不会启动新定位后端。
 

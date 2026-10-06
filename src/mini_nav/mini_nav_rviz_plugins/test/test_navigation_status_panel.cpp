@@ -133,6 +133,15 @@ TEST(NavigationStatusPanel, RealRvizPluginAndRosStatusLifecycle) {
         EXPECT_EQ(connection->text(), QString("在线"));
     };
     publishStatus("tracking", "正在导航");
+    std_msgs::msg::String avoiding;
+    avoiding.data = "avoiding_obstacle";
+    status_pub->publish(avoiding);
+    auto * reason = frame.findChild<QLabel *>("navigation_reason");
+    ASSERT_NE(reason, nullptr);
+    ASSERT_TRUE(waitFor([&] { return reason->text().contains("avoiding_obstacle"); }));
+    EXPECT_EQ(status->text(), QString("正在避障"));
+    screenshot("avoiding_obstacle");
+    publishStatus("tracking", "正在导航");
     geometry_msgs::msg::TwistStamped command;
     command.twist.linear.x = 0.15;
     command.twist.angular.z = -0.55;

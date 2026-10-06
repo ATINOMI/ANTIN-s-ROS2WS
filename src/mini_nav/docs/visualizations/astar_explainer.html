@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mini_nav · A* 是怎样找到路的？</title>
+<style>
+:root{color-scheme:light;--paper:#f6f5f0;--ink:#193431;--muted:#5e706b;--line:#d6ded7;--teal:#167b6a;--orange:#b65226;--purple:#6955a6}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,-apple-system,"Noto Sans CJK SC",sans-serif;line-height:1.65}main{max-width:1320px;margin:auto;padding:36px 32px 52px}header{display:flex;justify-content:space-between;align-items:start;gap:24px;border-bottom:1px solid var(--line);padding-bottom:24px}.eyebrow{font-size:12px;letter-spacing:.13em;font-weight:700;color:var(--teal)}h1{font-size:clamp(27px,3.5vw,44px);line-height:1.2;margin:10px 0 14px;letter-spacing:-.04em}h2{font-size:21px;margin:0 0 10px}h3{font-size:15px;margin:0 0 10px}p{margin:0 0 12px}.sub{max-width:790px;color:var(--muted);font-size:15px}.badge{font-size:12px;border:1px solid var(--line);padding:7px 12px;white-space:nowrap;border-radius:30px}.setup{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin:22px 0}.control{border-top:2px solid var(--line);padding-top:12px}.control>label{display:block;font-size:13px;font-weight:700;margin-bottom:8px}select,button{font:inherit;color:inherit}select{background:white;border:1px solid var(--line);border-radius:8px;padding:9px 11px;max-width:100%}button{cursor:pointer;border:1px solid var(--line);background:white;border-radius:7px;padding:7px 12px;font-size:13px}button:hover{border-color:var(--teal);background:#edf6f1}button:disabled{cursor:default;opacity:.45}button.primary{background:var(--teal);border-color:var(--teal);color:white}button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #d08529;outline-offset:3px}input[type=range]{accent-color:var(--teal);width:100%;cursor:pointer}output{font-variant-numeric:tabular-nums;color:var(--teal)}.tiny{font-size:12px;color:var(--muted)}.laboratory{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:24px;align-items:start}.map-card{background:white;border:1px solid var(--line);border-radius:12px;padding:16px}.map-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.map-head h2{font-size:17px;margin:0}.map-head select{font-size:12px;padding:6px}.map{position:relative;aspect-ratio:24/17;background:#e6ede7;border-radius:5px;overflow:hidden}.grid{display:grid;grid-template-columns:repeat(24,1fr);grid-template-rows:repeat(17,1fr);height:100%;gap:1px;padding:1px}.cell{padding:0;border:0;border-radius:0;min-width:0;min-height:0;position:relative;background:#f7faf6;font-size:clamp(8px,1vw,12px);font-weight:600;line-height:1;color:#334941}.cell:hover{box-shadow:inset 0 0 0 2px #465f59}.cell.hard{background:repeating-linear-gradient(135deg,#c2cbc5,#c2cbc5 3px,#d7dfd9 3px,#d7dfd9 6px)}.cell.wall{background:#29423c;color:white}.cell.unknown{background:repeating-linear-gradient(45deg,#727b83,#727b83 2px,#90989f 2px,#90989f 5px);color:white}.cell.closed::after{content:"";position:absolute;inset:4px;border-radius:2px;background:#a6cebf99;pointer-events:none}.cell.open::after{content:"";position:absolute;inset:4px;border:2px solid var(--purple);border-radius:2px;pointer-events:none}.cell.current{box-shadow:inset 0 0 0 3px var(--orange)}.cell.selected{outline:2px solid #ed9f27;outline-offset:-2px}.cell.endpoint{font-size:clamp(9px,1.2vw,15px);color:white;background:var(--teal)!important}.cell.goal{background:var(--orange)!important}.cell>span{position:relative;z-index:2}.overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.legend{display:flex;gap:10px 15px;flex-wrap:wrap;margin:12px 0;font-size:11px;color:var(--muted)}.key{display:flex;align-items:center;gap:5px}.swatch{width:12px;height:12px;border-radius:2px;background:var(--color)}.legend .hard-key{background:repeating-linear-gradient(135deg,#a8b7ae,#a8b7ae 2px,#d9e1db 2px,#d9e1db 4px)}.toolbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}.timeline{margin:14px 0 0}.timeline label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}.side{display:flex;flex-direction:column;gap:14px}.panel{border:1px solid var(--line);padding:17px;border-radius:10px;background:white}.panel.highlight{background:#e7f1e9;border-color:#c4d8c9}.phase{font-size:11px;letter-spacing:.1em;color:var(--teal);font-weight:750;margin-bottom:7px}.step-copy{font-size:14px;min-height:80px}.score{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.score>div{border-left:2px solid #cad8cd;padding-left:8px}.score b{display:block;font-size:22px;font-variant-numeric:tabular-nums}.score span{font-size:11px;color:var(--muted)}.picked{font-size:12px;color:var(--muted);margin-bottom:8px}.formula{font-family:ui-monospace,monospace;font-size:12px;background:#f3f5ef;border-radius:6px;padding:10px;overflow-wrap:anywhere}.stats{display:flex;gap:20px;font-size:12px;margin:10px 0}.stats b{font-size:18px;font-variant-numeric:tabular-nums}.queue{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}.queue th,.queue td{text-align:left;padding:4px 2px;border-bottom:1px solid #e7ece5}.queue th{color:var(--muted);font-weight:500}.checks{font-size:12px;list-style:none;padding:0;margin:7px 0 0}.checks li{padding:3px 0}.checks .ok{color:var(--teal)}.checks .bad{color:#9e4a25}.lower{margin-top:34px;border-top:1px solid var(--line);padding-top:25px}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0 24px}.flow article{border-top:3px solid #c3d4c9;padding:13px 0}.flow .num{font-size:12px;color:var(--teal)}.flow h3{margin:5px 0}.flow p{font-size:13px;color:var(--muted)}.explanations{display:grid;grid-template-columns:1fr 1fr;gap:18px}.explanations .panel p{font-size:13px}.inline{font-family:ui-monospace,monospace;font-size:.9em;background:#e8eee7;padding:1px 5px;border-radius:3px}details{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}summary{cursor:pointer;font-size:14px;font-weight:700}pre{font-size:12px;overflow-x:auto;background:#193431;color:#e7f1e9;padding:15px;border-radius:7px;line-height:1.8}a{color:var(--teal);text-underline-offset:3px}.sources{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.sources li{margin:5px 0}footer{margin-top:24px;font-size:12px;color:var(--muted)}.check-control{display:flex;align-items:center;gap:6px;font-size:12px;margin:9px 0}.check-control input{accent-color:var(--teal)}.radius{margin-top:12px}.scenario-copy{font-size:12px;color:var(--muted);margin-top:8px}.result{font-size:12px;color:var(--teal);font-weight:650;min-height:20px}.notes{font-size:12px;color:var(--muted);margin-top:16px}
+@media(max-width:1000px){.laboratory{grid-template-columns:minmax(0,1fr) 280px}main{padding:26px 22px}.flow{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){main{padding:20px 14px 34px}header{display:block}.badge{display:inline-block;margin-top:6px}.setup{grid-template-columns:1fr 1fr;gap:14px}.setup .control:first-child{grid-column:1/-1}.laboratory{grid-template-columns:1fr}.side{display:grid;grid-template-columns:1fr}.step-copy{min-height:0}.map-card{padding:11px}.cell.closed::after,.cell.open::after{inset:2px}.cell.open::after{border-width:1px}.explanations{grid-template-columns:1fr}.flow{gap:12px}.map-head{align-items:start}.map-head select{max-width:130px}.toolbar button{padding:8px 10px}.sub{font-size:14px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+.cell.new-open::after{background:#e9e3f5;border-color:#6955a6}.cell.parent-child{outline:3px solid #6955a6;outline-offset:-3px}.cell.parent-target{outline:3px solid #167b6a;outline-offset:-3px}.cell.in-path{background:#ffd8af!important;color:#793211;font-weight:800}.cell.in-path::after{display:none}.cell.endpoint.in-path{background:#b65226!important;color:white}.cell.path-new{box-shadow:inset 0 0 0 3px #eea528}.cell>span{z-index:3}.cell .node-marker,.cell .relation-tag{position:absolute;z-index:3;font-size:8px;line-height:1;pointer-events:none}.node-marker{left:2px;top:2px}.relation-tag{right:2px;bottom:2px;font-weight:800;color:#4e397f}.parent-target .relation-tag{color:#086b58}.endpoint.in-path .relation-tag{color:white}.overlay{z-index:1}.path-state{margin-top:14px;background:#fff3e4;border:1px solid #e5c7a4;border-radius:8px;padding:11px 13px}.path-state strong{font-size:14px;color:#8c421f}.path-state .tiny{color:#8c6246}.path-nodes,.parent-chain{display:flex;align-items:center;gap:5px;overflow-x:auto;padding:8px 0 5px;min-width:0}.path-nodes:empty{display:none}.path-chip{flex-shrink:0;background:#ffe3c1;border-color:#edc391;padding:4px 7px;font-size:11px;display:flex;flex-direction:column;align-items:center;line-height:1.5}.path-chip b{color:#843719}.path-chip.latest{border:2px solid #ba5a21;padding:3px 6px}.chain-arrow{font-size:13px;color:var(--purple);flex-shrink:0}.path-nodes .chain-arrow{color:#b65226}.queue-panel{border-top:4px solid var(--purple)}.queue-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.queue-title h3{margin:0}.queue-title small{font-size:11px;color:var(--muted);white-space:nowrap}.queue-event{font-size:12px;line-height:1.5;padding:7px 9px;border-radius:5px;margin-top:8px;overflow-wrap:anywhere}.queue-event.pop{background:#fff0df;color:#934216}.queue-event.push{background:#eee9f8;color:#5b428e}.queue-next{font-size:13px;font-weight:750;color:#503881;padding:10px 0 7px;line-height:1.5}.queue-scroll{max-height:205px;overflow:auto;border:1px solid #e4dced;border-radius:6px}.queue th{position:sticky;top:0;background:#f1edf8;z-index:1;padding:7px 4px;color:#534575}.queue td{padding:5px 4px;vertical-align:middle}.queue td small{display:block;font-size:10px;color:var(--muted);line-height:1.5}.queue .queue-front{background:#eee7fa}.queue .queue-front .queue-rank{background:#6955a6;color:white}.queue-rank{display:inline-block;font-size:10px;font-weight:800;background:#ede8f5;color:#6955a6;border-radius:4px;min-width:24px;text-align:center;padding:3px}.queue .queue-picked{box-shadow:inset 3px 0 #d08529}.queue .queue-new td:nth-child(2) small{color:#6955a6;font-weight:700}.node-link{border:0;padding:3px 0;background:transparent;font-size:12px;font-family:ui-monospace,monospace;border-radius:3px;text-decoration:underline;text-underline-offset:3px}.queue-legend{margin:9px 0 0;font-size:11px;color:var(--muted)}.parent-panel{border-top:4px solid #167b6a}.parent-assignment{background:#edf3ee;padding:9px;border-radius:6px;color:#513c85;font-family:ui-monospace,monospace;font-size:13px;font-weight:750;overflow-wrap:anywhere}.parent-relation{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0}.parent-node{background:#eee8f8;border:2px solid #6955a6;padding:7px 11px;border-radius:7px;flex:1;text-align:center}.parent-node.parent{background:#e2f2e9;border-color:#167b6a}.parent-node small{font-size:10px;display:block}.parent-node b{font-size:15px;font-family:ui-monospace,monospace}.parent-relation>span{font-size:24px;color:var(--purple)}.parent-actions{margin:8px 0;display:flex;align-items:center;justify-content:space-between;gap:8px}.parent-actions button{font-size:12px}.chain-node{flex-shrink:0;padding:4px 6px;font-size:11px;font-family:ui-monospace,monospace;background:#f0ebf8;border-color:#d6cae9}.parent-writes{max-height:120px;overflow:auto;margin-top:6px}.parent-write{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:4px 0;border-bottom:1px solid #e7ece5;font-size:12px}.parent-write small{font-size:10px;color:var(--muted)}.check-list{max-height:210px;overflow:auto}.panel h3{line-height:1.5}
+@media(max-width:760px){.cell.in-path>span{font-size:7px}.cell .node-marker,.cell .relation-tag{font-size:5px}.node-marker{left:1px;top:1px}.relation-tag{right:1px;bottom:1px}.cell.parent-child,.cell.parent-target{outline-width:2px;outline-offset:-2px}.cell.path-new{box-shadow:inset 0 0 0 2px #eea528}.queue-scroll{max-height:235px}}
+
+.search-summary{background:#e7f1e9;border:1px solid #c4d8c9;border-radius:8px;padding:11px 13px;margin-bottom:13px}.summary-top{display:flex;align-items:center;justify-content:space-between;gap:14px}.search-summary h3{margin-bottom:6px}.search-summary .step-copy{min-height:0;font-size:13px;line-height:1.5;margin:0}.search-summary .stats{gap:12px;margin:0;white-space:nowrap}.cell.in-path>span{display:inline-block;background:#ffe8cf;color:#793211;border-radius:3px;padding:2px;line-height:1.1}.cell.endpoint.in-path>span{background:#b65226;color:white}.queue-scroll{max-height:185px}
+@media(max-width:760px){.summary-top{display:block}.search-summary .stats{margin:3px 0 8px}.cell.in-path>span{padding:1px}.queue-scroll{max-height:235px}}
+.laboratory>div,.side,.panel,.map-card,.path-state{min-width:0}
+@media(max-width:760px){.laboratory,.side{grid-template-columns:minmax(0,1fr)}}
+
+main{max-width:1680px}
+.laboratory{grid-template-columns:minmax(0,1fr) clamp(440px,31vw,520px);gap:28px}
+.side{gap:20px}
+.side .panel{padding:22px}
+.side h3{font-size:20px;line-height:1.5}
+.side .tiny,.side .picked,.side .check-control{font-size:16px;line-height:1.75}
+.side .picked{margin-bottom:14px}
+.side .queue-title{flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.side .queue-title small{font-size:15px}
+.side .queue-event{font-size:16px;padding:11px 13px;line-height:1.7;margin-top:12px}
+.side .queue-next{font-size:18px;padding:15px 0 12px;line-height:1.65}
+.side .queue{font-size:16px}
+.side .queue th{font-size:15px;padding:11px 8px}
+.side .queue td{padding:10px 8px}
+.side .queue td b{font-size:19px}
+.side .queue td small{font-size:14px;line-height:1.65}
+.side .queue-rank{font-size:14px;min-width:34px;padding:4px 5px}
+.side .node-link{font-size:17px;padding:5px 0}
+.side .queue-scroll{max-height:430px}
+.side .queue-legend{font-size:15px;line-height:1.75;margin-top:14px}
+.side .parent-assignment{font-size:18px;padding:13px;line-height:1.65}
+.side .parent-relation{gap:12px;margin:18px 0}
+.side .parent-node{padding:12px}
+.side .parent-node small{font-size:14px}
+.side .parent-node b{font-size:24px}
+.side .parent-relation>span{font-size:30px}
+.side .parent-actions button{font-size:16px;min-height:44px;padding:9px 13px}
+.side .parent-chain{flex-wrap:wrap;max-height:260px;overflow-x:visible;overflow-y:auto;gap:7px;align-content:flex-start;margin:8px 0}
+.side .chain-node{font-size:16px;min-height:38px;padding:6px 9px}
+.side .chain-arrow{font-size:18px}
+.side .parent-writes{max-height:none;margin-top:14px}
+.side .parent-write{font-size:16px;padding:8px 0;gap:8px}
+.side .parent-write small{font-size:14px}
+.side .score{margin:18px 0;gap:12px}
+.side .score b{font-size:34px}
+.side .score span{font-size:15px;line-height:1.65}
+.side .formula{font-size:16px;line-height:1.8;padding:14px}
+.side .checks{font-size:16px;line-height:1.75}
+.side .checks li{padding:7px 0}
+.side .check-list{max-height:none}
+.side .check-control{gap:9px;margin:15px 0}
+.side input[type=checkbox]{width:19px;height:19px;flex-shrink:0}
+.side input[type=range]{margin:12px 0}
+@media(max-width:1100px){
+    .laboratory{grid-template-columns:minmax(0,1fr)}
+    .side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+    .side .panel:last-child{grid-column:1/-1}
+}
+@media(max-width:850px){
+    .side{grid-template-columns:minmax(0,1fr)}
+    .side .panel:last-child{grid-column:auto}
+}
+@media(max-width:480px){
+    .side .panel{padding:16px}
+    .side .queue{font-size:14px}
+    .side .queue th{font-size:14px;padding:9px 5px}
+    .side .queue td{padding:9px 5px}
+    .side .queue td small{font-size:13px}
+    .side .queue td b{font-size:18px}
+    .side .node-link{font-size:15px}
+    .side .queue-rank{font-size:13px;min-width:28px}
+    .side .parent-assignment{font-size:16px}
+    .side .parent-node{padding:10px 8px}
+    .side .parent-node b{font-size:21px}
+    .side .formula{font-size:15px;padding:11px}
+}
+
+[hidden]{display:none!important}
+.support-panels.side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:20px;align-items:start}
+.support-panels .safety-panel{grid-column:1/-1}
+.support-panels .score{gap:8px}
+.support-panels .score b{font-size:clamp(26px,2.1vw,34px)}
+.laboratory>.main-panels .panel:last-child{grid-column:auto}
+.tree-panel{margin-top:20px;padding:22px;border-top:4px solid var(--purple)}
+.tree-panel h3{font-size:20px;margin:0}
+.tree-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 18px;flex-wrap:wrap;margin-bottom:10px}
+.tree-heading strong{font-size:16px;color:var(--purple)}
+.tree-panel .tiny{font-size:16px;line-height:1.75}
+.tree-legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:14px 0}
+.tree-legend span{display:flex;gap:7px;align-items:center}
+.tree-legend i{width:17px;height:17px;border:1px solid #cad3cb;border-radius:4px}
+.tree-viewport{height:400px;overflow:auto;overscroll-behavior:contain;border:1px solid #cfc4e1;border-radius:8px;background:#faf9fd}
+.tree-canvas{position:relative;min-width:100%;min-height:100%}
+.tree-canvas>svg{position:absolute;left:0;top:0;pointer-events:none}
+.tree-level{position:absolute;font-size:14px;color:var(--muted);width:116px;text-align:center;top:14px}
+.tree-node{position:absolute;width:116px;height:60px;padding:5px 7px;border:2px solid var(--purple);background:#eee8f8;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.4;border-radius:8px}
+.tree-node b{font-size:17px;font-family:ui-monospace,monospace;white-space:nowrap}
+.tree-node small{font-size:14px;color:#5d477f}
+.tree-node.tree-closed,.tree-node.tree-root{background:#e2f2e9;border-color:var(--teal)}
+.tree-node.tree-closed small,.tree-node.tree-root small{color:#226354}
+.tree-node.tree-path{background:#ffe3c1;border-color:#b65226}
+.tree-node.tree-path small{color:#843719}
+.tree-node.tree-focus{outline:3px solid #d08529;outline-offset:3px}
+.tree-node:hover{border-color:#d08529}
+.tree-panel .tree-help{margin:14px 0 0}
+.tree-status{background:#f1edf8;color:#50397e;border-radius:6px;padding:11px 13px;font-size:16px;line-height:1.7}
+.tree-link{display:inline-block;margin-top:10px;font-size:16px}
+@media(min-width:1101px) and (max-width:1400px){.support-panels.side{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:850px){.support-panels.side{grid-template-columns:minmax(0,1fr)}.support-panels .safety-panel{grid-column:auto}}
+@media(max-width:480px){.tree-panel{padding:16px}.tree-viewport{height:340px}}
+.reading-route{margin:24px 0;padding:22px;border:1px solid var(--line);border-radius:12px;background:#eaf2eb}.reading-route>p{font-size:15px;max-width:960px}.route-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.route-buttons button{text-align:left;padding:14px;line-height:1.6}.route-buttons b,.route-buttons span{display:block}.route-buttons b{font-size:16px;color:var(--teal)}.route-buttons span{font-size:13px;color:var(--muted)}#lesson-note{margin:0;color:var(--teal)}@media(max-width:760px){.route-buttons{grid-template-columns:1fr}.reading-route{padding:16px}}
+</style>
+</head>
+<body><main>
+<header><div><div class="eyebrow">MINI_NAV / 算法观察室</div><h1>A* 是怎样找到路的？</h1><p class="sub">从起点开始，每次展开预计总代价最小的格子。障碍决定“能不能走”，软代价决定“值不值得走”，父节点记录“从哪里来”。</p></div><div class="badge">按当前项目源码讲解 · 2026-10-05</div></header>
+<section class="reading-route" aria-labelledby="route-title">
+<h2 id="route-title">先看懂一次搜索，再调整地图</h2>
+<p>把每个格子看成一个候选位置：<b>g</b> 是已经付出的代价，<b>h</b> 是剩余代价的下界。A* 每次取 <b>f = g + h</b> 最小的格子，尝试改进周围八格的到达记录。</p>
+<div class="route-buttons">
+<button type="button" data-lesson="expand"><b>① 看一次展开</b><span>起点出队 → 安全邻居入队</span></button>
+<button type="button" data-lesson="cost"><b>② 比较软代价</b><span>从 w = 0 开始，再增大权重</span></button>
+<button type="button" data-lesson="trace"><b>③ 看路径回溯</b><span>终点已确定 → 沿 parent 逐格倒走</span></button>
+</div>
+<p id="lesson-note" role="status">建议先选 ①，再点地图下方的“下一步”。绿色已展开格是搜索过程，橙色 P 编号才是回溯得到的路径。</p>
+</section>
+<section class="setup" aria-label="演示参数">
+<div class="control"><label for="scenario">01 / 选一个问题</label><select id="scenario"><option value="wall">为什么能绕过一堵墙？</option><option value="soft">为什么会多走几步、远离障碍？</option><option value="tolerance">目标在墙上，还能到哪里？</option><option value="corner">两个障碍之间能斜着穿过去吗？</option><option value="unknown">未知格周围要留多少安全距离？</option></select><p id="scenario-copy" class="scenario-copy"></p></div>
+<div class="control"><label for="weight">02 / 软代价权重 w = <output id="weight-value">2.0</output></label><input id="weight" type="range" min="0" max="6" step="0.5" value="2"><div class="tiny">0 只计几何长度；增大后更愿意绕开高代价格。硬禁行区始终不能走。</div></div>
+<div class="control"><label for="tolerance">03 / 目标容差 = <output id="tolerance-value">0.50 m</output></label><input id="tolerance" type="range" min="0" max="1.5" step="0.1" value="0.5"><div class="tiny">原目标可达时优先到达它；不可达时才用容差选择替代终点。</div></div>
+</section>
+<section class="laboratory" aria-label="A* 搜索演示">
+<div><div class="map-card"><div class="map-head"><div><h2>逐格观察搜索</h2><span class="tiny">x 向右 · y 向上 · 每格 0.20 m</span></div><select id="mode" aria-label="点击地图的作用"><option value="inspect">点击：查看格子</option><option value="wall">点击：添加 / 移除墙</option><option value="start">点击：设置起点 S</option><option value="goal">点击：设置目标 G</option></select></div>
+<div class="search-summary"><div class="summary-top"><div><div id="phase" class="phase">准备搜索</div><h3 id="step-title">先把起点加入开放队列</h3></div><div class="stats"><span>已展开 <b id="closed-count">0</b></span><span>待展开 <b id="open-count">1</b></span></div></div><p id="step-copy" class="step-copy"></p></div>
+<div class="map"><div id="grid" class="grid" role="group" aria-label="可交互栅格地图"></div><svg id="overlay" class="overlay" viewBox="0 0 24 17" aria-hidden="true"></svg></div>
+<div class="legend"><span class="key"><i class="swatch" style="--color:#29423c"></i>障碍 254</span><span class="key"><i class="swatch hard-key"></i>硬安全区 253</span><span class="key"><i class="swatch" style="--color:#ecc694"></i>软代价 1–252</span><span class="key"><i class="swatch" style="--color:#818b93"></i>未知 255</span><span class="key"><i class="swatch" style="--color:#a6cebf"></i>已展开</span><span class="key"><i class="swatch" style="border:2px solid #6955a6;--color:white"></i>待展开</span><span class="key"><i class="swatch" style="--color:#b65226"></i>当前展开</span><span class="key"><i class="swatch" style="--color:#ffd8af"></i>P 编号：已加入路径</span><span class="key"><i class="swatch" style="--color:#6955a6"></i>紫箭头：孩子 → parent</span></div>
+<div class="toolbar"><button id="prev" aria-label="上一步">← 上一步</button><button id="next" class="primary">下一步 →</button><button id="play">自动播放</button><button id="finish">直接看结果</button><button id="reset">重置场景</button></div>
+<div class="path-state"><strong id="path-count">已加入路径：0 格</strong><div id="path-note" class="tiny"></div><div id="path-nodes" class="path-nodes" aria-label="已加入路径的节点"></div></div>
+<div class="timeline"><label for="timeline"><span>回放：拖动查看搜索和回溯</span><output id="step-number">0 / 0</output></label><input id="timeline" type="range" min="0" max="1" value="0" step="1"></div><div id="result" class="result" aria-live="polite"></div>
+</div>
+<div class="notes">这是一张便于观察的小地图，不是实际 Gazebo 地图。算法规则来自当前 C++ 实现；演示用 JavaScript 重现。相同 f 的节点按入队顺序展示，C++ 堆未规定同分顺序，所以等价路径或展开顺序可能不同。</div>
+<div id="parent-tree-panel" class="panel tree-panel" hidden>
+<div class="tree-heading"><h3>完整 parent 树</h3><strong id="parent-tree-count"></strong></div>
+<p class="tiny">起点 S 是树根。每条紫箭头从孩子指回 parent；每一列比前一列多一层。只展示当前回放步骤已发现的节点。</p>
+<div class="tree-legend tiny"><span><i style="background:#e2f2e9"></i>已展开 / 起点</span><span><i style="background:#eee8f8"></i>待展开</span><span><i style="background:#ffe3c1"></i>已加入路径</span></div>
+<div id="parent-tree-viewport" class="tree-viewport" tabindex="0" aria-label="完整父节点树图，可横向和纵向滚动">
+<div id="parent-tree-canvas" class="tree-canvas" role="group" aria-label="当前步骤的完整 parent 树"><svg id="parent-tree-graph" aria-hidden="true"></svg><div id="parent-tree-nodes"></div></div>
+</div>
+<p class="tiny tree-help">节点保持大字号；图较大时在框内滚动。点击任意节点，parent 面板显示对应记录，地图同步定位。</p>
+</div>
+<div class="support-panels side">
+<div class="panel ledger-panel"><h3>一个格子的账本</h3><div id="picked" class="picked"></div><div class="score"><div><b id="g-score">0</b><span>g：已知到达代价</span></div><div><b id="h-score">0</b><span>h：剩余距离下界</span></div><div><b id="f-score">0</b><span>f = g + h</span></div></div><div class="formula">step = L × (1 + w × c / 252)<br>g[next] = g[current] + step<br>h = max(dx,dy) + (√2−1) × min(dx,dy)</div><p class="tiny" style="margin-top:8px">L 为 1 或 √2，c 是要进入的格子的代价。g、h 按栅格长度计，不是米；目标容差按米计。</p><div id="edge-example" class="tiny"></div></div>
+<div class="panel neighbors-panel"><h3>本步八邻居检查</h3><ul id="checks" class="checks check-list"></ul></div>
+<div class="panel safety-panel"><h3>车体也要能通过</h3><label for="radius" class="tiny">圆盘安全半径 R = <output id="radius-value">0.26 m</output></label><input id="radius" type="range" min="0.06" max="0.4" step="0.01" value="0.26"><label class="check-control"><input id="unknown" type="checkbox">未知格向外生成硬安全区</label><label class="check-control"><input id="show-costs" type="checkbox">在地图上显示代价值</label><p class="tiny">R = 机器人外接圆 + 安全余量。橙色圆盘显示当前车体；相邻中心连线的整段扫掠都必须安全。</p></div>
+</div>
+</div>
+<aside class="side main-panels">
+
+<div class="panel queue-panel"><div class="queue-title"><h3 id="queue-status">开放队列 · 最小 f 优先</h3><small id="queue-count"></small></div><div id="queue-pop" class="queue-event pop"></div><div id="queue-push" class="queue-event push"></div><div id="queue-next" class="queue-next"></div><div class="queue-scroll"><table class="queue"><thead><tr><th>顺位</th><th>节点</th><th>f / g+h</th><th>parent</th></tr></thead><tbody id="queue"></tbody></table></div><p class="queue-legend">点击节点可在地图定位。搜索中前 8 项标为 Q1…Q8；这里按 f 排序、每格保留最优项，源码堆中的重复条目出队时会跳过。</p></div>
+<div class="panel parent-panel"><h3>parent：记录这个格子从哪里来</h3><div id="parent" class="parent-assignment"></div><div class="parent-relation"><div class="parent-node"><small>孩子格子</small><b id="parent-child"></b></div><span aria-label="指向父节点">→</span><div class="parent-node parent"><small>父节点 parent</small><b id="parent-target"></b></div></div><p id="parent-note" class="tiny"></p><div class="parent-actions"><button id="follow-parent" type="button">沿 parent 回到上一格</button></div><div class="tiny">当前父节点链 · 回溯方向：</div><div id="parent-chain" class="parent-chain" aria-label="父节点链"></div><div id="parent-writes" class="parent-writes"></div><label class="check-control"><input id="show-parents" type="checkbox" aria-controls="parent-tree-panel" aria-describedby="parent-tree-status">显示整棵 parent 树</label><div id="parent-tree-status" class="tree-status" role="status" aria-live="polite"></div><a id="parent-tree-link" class="tree-link" href="#parent-tree-panel" hidden>查看地图下方的完整树图 ↓</a></div>
+</aside></section>
+<section class="lower"><div class="eyebrow">从 ROS 输入到实际路径</div><h2>搜索结束之后，机器人还没有开始走</h2>
+<div class="flow"><article><span class="num">01 / 建图与坐标</span><h3>原图 → 膨胀规划图</h3><p>静态地图与有效动态障碍融合，再膨胀。当前机器人 TF 和目标位置转换为栅格。原始定位地图保留。</p></article><article><span class="num">02 / A* 搜索</span><h3>最小 f → 八个邻居</h3><p>依次检查越界、禁行、斜向穿角、更低 g 和连续车体扫掠。更优时更新 g 与 parent，加入开放队列。</p></article><article><span class="num">03 / 路径重建</span><h3>终点 → parent → 起点</h3><p>找到原目标立即结束；否则搜完可达区域才确定容差终点。从终点沿父节点倒走，再反转序列。</p></article><article><span class="num">04 / 发布与跟踪</span><h3>安全后处理 → FollowPath</h3><p>格中心转回米制坐标。安全简化与平滑只接受积分软代价不增加的修改；原始与最终路径分别发布。</p></article></div>
+<div class="explanations"><article class="panel"><h3>为什么 h 能指方向，却不冒进？</h3><p>假设还有 dx、dy 格要走：先沿对角走 min(dx,dy) 步，再直走剩余距离，这就是八方向距离 h。它忽略障碍和非负软代价，因此不会高估剩余最小代价。</p><p>较小的 h 让搜索朝目标推进；g 同时限制已经付出的代价。目标是总代价最小，权重非零时不保证几何长度最短。</p><div class="formula">例如 dx = 5，dy = 3<br>h = 2 + 3√2 ≈ 6.243 格</div></article><article class="panel"><h3>为什么“目标容差”不能穿墙？</h3><p>替代终点只能来自实际展开过的安全格。先比较与原目标格中心的欧氏距离；距离相同，再比较累计 g。原目标若可达，始终优先原目标。</p><p>容差不会放宽硬禁行、穿角和扫掠规则。起点不安全、目标越界，或者容差内无可达安全格，仍然返回空路径。</p><div class="formula">选“目标在墙上”：容差 0 → 失败<br>容差 0.5 m → 选墙这一侧的安全终点</div></article></div>
+<details><summary>展开：对应源码、默认参数和演示范围</summary>
+<p class="tiny" style="margin-top:12px">项目默认 w = 2.0，目标容差 0.5 m，机器人半径 0.24 m + 余量 0.02 m，膨胀半径 0.45 m，衰减系数 10 /m，未知膨胀关闭。虚线圆为目标容差范围，搜索中的橙点为当前容差候选。演示默认采用这些距离参数，栅格分辨率改为 0.20 m；穿角场景用 0.06 m 小圆盘突出穿角规则。控制条只改此页面。</p>
+<pre>// astar_navigator.cpp / PlanImpl（摘录）
+step_length = diagonal ? sqrt(2.0) : 1.0;
+step_cost = step_length * (1.0 + cost_travel_multiplier_ * cell_cost / 252.0);
+tentative_g_score = g_score[current.index] + step_cost;
+if (tentative_g_score >= g_score[next_index]) continue;
+// 带 source 的重载：还检查 IsCircularSweepClear(...)
+g_score[next_index] = tentative_g_score;
+parent[next_index] = current.index;
+open_list.push({next_index, tentative_g_score + OctileDistance({mx, my}, goal)});</pre>
+<ul class="sources"><li><a href="../../mini_nav_core/src/navigator/astar_navigator.cpp">astar_navigator.cpp</a>：PlanImpl（第 116 行）与 OctileDistance（第 363 行）。<a href="../../mini_nav_core/include/mini_nav_core/navigator/astar_navigator.hpp">头文件</a>：Plan 重载与比较器。</li><li><a href="../../mini_nav_core/src/map/inflation_layer.cpp">inflation_layer.cpp</a>：InflateCostmap（第 62 行），中心到障碍方格面积距离、硬安全区与软代价。</li><li><a href="../../mini_nav_core/src/navigator/path_postprocessor.cpp">path_postprocessor.cpp</a>：连续扫掠（第 328 行）、安全简化和平滑（第 350 行）。</li><li><a href="../../mini_nav_nodes/src/costmap_publisher.cpp">costmap_publisher.cpp</a>：PlanAndPublish（第 672 行），调用安全重载并发布两条路径。</li><li><a href="../../mini_nav_bringup/config/planning_costmap.yaml">planning_costmap.yaml</a>：实际默认参数；<a href="../planning_costmap.md">规划代价图说明</a>与<a href="../navigation_tasks.md">导航任务链</a>。</li></ul>
+<p class="tiny">页面重现膨胀、A*、逐边圆盘扫掠与回溯；后处理和 ROS 节点链路在文字中说明。页面不运行 ROS，不显示实际传感器数据，也不模拟最终平滑路径。沿最优父节点链的橙色线是 A* 原始栅格路径。原点设为 (0,0)，格中心为 ((x+0.5)×分辨率, (y+0.5)×分辨率)。</p>
+</details></section><footer>操作建议：先点“下一步”，观察当前格的邻居筛选；再点“直接看结果”，拖动回放观察橙色 P 节点逐个加入。点击队列节点，或点“沿 parent 回到上一格”追踪父节点链。想试自己的地图，可切换为“添加 / 移除墙”。</footer>
+</main>
+<script>
+'use strict';
+const W=24,H=17,RES=.2,N=W*H,DIRS=[[0,1],[1,0],[0,-1],[-1,0],[1,1],[1,-1],[-1,-1],[-1,1]];
+const $=id=>document.getElementById(id),idx=(x,y)=>y*W+x,xy=i=>[i%W,Math.floor(i/W)],fmt=n=>Number.isFinite(n)?n.toFixed(2):'∞',coord=i=>'('+xy(i).join(', ')+')';
+const scenarios={wall:'观察搜索如何围绕墙展开。沿墙走也可能付出软代价，A* 会比较上下两条路。',soft:'中间通道两侧有障碍，虽然可走，软代价较高。把 w 从 0 调到 2，比较长度和总成本。',tolerance:'目标 G 在贯穿地图的墙上。原目标不可达；搜完起点所在区域，再比较容差内的安全格。',corner:'两个障碍封住对角移动的两侧。小圆盘让起终点仍安全，但 A* 仍拒绝直接斜穿；需要绕行。',unknown:'未知格自身始终禁行。开关只改变相邻区域的圆盘余量要求，未知格不生成软代价。'};
+let source=[],costs=[],start=idx(3,8),goal=idx(20,8),frames=[],frameIndex=0,picked=null,timer=null,buttons=[];
+function preset(name){source=Array(N).fill(0);start=idx(3,8);goal=idx(20,8);$('radius').value=name==='corner'?.06:.26;
+if(name==='wall')for(let y=3;y<=11;y++)source[idx(12,y)]=254;
+if(name==='soft')for(let x=8;x<=16;x++){source[idx(x,6)]=254;source[idx(x,10)]=254;}
+if(name==='tolerance'){for(let y=0;y<H;y++)source[idx(12,y)]=254;goal=idx(12,8);}
+if(name==='corner'){start=idx(10,7);goal=idx(11,8);source[idx(10,8)]=254;source[idx(11,7)]=254;}
+if(name==='unknown')for(let y=3;y<=11;y++)source[idx(12,y)]=255;
+$('scenario-copy').textContent=scenarios[name];picked=null;recompute();}
+function inflate(src,r,unknown){const out=src.slice();for(let i=0;i<N;i++){const [x,y]=xy(i);if(src[i]===255)continue;let c=out[i];for(let j=0;j<N;j++){if(src[j]!==254&&!(src[j]===255&&unknown))continue;const [ox,oy]=xy(j),d=Math.hypot(Math.max(0,Math.abs(x-ox)-.5),Math.max(0,Math.abs(y-oy)-.5))*RES;if(d===0||d>.45)continue;const v=d<=r?253:Math.max(1,Math.floor(252*Math.exp(-10*(d-r))));if(src[j]===255&&v<253)continue;c=Math.max(c,v);}
+const edge=Math.min(x+.5,W-x-.5,y+.5,H-y-.5)*RES;if(edge<=r)c=Math.max(c,253);out[i]=c;}return out;}
+function pointSegment(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy,t=l===0?0:Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));return (p[0]-a[0]-t*dx)**2+(p[1]-a[1]-t*dy)**2;}
+function pointRect(p,x0,y0,x1,y1){return (p[0]-Math.max(x0,Math.min(x1,p[0])))**2+(p[1]-Math.max(y0,Math.min(y1,p[1])))**2;}
+function segmentRect(a,b,x0,y0,x1,y1){let enter=0,leave=1;const dx=b[0]-a[0],dy=b[1]-a[1];function clip(p,q){if(p===0)return q>=0;const t=q/p;if(p<0){if(t>leave)return false;enter=Math.max(enter,t);}else{if(t<enter)return false;leave=Math.min(leave,t);}return true;}
+if(clip(-dx,a[0]-x0)&&clip(dx,x1-a[0])&&clip(-dy,a[1]-y0)&&clip(dy,y1-a[1])&&enter<=leave)return 0;
+return Math.min(pointRect(a,x0,y0,x1,y1),pointRect(b,x0,y0,x1,y1),...[[x0,y0],[x0,y1],[x1,y0],[x1,y1]].map(p=>pointSegment(p,a,b)));}
+function sweep(src,i,j,r,unknown){const a=xy(i).map(v=>(v+.5)*RES),b=xy(j).map(v=>(v+.5)*RES);if(![a,b].every(p=>p[0]>r&&p[0]<W*RES-r&&p[1]>r&&p[1]<H*RES-r))return false;for(let k=0;k<N;k++){if(src[k]<253||(!unknown&&src[k]===255))continue;const [x,y]=xy(k);if(segmentRect(a,b,x*RES,y*RES,(x+1)*RES,(y+1)*RES)<=r*r+1e-9)return false;}return true;}
+function octile(i,j){const [x,y]=xy(i),[gx,gy]=xy(j),dx=Math.abs(x-gx),dy=Math.abs(y-gy);return Math.max(dx,dy)+(Math.SQRT2-1)*Math.min(dx,dy);}
+function search(src,planning,s,t,w,r,unknown,tol){const g=Array(N).fill(Infinity),parent=Array(N).fill(-1),closed=Array(N).fill(false),open=[],history=[];let seq=0,nearest=-1,nearestD=Infinity,end=-1;
+const record=(phase,current,checks=[],path=[])=>history.push({phase,current,checks,path:path.slice(),g:g.slice(),parent:parent.slice(),closed:closed.slice(),queue:open.filter(o=>!closed[o.i]).sort((a,b)=>a.f-b.f||a.seq-b.seq),nearest});
+if(s<0||t<0||s>=N||t>=N||planning[s]>=253||!sweep(src,s,s,r,unknown)||(tol===0&&(planning[t]>=253||!sweep(src,t,t,r,unknown)))){record('invalid',-1);return history;}
+g[s]=0;open.push({i:s,f:octile(s,t),seq:seq++});record('init',-1);
+while(open.length){open.sort((a,b)=>a.f-b.f||a.seq-b.seq);const cur=open.shift().i;if(closed[cur])continue;closed[cur]=true;if(cur===t){end=t;record('goal',cur);break;}
+const [x,y]=xy(cur),[gx,gy]=xy(t),d=Math.hypot(x-gx,y-gy)*RES;if(tol>0&&d<=tol&&(d<nearestD||(d===nearestD&&g[cur]<g[nearest]))){nearest=cur;nearestD=d;}
+const checks=[];
+for(const [dx,dy]of DIRS){const nx=x+dx,ny=y+dy,n=idx(nx,ny),diagonal=dx!==0&&dy!==0;let reason='';if(nx<0||nx>=W||ny<0||ny>=H)reason='越界';else if(planning[n]>=253)reason=planning[n]===255?'未知格禁行':'硬禁行 ≥253';else if(diagonal&&(planning[idx(nx,y)]>=253||planning[idx(x,ny)]>=253))reason='斜向穿角';else {const step=(diagonal?Math.SQRT2:1)*(1+w*planning[n]/252),ng=g[cur]+step;if(ng>=g[n])reason='没有更低的 g';else if(!sweep(src,cur,n,r,unknown))reason='车体扫掠碰撞';else{const previousParent=parent[n],previousG=g[n];g[n]=ng;parent[n]=cur;open.push({i:n,f:ng+octile(n,t),seq:seq++});checks.push({i:n,x:nx,y:ny,reason:'更新 g / parent，入队',ok:true,step,previousParent,previousG});continue;}}
+checks.push({i:n,x:nx,y:ny,reason,ok:false});}
+record('expand',cur,checks);
+}
+if(end<0)end=nearest;if(end<0){record('failure',-1);return history;}
+if(end!==t)record('fallback',end);const reverse=[];let k=end;while(k!==s){reverse.push(k);record('trace',k,[],reverse);k=parent[k];}reverse.push(s);record('done',end,[],reverse.reverse());return history;}
+function stop(){if(timer!==null)clearInterval(timer);timer=null;$('play').textContent='自动播放';}
+function recompute(){stop();picked=null;const r=+$('radius').value,w=+$('weight').value,tol=+$('tolerance').value,unknown=$('unknown').checked;costs=inflate(source,r,unknown);frames=search(source,costs,start,goal,w,r,unknown,tol);frameIndex=0;$('weight-value').textContent=w.toFixed(1);$('tolerance-value').textContent=tol.toFixed(2)+' m';$('radius-value').textContent=r.toFixed(2)+' m';$('timeline').max=frames.length-1;render();}
+function points(path){return path.map(i=>{const [x,y]=xy(i);return `${x+.5},${H-y-.5}`;}).join(' ');}
+function renderParentTree(f, focus, pathRanks) {
+    const shown = $('show-parents').checked;
+    const nodes = f.g.flatMap((g, i) => Number.isFinite(g) ? [i] : []);
+    const edges = nodes.filter(i => f.parent[i] >= 0);
+    const count = `${nodes.length} 个节点 · ${edges.length} 条 parent 连接`;
+    $('parent-tree-panel').hidden = !shown;
+    $('parent-tree-link').hidden = !shown;
+    $('parent-tree-count').textContent = count;
+    $('parent-tree-status').textContent = shown
+        ? `已显示完整树：${count}。地图紫箭头已增强；地图下方还有可点击的树图。`
+        : `完整树已隐藏。当前步骤记录了${count}；勾选后同时显示地图箭头和完整树图。`;
+    if (!shown) return;
+
+    const children = new Map(nodes.map(i => [i, []]));
+    for (const i of edges) children.get(f.parent[i])?.push(i);
+    const levels = [];
+    let layer = nodes.filter(i => f.parent[i] < 0);
+    const visited = new Set();
+    while (layer.length) {
+        levels.push(layer);
+        for (const i of layer) visited.add(i);
+        layer = layer.flatMap(i => children.get(i)).filter(i => !visited.has(i));
+    }
+    const positions = new Map();
+    const width = Math.max(180, levels.length * 184 + 44);
+    const height = Math.max(180, Math.max(0, ...levels.map(l => l.length)) * 84 + 68);
+    const canvas = $('parent-tree-canvas');
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    let labels = '';
+    levels.forEach((level, depth) => {
+        const x = 24 + depth * 184;
+        labels += `<span class="tree-level" style="left:${x}px">${depth === 0 ? '树根 · 起点 S' : `第 ${depth} 层`}</span>`;
+        level.forEach((i, row) => positions.set(i, {x, y: 52 + row * 84}));
+    });
+    const inPath = new Set(f.path);
+    $('parent-tree-nodes').innerHTML = labels + nodes.map(i => {
+        const pos = positions.get(i);
+        const cls = `${i === start ? ' tree-root' : ''}${f.closed[i] ? ' tree-closed' : ''}${inPath.has(i) ? ' tree-path' : ''}${i === focus ? ' tree-focus' : ''}`;
+        const tag = i === start ? 'S · ' : inPath.has(i) ? `P${pathRanks.get(i)} · ` : '';
+        return `<button type="button" class="tree-node${cls}" data-inspect="${i}" style="left:${pos.x}px;top:${pos.y}px" aria-label="查看树节点 ${coord(i)}，${f.parent[i] >= 0 ? `parent ${coord(f.parent[i])}` : '起点，无 parent'}"><b>${coord(i)}</b><small>${tag}g = ${fmt(f.g[i])}</small></button>`;
+    }).join('') + (nodes.length ? '' : '<p class="tiny" style="padding:24px">当前步骤没有有效节点，尚未建立 parent 树。</p>');
+    const graph = $('parent-tree-graph');
+    graph.setAttribute('width', width);
+    graph.setAttribute('height', height);
+    graph.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    graph.innerHTML = '<defs><marker id="tree-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#6955a6"/></marker></defs>' + edges.map(i => {
+        const child = positions.get(i), parent = positions.get(f.parent[i]);
+        const x1 = child.x - 2, y1 = child.y + 30, x2 = parent.x + 120, y2 = parent.y + 30, middle = (x1 + x2) / 2;
+        return `<path class="tree-edge" data-child="${i}" data-parent="${f.parent[i]}" d="M${x1} ${y1} C${middle} ${y1},${middle} ${y2},${x2} ${y2}" fill="none" stroke="#6955a6" stroke-width="${i === focus ? 3.5 : 2}" opacity="${i === focus ? 1 : .8}" marker-end="url(#tree-arrow)"/>`;
+    }).join('');
+}
+function render() {
+    const f = frames[frameIndex];
+    const openSet = new Set(f.queue.map(o => o.i));
+    const seen = new Set();
+    const queue = f.queue.filter(o => {
+        if (seen.has(o.i)) return false;
+        seen.add(o.i);
+        return true;
+    });
+    const searching = ['init', 'expand'].includes(f.phase);
+    const ranks = new Map(searching ? queue.slice(0, 8).map((o, n) => [o.i, n + 1]) : []);
+    const updates = f.checks.filter(c => c.ok);
+    const newlyQueued = new Set(updates.map(c => c.i));
+    const finalPath = frames.at(-1).path;
+    const pathRanks = new Map(finalPath.map((i, n) => [i, n + 1]));
+    const inPath = new Set(f.path);
+    const added = f.phase === 'trace' ? f.current : f.phase === 'done' ? start : -1;
+    const focus = picked ?? (f.current >= 0 && f.parent[f.current] >= 0 ? f.current : updates[0]?.i ?? (f.current >= 0 ? f.current : start));
+    const parentNode = f.parent[focus];
+
+    buttons.forEach((b, i) => {
+        const c = costs[i];
+        let cls = 'cell';
+        if (c === 254) cls += ' wall';
+        else if (c === 255) cls += ' unknown';
+        else if (c === 253) cls += ' hard';
+        if (f.closed[i]) cls += ' closed';
+        else if (openSet.has(i)) cls += ' open';
+        if (newlyQueued.has(i)) cls += ' new-open';
+        if (i === f.current) cls += ' current';
+        if (i === picked) cls += ' selected';
+        if (i === focus && parentNode >= 0) cls += ' parent-child';
+        if (i === parentNode) cls += ' parent-target';
+        if (i === start) cls += ' endpoint';
+        if (i === goal) cls += ' endpoint goal';
+        if (inPath.has(i)) cls += ' in-path';
+        if (i === added) cls += ' path-new';
+        b.className = cls;
+        b.style.backgroundColor = c > 0 && c < 253 ? `hsl(36 65% ${94 - c / 252 * 24}%)` : '';
+        b.firstChild.textContent = inPath.has(i) ? `P${pathRanks.get(i)}` : i === start ? 'S' : i === goal ? 'G' : ranks.has(i) ? `Q${ranks.get(i)}` : $('show-costs').checked ? c === 255 ? '?' : String(c) : '';
+        b.querySelector('.node-marker').textContent = inPath.has(i) ? i === start ? 'S' : i === goal ? 'G' : '' : ranks.has(i) && (i === start || i === goal) ? `Q${ranks.get(i)}` : '';
+        b.querySelector('.relation-tag').textContent = parentNode >= 0 ? i === focus ? '子' : i === parentNode ? '父' : '' : '';
+        const tags = [i === start ? '起点' : '', i === goal ? '目标' : '', inPath.has(i) ? `已加入路径 P${pathRanks.get(i)}` : '', ranks.has(i) ? `开放队列 Q${ranks.get(i)}` : '', f.parent[i] >= 0 ? `parent ${coord(f.parent[i])}` : ''].filter(Boolean);
+        const name = `格子 ${coord(i)}，代价 ${c}${tags.length ? '，' + tags.join('，') : ''}`;
+        b.setAttribute('aria-label', name);
+        b.title = name;
+    });
+
+    let svg = '<defs><marker id="parent-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth=".26" markerHeight=".26" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#6955a6"/></marker></defs>';
+    const [gx, gy] = xy(goal), tol = +$('tolerance').value;
+    if (tol > 0) svg += `<circle cx="${gx + .5}" cy="${H - gy - .5}" r="${tol / RES}" fill="none" stroke="#b65226" stroke-width=".05" stroke-dasharray=".2 .15"/>`;
+    const arrow = (child, parent, width, opacity = 1) => {
+        const a = xy(child), b = xy(parent), dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy), ux = dx / length, uy = dy / length;
+        return `<line class="parent-edge" data-child="${child}" data-parent="${parent}" x1="${a[0] + .5 + ux * .25}" y1="${H - a[1] - .5 - uy * .25}" x2="${b[0] + .5 - ux * .3}" y2="${H - b[1] - .5 + uy * .3}" stroke="#6955a6" stroke-width="${width}" opacity="${opacity}" marker-end="url(#parent-arrow)"/>`;
+    };
+    if ($('show-parents').checked) for (let i = 0; i < N; i++) if (f.parent[i] >= 0 && i !== focus) svg += arrow(i, f.parent[i], .09, .9);
+    if (!$('show-parents').checked) for (const u of updates) if (u.i !== focus) svg += arrow(u.i, f.parent[u.i], .07, .65);
+    if (f.path.length) svg += `<polyline points="${points(f.path)}" fill="none" stroke="#b65226" stroke-width=".13" stroke-linecap="round" stroke-linejoin="round"/>`;
+    if (parentNode >= 0) svg += arrow(focus, parentNode, .12);
+    if (f.current >= 0) {
+        const [x, y] = xy(f.current);
+        svg += `<circle cx="${x + .5}" cy="${H - y - .5}" r="${+$('radius').value / RES}" fill="#d9832010" stroke="#b65226" stroke-width=".05"/>`;
+    }
+    if (f.nearest >= 0 && !['done', 'goal', 'trace'].includes(f.phase)) {
+        const [x, y] = xy(f.nearest);
+        svg += `<circle cx="${x + .5}" cy="${H - y - .5}" r=".15" fill="#b65226"/>`;
+    }
+    $('overlay').innerHTML = svg;
+    renderParentTree(f, focus, pathRanks);
+
+    const phases = {
+        init: ['01 / 初始化', '先把起点加入开放队列', '起点 g = 0。其余格的 g 为无穷大，parent 尚未设置。队列按 f = g + h 取最小值。'],
+        expand: ['02 / 展开八邻居', `展开 ${coord(f.current)}`, `当前格已经出队并标记 expanded。检查八个方向，只对安全且到达代价更低的邻居更新 g 与 parent。${f.nearest >= 0 ? '已记录一个容差候选，但搜索仍继续。' : ''}`],
+        goal: ['03 / 原目标到达', '原目标出队，立即结束搜索', '原目标 G 可达，优先使用它。现在沿 parent 从目标向起点回溯。'],
+        fallback: ['03 / 选择容差终点', '原目标不可达，已搜完可达区域', `选择 ${coord(f.current)}：先离原目标最近，再比较 g。所有路径边仍遵守原有安全规则。`],
+        trace: ['04 / 沿父节点回溯', `加入 P${pathRanks.get(f.current)} ${coord(f.current)}`, '回溯时从终点沿 parent 倒走，橙色格子逐个加入路径。P 编号按最终起点到终点的顺序，回溯时编号逐步减小。'],
+        done: ['05 / 输出路径', '起点到终点的路径已重建', '橙色格子按 P1 → P2 → … 排列。ROS 节点接下来转换坐标并进行安全简化和平滑，再交给路径跟踪器。'],
+        invalid: ['规划拒绝', '起点或原目标不满足前提', '检查起点是否落在硬禁行区、未知格或车体余量不足。容差为 0 时，原目标也必须安全。设置容差不能修复不安全起点。'],
+        failure: ['无可达终点', '开放队列已空，返回空路径', '原目标不可达，容差内也没有实际可达的安全格。试着增加目标容差，或移除挡路的墙。']
+    };
+    const p = phases[f.phase];
+    $('phase').textContent = p[0];
+    $('step-title').textContent = p[1];
+    $('step-copy').textContent = p[2];
+    $('closed-count').textContent = f.closed.filter(Boolean).length;
+    $('open-count').textContent = openSet.size;
+    $('step-number').textContent = `${frameIndex} / ${frames.length - 1}`;
+    $('timeline').value = frameIndex;
+    $('prev').disabled = frameIndex === 0;
+    $('next').disabled = frameIndex === frames.length - 1;
+    $('finish').disabled = frameIndex === frames.length - 1;
+    $('play').disabled = frames.length === 1;
+
+    const selected = focus, g = f.g[selected], h = octile(selected, goal);
+    $('picked').textContent = `${picked !== null ? '选中' : '观察'} ${coord(selected)} · 格代价 ${costs[selected]}${inPath.has(selected) ? ` · 路径 P${pathRanks.get(selected)}` : f.closed[selected] ? ' · 已展开' : openSet.has(selected) ? ' · 待展开' : ''}`;
+    $('g-score').textContent = fmt(g);
+    $('h-score').textContent = fmt(h);
+    $('f-score').textContent = fmt(g + h);
+    const c = costs[selected], w = +$('weight').value;
+    $('edge-example').textContent = c < 253 ? `如果直走进入此格：step = 1 × (1 + ${w.toFixed(1)} × ${c} / 252) = ${fmt(1 + w * c / 252)}` : '此格代价 ≥253，直接拒绝，不计算通行代价。';
+
+    $('queue-status').textContent = searching ? '开放队列 · 最小 f 优先' : '开放队列 · 搜索已停止';
+    $('queue-count').textContent = `${queue.length} 个待展开格`;
+    $('queue-pop').textContent = f.phase === 'expand' || f.phase === 'goal' ? `本步出队：${coord(f.current)} · f = ${fmt(f.g[f.current] + octile(f.current, goal))}` : searching ? '尚未出队：先把起点入队' : '回溯阶段不再从开放队列取点';
+    $('queue-push').textContent = updates.length ? `本步入队 / 更新：${updates.map(u => coord(u.i)).join('、')}` : f.phase === 'init' ? `初始化入队：${coord(start)}` : searching ? '本步没有更优邻居入队' : '剩余队列项保留在此，仅用于观察';
+    $('queue-next').textContent = searching && queue.length ? `下一出队 Q1：${coord(queue[0].i)} · f = ${fmt(queue[0].f)}` : searching ? '没有待展开项' : '搜索已结束，剩余项不会继续出队';
+    $('queue').innerHTML = queue.map((o, n) => {
+        const update = updates.find(u => u.i === o.i);
+        const label = searching ? `Q${n + 1}` : `#${n + 1}`;
+        return `<tr class="${n === 0 && searching ? 'queue-front ' : ''}${picked === o.i ? 'queue-picked ' : ''}${update ? 'queue-new' : ''}"><td><span class="queue-rank">${label}</span></td><td><button type="button" class="node-link" data-inspect="${o.i}" aria-label="查看队列格子 ${coord(o.i)}">${coord(o.i)}</button>${update ? `<small>${Number.isFinite(update.previousG) ? '更新' : '新入队'}</small>` : ''}</td><td><b>${fmt(o.f)}</b><small>${fmt(f.g[o.i])} + ${fmt(octile(o.i, goal))}</small></td><td>${f.parent[o.i] >= 0 ? coord(f.parent[o.i]) : '起点'}</td></tr>`;
+    }).join('') || '<tr><td colspan="4">队列为空</td></tr>';
+
+    $('parent').textContent = parentNode >= 0 ? `parent[${coord(focus)}] = ${coord(parentNode)}` : `parent[${coord(focus)}] 尚未设置`;
+    $('parent-child').textContent = coord(focus);
+    $('parent-target').textContent = parentNode >= 0 ? coord(parentNode) : '无';
+    $('parent-note').textContent = parentNode >= 0 ? `含义：当前最优到达记录从 ${coord(parentNode)} 走到 ${coord(focus)}。地图紫箭头指回 parent；紫框为孩子，青框为父节点。` : focus === start ? '起点没有父节点，回溯到这里就结束。' : '尚未找到这个格子的安全到达记录。';
+    $('follow-parent').disabled = parentNode < 0;
+    $('follow-parent').dataset.inspect = parentNode;
+    const chain = [];
+    for (let i = focus; i >= 0 && chain.length <= N; i = f.parent[i]) chain.push(i);
+    $('parent-chain').innerHTML = chain.map((i, n) => `${n ? '<span class="chain-arrow">→</span>' : ''}<button type="button" class="chain-node" data-inspect="${i}" aria-label="查看父节点链格子 ${coord(i)}">${coord(i)}${i === start ? ' S' : ''}</button>`).join('');
+    $('parent-writes').innerHTML = updates.length ? '<div class="tiny">本步 parent 写入：</div>' + updates.map(u => `<div class="parent-write"><button type="button" class="node-link" data-inspect="${u.i}">${coord(u.i)}</button><span>← ${coord(f.current)}</span><small>${u.previousParent >= 0 ? `原父 ${coord(u.previousParent)} · g ${fmt(u.previousG)} → ${fmt(f.g[u.i])}` : '首次发现'}</small></div>`).join('') : '<div class="tiny">本步没有修改 parent。点击队列、路径节点或地图可检查对应记录。</div>';
+    $('checks').innerHTML = f.checks.map(check => `<li class="${check.ok ? 'ok' : 'bad'}">${check.ok ? '＋' : '×'} (${check.x}, ${check.y}) · ${check.reason}</li>`).join('');
+
+    $('path-count').textContent = f.path.length ? `已加入路径：${f.path.length} / ${finalPath.length} 格` : '已加入路径：0 格';
+    $('path-note').textContent = f.path.length ? f.phase === 'done' ? '已反转为起点 → 终点。地图每个橙色格都有 P 编号。' : `本步加入 P${pathRanks.get(added)} ${coord(added)}；下步沿紫箭头取 parent。` : '搜索时保存 parent；选定终点后，才沿 parent 逐个把节点加入路径。';
+    $('path-nodes').innerHTML = f.path.map((i, n) => `${n ? '<span class="chain-arrow">→</span>' : ''}<button type="button" class="path-chip ${i === added ? 'latest' : ''}" data-inspect="${i}" aria-label="查看路径节点 P${pathRanks.get(i)} ${coord(i)}"><b>P${pathRanks.get(i)}</b><span>${coord(i)}</span></button>`).join('');
+    let result = '';
+    if (f.phase === 'done') {
+        const e = f.path.at(-1), length = f.path.slice(1).reduce((v, k, j) => v + Math.hypot(...xy(k).map((x, d) => x - xy(f.path[j])[d])) * RES, 0), offset = Math.hypot(...xy(e).map((x, d) => x - xy(goal)[d])) * RES;
+        result = `${f.path.length} 个路径格 · 几何长度 ${length.toFixed(2)} m · 加权代价 g = ${fmt(f.g[e])} · ${e === goal ? '到达原目标' : `替代终点 ${coord(e)}，偏移 ${offset.toFixed(2)} m`}`;
+    }
+    if (f.phase === 'invalid' || f.phase === 'failure') result = '结果：空路径。';
+    $('result').textContent = result;
+}
+for(let y=H-1;y>=0;y--)for(let x=0;x<W;x++){const i=idx(x,y),b=document.createElement('button');b.type='button';b.className='cell';b.dataset.index=i;b.append(document.createElement('span'));for(const name of ['node-marker','relation-tag']){const marker=document.createElement('small');marker.className=name;marker.setAttribute('aria-hidden','true');b.append(marker);}b.addEventListener('click',()=>{const mode=$('mode').value;if(mode==='inspect'){stop();picked=i;render();return;}if(mode==='start')start=i;if(mode==='goal')goal=i;if(mode==='wall')source[i]=source[i]===254?0:254;recompute();});$('grid').append(b);buttons[i]=b;}
+$('scenario').addEventListener('change',()=>preset($('scenario').value));for(const id of ['weight','tolerance','radius'])$(id).addEventListener('input',recompute);$('unknown').addEventListener('change',recompute);$('show-costs').addEventListener('change',render);$('prev').addEventListener('click',()=>{stop();frameIndex=Math.max(0,frameIndex-1);render();});$('next').addEventListener('click',()=>{stop();frameIndex=Math.min(frames.length-1,frameIndex+1);render();});$('finish').addEventListener('click',()=>{stop();frameIndex=frames.length-1;render();});$('reset').addEventListener('click',()=>{for(const [id,value]of [['weight',2],['tolerance',.5]])$(id).value=value;$('unknown').checked=false;preset($('scenario').value);});$('timeline').addEventListener('input',()=>{stop();frameIndex=+$('timeline').value;render();});$('play').addEventListener('click',()=>{if(timer!==null){stop();return;}if(frameIndex===frames.length-1)frameIndex=0;$('play').textContent='暂停';timer=setInterval(()=>{if(frameIndex>=frames.length-1){stop();return;}frameIndex++;render();},window.matchMedia('(prefers-reduced-motion: reduce)').matches?550:160);});
+$('show-parents').addEventListener('change',render);document.addEventListener('click',event=>{const button=event.target.closest('button[data-inspect]');if(!button||button.disabled)return;const i=+button.dataset.inspect;if(i<0||i>=N)return;stop();picked=i;render();});
+for (const button of document.querySelectorAll('[data-lesson]')) {
+    button.addEventListener('click', () => {
+        const lesson = button.dataset.lesson;
+        $('scenario').value = lesson === 'cost' ? 'soft' : 'wall';
+        $('weight').value = lesson === 'cost' ? 0 : 2;
+        $('tolerance').value = .5;
+        $('unknown').checked = false;
+        $('mode').value = 'inspect';
+        $('show-parents').checked = false;
+        $('show-costs').checked = lesson === 'cost';
+        preset($('scenario').value);
+        if (lesson === 'expand') frameIndex = 1;
+        if (lesson === 'cost') frameIndex = frames.length - 1;
+        if (lesson === 'trace') frameIndex = frames.findIndex(frame => frame.phase === 'trace');
+        $('lesson-note').textContent = {
+            expand: '① 起点已展开。观察 Q1 和本步八邻居检查，再点“下一步”：下一次取的是整个开放队列中 f 最小的格子，并不一定紧挨当前格。',
+            cost: '② 现在 w = 0，只比较几何步长。记住结果长度，再把软代价权重调到 2，点“直接看结果”。新旧 g 使用不同目标函数，不能直接比较大小；请比较路线和几何长度。',
+            trace: '③ 现在只把终点加入路径。每点一次“下一步”就沿 parent 加入上一格；回到起点后反转，才得到起点到终点的完整路线。'
+        }[lesson];
+        render();
+    });
+}
+window.MiniNavDemo={snapshot:()=>({frame:frames[frameIndex],frameIndex,source:source.slice(),planning:costs.slice(),start,goal,resolution:RES,radius:+$('radius').value,weight:+$('weight').value,unknown:$('unknown').checked,tolerance:+$('tolerance').value,last:frames.at(-1),frames:frames.length}),sweep,octile,inflate,search};preset('wall');
+</script></body></html>

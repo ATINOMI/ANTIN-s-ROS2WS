@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
@@ -34,6 +35,7 @@
 #include "mini_nav_core/navigator/path_postprocessor.hpp"
 #include "mini_nav_core/map/costmap_2d.hpp"
 #include "mini_nav_core/map/inflation_layer.hpp"
+#include "mini_nav_nodes/msg/collision_map.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_nodes
@@ -113,6 +115,7 @@ namespace mini_nav_nodes
             mini_nav_core::InflationParameters inflation_parameters_;
             double cost_travel_multiplier_;
             double goal_tolerance_;
+            double goal_position_tolerance_;
 
             /* Cost constants ----------------------------------------------------*/
 
@@ -127,6 +130,8 @@ namespace mini_nav_nodes
             std::unique_ptr<mini_nav_core::Costmap2D> costmap_;
             /// 原始地图生成的膨胀规划图；不会写回定位所用的 /map。
             std::unique_ptr<mini_nav_core::Costmap2D> planning_costmap_;
+            /// 从同一原始障碍图生成的 0.26 m 车体安全图，供跟踪器检查。
+            std::unique_ptr<mini_nav_core::Costmap2D> safety_costmap_;
             /// 根据 map -> base_footprint 等 TF 获取当前车位，不从 /initialpose 缓存起点。
             std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
             std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -136,6 +141,21 @@ namespace mini_nav_nodes
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_publisher_;
             /// /mini_nav/planning_costmap 的发布器，供 RViz 核对安全区。
             rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr planning_costmap_publisher_;
+            rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr safety_costmap_publisher_;
+            rclcpp::Publisher<msg::CollisionMap>::SharedPtr collision_publisher_;
+            std::vector<mini_nav_core::PathPoint> dynamic_points_;
+            std::vector<mini_nav_core::PathPoint> collision_points_;
+            std::string collision_points_frame_;
+            double observation_uncertainty_{0.03};
+            double localization_uncertainty_{0.03};
+            std::optional<mini_nav_core::PathPoint> actual_start_;
+            struct StableObservation { double first{0}, last{0}; unsigned int count{0}; };
+            std::unordered_map<std::size_t, StableObservation> stable_observations_;
+            double stable_scan_stamp_{-1.0};
+            std::string dynamic_policy_;
+            bool dynamic_replan_{false};
+            bool start_unsafe_{false};
+            std::unique_ptr<mini_nav_core::Costmap2D> collision_source_;
             /// /mini_nav/raw_path 的原始八邻域 A* 路径发布器。
             rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr raw_path_publisher_;
             /// /mini_nav/global_path 的最终路径发布器。

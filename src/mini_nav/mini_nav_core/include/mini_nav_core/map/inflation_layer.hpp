@@ -16,9 +16,9 @@ namespace mini_nav_core
     /**
      * @brief 静态障碍膨胀所需的几何和衰减参数。
      *
-     * robot_radius 与 safety_margin 之和是不可通行区半径；
-     * inflation_radius 是确定障碍物软代价影响的最远距离。硬安全距离
-     * 从禁行格面积或地图外边界量起，需结合车体碰撞包络选取。
+     * robot_radius 与 safety_margin 之和供真实车体安全检查使用；
+     * inscribed_radius 可独立指定膨胀硬区，默认零沿用车体安全半径。
+     * inflation_radius 按官方规则向上取整到整格，距离从源格中心量起。
      */
     struct InflationParameters
     {
@@ -26,25 +26,28 @@ namespace mini_nav_core
         double robot_radius = 0.24;
         /// 外接圆之外额外保留的安全距离，单位：米，允许为零。
         double safety_margin = 0.02;
-        /// 障碍代价向外传播的最大半径，单位：米，不得小于硬安全半径。
+        /// 障碍代价传播半径，单位：米，不得小于车体安全半径或膨胀内切半径。
         double inflation_radius = 0.45;
         /// 软代价的指数衰减系数，单位：1/米；越大则离开安全区后衰减越快。
         double cost_scaling_factor = 10.0;
-        /// 是否让未知格向已知区域传播硬安全区；未知格本身始终禁行。
+        /// 是否将未知格作为完整膨胀源，对应官方同名参数。
         bool inflate_around_unknown = false;
+        /// 膨胀用内切半径，单位：米；零表示沿用 robot_radius + safety_margin。
+        double inscribed_radius = 0.0;
     };
 
     /**
      * @brief 从原始静态图生成独立的膨胀规划图。
      *
-     * 254 障碍格在硬安全半径内写入 253，在硬半径外至
-     * inflation_radius 内写入 1..252 的指数衰减软代价。255 未知格
-     * 仅在 inflate_around_unknown 开启时传播硬安全区，从不传播软代价；
-     * 地图外边界始终保留硬安全距离。
-     * 距离取目标格中心到源格方形面积或地图外边界的最短距离。
-     * 栅格间连续移动的车体扫掠由规划器另外检查；源格保持原值。
-     * 新代价与原格代价取较大值，因此不会降低已有代价；255 未知格
-     * 保持未知。输出沿用输入地图的尺寸、分辨率和原点。
+     * 对齐 Nav2 1.3.12 InflationLayer 的全图更新：按格中心欧氏距离
+     * 分组，四邻域传播且首次访问锁定来源。254 障碍格在硬半径内
+     * 写入 253，外圈指数软代价允许截断到零，传播范围为
+     * ceil(inflation_radius / resolution) 格。
+     * inflate_around_unknown 开启时 255 也作为完整膨胀源。
+     * 接收规则固定为官方默认 inflate_unknown=false：未知格可被
+     * 253 或 254 覆盖，不接收软代价；其余格与新代价取最大值。
+     * 不额外膨胀地图外边界；连续车体扫掠仍由规划器另行检查。
+     * 输出沿用输入尺寸、分辨率和原点，原始地图不变。
      *
      * @param source 原始静态代价地图；函数不会修改它。
      * @param parameters 机器人半径、安全余量、膨胀半径和衰减系数。

@@ -86,7 +86,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "inflate_around_unknown",
             default_value="false",
-            description="Add a hard safety band around unknown cells in both costmaps.",
+            description="Use unknown cells as inflation sources in both costmaps, following Nav2.",
         ),
         DeclareLaunchArgument(
             "x_pose",

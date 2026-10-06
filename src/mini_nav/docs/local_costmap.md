@@ -8,8 +8,9 @@
 
 每帧扫描在扫描时间查询 `odom <- base_footprint` 和 `odom <- 扫描坐标系` 的 TF。
 所有有效射线先清除空闲格，再标记有限距离的障碍端点，以免相邻射线擦除命中点。
-随后对确定障碍做机器人半径、安全余量和衰减代价的膨胀；未知格仅在
-`inflate_around_unknown` 开启时向已知格传播硬安全距离，从不生成软代价。
+随后使用与全局图相同的 Nav2 1.3.12 膨胀核：按格中心距离分组传播，
+外半径向上取整到整格。未知格在 `inflate_around_unknown` 开启时成为完整膨胀源；
+接收行为固定为官方默认 `inflate_unknown=false`，允许硬代价覆盖未知格、拒绝软代价。
 未被刷新超过
 `observation_persistence` 秒的格子恢复为未知；整帧扫描超时或 TF 不可用时，
 整张局部图恢复为未知，并将 `/mini_nav/local_costmap_valid` 发布为 `false`。
@@ -23,10 +24,12 @@
 | `width`, `height` | 4.0 m | 局部窗口尺寸 |
 | `resolution` | 0.05 m | 栅格分辨率 |
 | `robot_radius` | 0.24 m | 机器人半径 |
-| `safety_margin` | 0.02 m | 硬安全余量 |
-| `inflation_radius` | 0.45 m | 确定障碍的软代价最远距离 |
-| `cost_scaling_factor` | 10.0 /m | 软代价指数衰减系数 |
-| `inflate_around_unknown` | `false` | 未知格是否向已知格传播硬安全区 |
+| `safety_margin` | 0.02 m | 真实车体安全余量 |
+| `observation_uncertainty` | 0.03 m | 连续激光端点的额外观测误差预算 |
+| `inscribed_radius` | 0.22549849949589046 m | learning 官方圆足迹含 padding 的膨胀内切半径；0 沿用车体安全半径 |
+| `inflation_radius` | 0.70 m | 确定障碍的软代价最远距离 |
+| `cost_scaling_factor` | 3.0 /m | 软代价指数衰减系数 |
+| `inflate_around_unknown` | `false` | 未知格是否作为完整膨胀源 |
 | `obstacle_max_range` | 2.5 m | 标记障碍的最远距离 |
 | `raytrace_max_range` | 3.0 m | 射线清除的最远距离 |
 | `observation_persistence` | 2.0 s | 单个格子的观测有效期 |
@@ -34,16 +37,30 @@
 | `publish_frequency` | 5 Hz | 地图发布频率 |
 
 0.24 m 半径来自 Waffle 碰撞体的平面外接圆，计算见[规划代价地图](planning_costmap.md#参数与显示)。
-加上 0.02 m 安全余量后，硬禁行距离为 0.26 m；0.45 m 半径只限制确定障碍的
-软代价范围，不会改变硬碰撞阈值。
+加上 0.02 m 安全余量后，真实车体安全半径仍为 0.26 m。
+显示图的膨胀内切半径独立设为 0.22549849949589046 m，外半径 0.70 m、衰减 3.0，
+与 learning 官方膨胀参数一致。节点同时从同一原始观测生成
+`/mini_nav/local_safety_costmap`，其硬半径仍为 0.26 m。
+两张图不会相互再膨胀，也不额外添加窗口外缘硬圈。
 
 两个定位与 A* 启动文件都会启动该节点。RViz 配置
 `rviz/localization_astar.rviz` 默认叠加显示 `Local Costmap` 和 `Planning Costmap`；
 Fixed Frame 为 `map` 时需要定位节点提供 `map -> odom`。
 局部图以 `odom` 为坐标系，窗口跟随机器人；全局规划图仍固定在 `map`。
-该图当前用于观测和调试，
-停车控制尚未接入；后续控制器应同时检查地图有效状态及局部轨迹上的硬障碍，
-并保留静态规划图对固定墙体的约束。
+显示和安全膨胀图用于观测和调试；生产跟踪器订阅原子的
+`/mini_nav/local_collision_map`（`mini_nav_nodes/msg/CollisionMap`）。它同时携带
+未膨胀观测覆盖格、连续端点、0.26 m 车体安全半径、0.03 m 额外端点误差预算和有效性。
+激光命中格在覆盖图中为已观测，不扩大为整个障碍方格；连续端点保留并参与
+0.29 m 最小间距精查。静态墙体及 3D collision cloud 仍按完整占据格面积保守检查。
+射线清除、滚动和过期同步更新格与端点；端点后方未知格仍禁行。
+快照 header 使用真实观测时间，发布定时器不能刷新旧观测的新鲜度。
+跟踪器还检查 `/mini_nav/local_costmap_valid`。扫描超时后膨胀图与原始覆盖图均
+恢复未知，快照无效且端点清空；固定墙体由全局原始静态碰撞图约束。
+
+默认 0.03 m 取自当前仿真 2D LaserScan 的 Gaussian 标准差 0.01 m 的三倍；
+odom 系使用原 0.02 m 车体余量。map 配准实测约 4 cm，超出该预算，
+因此全局原始几何另加 0.03 m 定位预算，合计 0.05 m，并以同时间真值评估检查。
+三倍标准差是统计预算，不是高斯噪声绝对界。更换传感器或定位环境须重新评估。
 
 从工作区根目录启动自研定位示例：
 

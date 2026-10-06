@@ -41,6 +41,26 @@ install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_collision_geometry test/test_collision_geometry.cpp)
+  target_link_libraries(test_collision_geometry ${PROJECT_NAME})
+  target_compile_definitions(test_collision_geometry PRIVATE
+    COLLISION_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
+
+  # 官方库只作为膨胀回归测试的对照，不进入核心库的运行依赖。
+  find_package(nav2_costmap_2d REQUIRED)
+  find_package(nav2_util REQUIRED)
+  find_package(tf2_ros REQUIRED)
+  ament_add_gtest(test_inflation_layer test/test_inflation_layer.cpp)
+  if(TARGET test_inflation_layer)
+    target_link_libraries(test_inflation_layer ${PROJECT_NAME})
+    ament_target_dependencies(test_inflation_layer nav2_costmap_2d nav2_util tf2_ros)
+    find_library(NAV2_LAYERS_LIBRARY layers REQUIRED)
+    target_link_libraries(test_inflation_layer ${NAV2_LAYERS_LIBRARY})
+    target_compile_definitions(test_inflation_layer PRIVATE
+      MINI_NAV_TEST_MAP="${CMAKE_CURRENT_SOURCE_DIR}/../mini_nav_bringup/maps/tb3_learning.pgm")
+    set_tests_properties(test_inflation_layer PROPERTIES
+      ENVIRONMENT "ROS_DOMAIN_ID=219;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST")
+  endif()
 
   ament_add_gtest(test_costmap_2d test/test_costmap_2d.cpp)
   if(TARGET test_costmap_2d)

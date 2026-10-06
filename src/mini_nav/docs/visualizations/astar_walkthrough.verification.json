@@ -1,0 +1,172 @@
+{
+  "verified_at": "2026-10-04T16:56:29.648Z",
+  "cpp_comparisons": [
+    {
+      "name": "wall",
+      "w": 2,
+      "tol": 0.5,
+      "path_cells": 13,
+      "g": 15.976990984134025,
+      "events": 597
+    },
+    {
+      "name": "wall",
+      "w": 0,
+      "tol": 0,
+      "path_cells": 13,
+      "g": 14.071067811865476,
+      "events": 602
+    },
+    {
+      "name": "soft",
+      "w": 0,
+      "tol": 0.5,
+      "path_cells": 10,
+      "g": 9,
+      "events": 97
+    },
+    {
+      "name": "soft",
+      "w": 2,
+      "tol": 0.5,
+      "path_cells": 10,
+      "g": 18.698412698412696,
+      "events": 592
+    },
+    {
+      "name": "soft",
+      "w": 6,
+      "tol": 0.5,
+      "path_cells": 19,
+      "g": 20.858884758402823,
+      "events": 629
+    },
+    {
+      "name": "corner",
+      "w": 2,
+      "tol": 0,
+      "path_cells": 8,
+      "g": 12.48835863537889,
+      "events": 669
+    },
+    {
+      "name": "corner",
+      "w": 6,
+      "tol": 0.5,
+      "path_cells": 10,
+      "g": 20.75716861700658,
+      "events": 1483
+    },
+    {
+      "name": "tolerance",
+      "w": 2,
+      "tol": 0,
+      "path_cells": 0,
+      "g": 0,
+      "events": 1
+    },
+    {
+      "name": "tolerance",
+      "w": 2,
+      "tol": 0.5,
+      "path_cells": 4,
+      "g": 4.333333333333333,
+      "events": 548
+    },
+    {
+      "name": "tolerance",
+      "w": 2,
+      "tol": 0.8,
+      "path_cells": 4,
+      "g": 4.333333333333333,
+      "events": 550
+    }
+  ],
+  "viewports": [
+    1440,
+    1024,
+    800,
+    768,
+    390,
+    320
+  ],
+  "page_errors": [],
+  "checks": [
+    "source inflation and final costs match C++",
+    "path edges pass circular sweep",
+    "single-neighbor updates and parent assignment",
+    "queue selection",
+    "jump to next pop",
+    "rewind and timeline keyboard",
+    "trace grows one node per step",
+    "play pause",
+    "corner rejection",
+    "no page horizontal overflow"
+  ],
+  "html_sha256": "831bbcea62385b0f9851288df858ebf34105640fe2a6789d82a1461981f8e38f",
+  "visual_review": [
+    "1440px desktop screenshot reviewed",
+    "390px mobile screenshot reviewed; map scrolls internally"
+  ],
+  "parent_tree_and_speed": {
+    "verified_at": "2026-10-04T18:01:05.167Z",
+    "reparent_event": 30,
+    "speed_observation": {
+      "slow_1150ms": 1,
+      "fast_1050ms": 17
+    },
+    "viewports": [
+      1440,
+      768,
+      390,
+      320
+    ],
+    "page_errors": [],
+    "checks": [
+      "parent nodes and edges equal current frame",
+      "new edge and replaced edge highlighted",
+      "rewind removes future nodes",
+      "trace colors match path",
+      "node click selects map inspector",
+      "speed selectors synchronized and live change applies",
+      "pause stops timeline",
+      "drag and keyboard movement",
+      "Escape close and reopen",
+      "invalid state has empty tree",
+      "mobile window fits viewport",
+      "reduced motion playback"
+    ],
+    "visual_review": [
+      "Desktop reparent event reviewed",
+      "390px floating window reviewed"
+    ]
+  },
+  "resizable_parent_window": {
+    "verified_at": "2026-10-04T18:05:59.324Z",
+    "handles": [
+      "e",
+      "w",
+      "s",
+      "n",
+      "se",
+      "sw",
+      "ne",
+      "nw"
+    ],
+    "checks": [
+      "eight edges/corners resize with actual pointer gestures",
+      "tree viewport grows with window",
+      "minimum size keeps playback controls visible",
+      "keyboard resizing",
+      "screen boundary clamps",
+      "close and reopen retains size",
+      "playback and nodes survive resize",
+      "390 and 320px viewports fit"
+    ],
+    "page_errors": [],
+    "visual_review": [
+      "enlarged desktop window",
+      "mobile window after resize"
+    ]
+  }
+}

@@ -32,6 +32,12 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @file util.hpp
+ * @brief 迭代误差状态滤波的类型检查和恒等复制工具。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef __MEKFOM_UTIL_HPP__
 #define __MEKFOM_UTIL_HPP__
 
@@ -39,37 +45,70 @@
 #include "../mtk/src/mtkmath.hpp"
 namespace esekfom {
 
+/**
+ * @brief 判断两个模板类型是否相同，主模板返回 false。
+ */
 template <typename T1, typename T2>
 class is_same {
 public:
+    /**
+     * @brief 返回当前类型特化的判断结果。
+     * @return 匹配的特化为 true，主模板为 false。
+     */
     operator bool() {
         return false;
     }
 };
+/**
+ * @brief 相同类型的特化，转换为 bool 时返回 true。
+ */
 template<typename T1>
 class is_same<T1, T1> {
 public:
+    /**
+     * @brief 返回当前类型特化的判断结果。
+     * @return 匹配的特化为 true，主模板为 false。
+     */
     operator bool() {
         return true;
     }
 };
 
+/**
+ * @brief 判断模板参数是否为 double，主模板返回 false。
+ */
 template <typename T>
 class is_double {
 public:
+    /**
+     * @brief 返回当前类型特化的判断结果。
+     * @return 匹配的特化为 true，主模板为 false。
+     */
     operator bool() {
         return false;
     }
 };
 
+/**
+ * @brief double 类型特化，转换为 bool 时返回 true。
+ */
 template<>
 class is_double<double> {
 public:
+    /**
+     * @brief 返回当前类型特化的判断结果。
+     * @return 匹配的特化为 true，主模板为 false。
+     */
     operator bool() {
         return true;
     }
 };
 
+/**
+ * @brief 按值复制并返回输入。
+ * @param x 待复制的值。
+ * @return 与 x 等值的副本。
+ */
 template<typename T>
 static T
 id(const T &x)

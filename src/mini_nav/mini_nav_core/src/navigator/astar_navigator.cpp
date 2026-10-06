@@ -97,6 +97,30 @@ std::vector<MapLocation> AStarPlanner::Plan(
                   goal_tolerance);
 }
 
+/** 使用同一原始几何检查实际起点连接及每条搜索边。 */
+std::vector<MapLocation> AStarPlanner::Plan(
+    const Costmap2D & planning, const CollisionGeometry & geometry,
+    const PathPoint & actual_start, const MapLocation & start,
+    const MapLocation & goal, double goal_tolerance,
+    const CollisionGeometry * terminal_geometry,
+    const CollisionGeometry * start_geometry) const
+{
+    const auto & source = geometry.grid;
+    if (planning.GetSizeInCellsX() != source.GetSizeInCellsX() ||
+        planning.GetSizeInCellsY() != source.GetSizeInCellsY() ||
+        planning.GetResolution() != source.GetResolution() ||
+        planning.GetOriginX() != source.GetOriginX() ||
+        planning.GetOriginY() != source.GetOriginY()) {
+        throw std::invalid_argument("Collision geometry must match planning map");
+    }
+    if (!source.IsInBounds(start.x, start.y)) return {};
+    if (!geometry.IsClear(actual_start, actual_start) ||
+        (start_geometry && !start_geometry->IsClear(actual_start, actual_start))) return {};
+    return PlanImpl(planning, &source, geometry.radius, start, goal,
+                    geometry.include_unknown, goal_tolerance, &geometry, terminal_geometry,
+                    &actual_start, start_geometry);
+}
+
 /**
  * @brief 维护最小 f 值队列、累计代价及父索引，搜索后回溯最终路径。
  *
@@ -120,7 +144,9 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
   const MapLocation & start,
   const MapLocation & goal,
   bool include_unknown_clearance,
-  double goal_tolerance) const
+  double goal_tolerance, const CollisionGeometry * geometry,
+  const CollisionGeometry * terminal_geometry, const PathPoint * actual_start,
+  const CollisionGeometry * start_geometry) const
 {
   // 检查 goal_tolerance 是否为有限非负数
   if (!std::isfinite(goal_tolerance) || goal_tolerance < 0.0) 
@@ -130,17 +156,25 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
   // 获取地图尺寸
   const unsigned int size_x = costmap.GetSizeInCellsX();
   const unsigned int size_y = costmap.GetSizeInCellsY();
+  const auto blocked = [&](unsigned int x, unsigned int y) {
+    if (geometry) {
+      PathPoint point{};
+      geometry->grid.MapToWorld(x, y, point.x, point.y);
+      return !geometry->IsClear(point, point);
+    }
+    return costmap.GetCost(x, y) >= kInscribedInflatedObstacle;
+  };
 
   // 检查起点和终点是否在地图范围内，且不在障碍物上
   if (start.x >= size_x || start.y >= size_y ||                                                 // 检查起点是否越界
       goal.x  >= size_x || goal.y  >= size_y ||                                                 // 检查终点是否越界
-      costmap.GetCost(start.x, start.y) >= kInscribedInflatedObstacle ||                        // 检查起点是否在障碍物上
-      (goal_tolerance == 0.0 && costmap.GetCost(goal.x, goal.y) >= kInscribedInflatedObstacle)) // 检查终点是否在障碍物上（仅当 goal_tolerance 为 0 时检查）
+      (!actual_start && blocked(start.x, start.y)) ||    // 检查起点是否在障碍物上
+      (goal_tolerance == 0.0 && blocked(goal.x, goal.y))) // 检查终点是否在障碍物上（仅当 goal_tolerance 为 0 时检查）
   {
     return {};
   }
 
-  if (source != nullptr) 
+  if (source != nullptr && geometry == nullptr)
   {
     PathPoint start_point{};  // 起点的世界坐标
     PathPoint goal_point{};   // 终点的世界坐标
@@ -149,7 +183,7 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
 
     // 检查起点和终点的圆形扫掠是否安全
     if (!IsCircularSweepClear(*source, start_point, start_point, clearance_radius, include_unknown_clearance) ||
-        (goal_tolerance == 0.0 && !IsCircularSweepClear(*source, goal_point, goal_point, clearance_radius, include_unknown_clearance))) 
+        (goal_tolerance == 0.0 && !IsCircularSweepClear(*source, goal_point, goal_point, clearance_radius, include_unknown_clearance)))
     {
       return {};
     }
@@ -190,8 +224,33 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
   std::priority_queue<OpenNode, std::vector<OpenNode>, CompareOpenNode> open_list;
 
   // 初始化起点的 g 值为 0，并将其加入 open_list。
-  g_score[start_index] = 0;
-  open_list.push({start_index, OctileDistance(start, goal)});
+  if (!actual_start) {
+    g_score[start_index] = 0;
+    open_list.push({start_index, OctileDistance(start, goal)});
+  } else {
+    const auto add_anchor = [&](unsigned int x, unsigned int y) {
+      if (blocked(x, y)) return false;
+      PathPoint point{};
+      costmap.MapToWorld(x, y, point.x, point.y);
+      if (!geometry->IsClear(*actual_start, point) ||
+          (start_geometry && !start_geometry->IsClear(*actual_start, point))) return false;
+      const unsigned int index = GetIndex(x, y, size_x);
+      g_score[index] = std::hypot(point.x - actual_start->x, point.y - actual_start->y) /
+          costmap.GetResolution() * (1.0 + cost_travel_multiplier_ * costmap.GetCost(x, y) / 252.0);
+      open_list.push({index, g_score[index] + OctileDistance({x, y}, goal)});
+      return true;
+    };
+    // 所属格中心可连通时保持原入口；否则以全部安全邻接中心作为搜索根。
+    if (!add_anchor(start.x, start.y)) {
+      for (int dx = -1; dx <= 1; ++dx) for (int dy = -1; dy <= 1; ++dy) {
+        if (dx == 0 && dy == 0) continue;
+        const int x = static_cast<int>(start.x) + dx;
+        const int y = static_cast<int>(start.y) + dy;
+        if (x >= 0 && y >= 0 && x < static_cast<int>(size_x) && y < static_cast<int>(size_y))
+          add_anchor(static_cast<unsigned int>(x), static_cast<unsigned int>(y));
+      }
+    }
+  }
 
   constexpr int directions[8][2] = {
     { 0,  1},  // Up
@@ -224,8 +283,14 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
         // 标记当前节点为已扩展
         expanded[current.index] = true;
 
+        PathPoint terminal_point{};
+        costmap.MapToWorld(current.index % size_x, current.index / size_x,
+            terminal_point.x, terminal_point.y);
+        // 路线可暂不融合动态点，但停车点必须通过当前完整几何检查。
+        const bool terminal_clear = !terminal_geometry ||
+            terminal_geometry->IsClear(terminal_point, terminal_point);
         // 如果当前节点是目标节点，则搜索结束
-        if (current.index == goal_index) 
+        if (current.index == goal_index && terminal_clear)
         {
             end_index = goal_index;
             break;  // Goal reached
@@ -239,7 +304,7 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
         const double distance = std::hypot( static_cast<double>(current_x) - goal.x,
                                             static_cast<double>(current_y) - goal.y) * costmap.GetResolution();
 
-        if (goal_tolerance > 0.0 &&           // 启用 goal_tolerance
+        if (terminal_clear && goal_tolerance > 0.0 &&           // 启用 goal_tolerance
             distance <= goal_tolerance &&     // 当前节点在容差范围内
             (distance < nearest_distance ||   // 当前节点比最近的可达安全格更近
              (distance == nearest_distance && g_score[current.index] < g_score[nearest_index]))) // 当前节点与最近的可达安全格距离相等,但是代价更小
@@ -261,14 +326,14 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
 
             // 检查邻居节点是否是障碍物
             const auto cell_cost = costmap.GetCost(next_x, next_y);
-            if (cell_cost >= kInscribedInflatedObstacle) continue;
+            if (blocked(next_x, next_y)) continue;
 
             // 斜向移动会扫过两侧相邻格；任一侧为禁行区时不能穿角。
             const bool diagonal = direction[0] != 0 && direction[1] != 0; // 判断是否为斜向移动
 
             if (diagonal &&  // 是否斜向移动
-                (costmap.GetCost(next_x, current_y) >= kInscribedInflatedObstacle || // 检查水平邻居是否为障碍物
-                 costmap.GetCost(current_x, next_y) >= kInscribedInflatedObstacle))  // 检查垂直邻居是否为障碍物
+                (blocked(next_x, current_y) || // 检查水平邻居是否为障碍物
+                 blocked(current_x, next_y)))  // 检查垂直邻居是否为障碍物
             {
                 continue;
             }
@@ -296,8 +361,9 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
                 source->MapToWorld(current_x, current_y, current_point.x, current_point.y);
                 source->MapToWorld(mx, my, next_point.x, next_point.y);
                 
-                if (!IsCircularSweepClear(*source, current_point, next_point, clearance_radius,
-                                          include_unknown_clearance)) 
+                if (!(geometry ? geometry->IsClear(current_point, next_point) :
+                      IsCircularSweepClear(*source, current_point, next_point, clearance_radius,
+                                          include_unknown_clearance)))
                 {
                     continue;
                 }
@@ -322,8 +388,8 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
     std::vector<MapLocation> path;
     //使用 current_index 来追踪当前节点的索引，从目标节点开始回溯到起点节点。
     unsigned int current_index = end_index;
-    //当 current_index 不等于起点索引时，继续回溯
-    while (current_index != start_index) 
+    //当 current_index 还有父节点时，继续回溯至安全起点锚点
+    while (parent[current_index] != invalid_parent)
     {
         const unsigned int x = current_index % size_x;
         const unsigned int y = current_index / size_x;
@@ -332,7 +398,7 @@ std::vector<MapLocation> AStarPlanner::PlanImpl(
     }
 
     // 将起点加入路径，并将路径反转，使其从起点到终点的顺序正确。
-    path.push_back(start);
+    path.push_back({current_index % size_x, current_index / size_x});
     std::reverse(path.begin(), path.end());
     return path;
 }

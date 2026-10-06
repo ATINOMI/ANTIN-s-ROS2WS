@@ -212,10 +212,15 @@ void NavigationManagerNode::plan()
     if (!task_ || request_pending_ || !planner_->action_server_is_ready() ||
         !controller_->action_server_is_ready()) return;
     lease(false); can_follow_ = false;
+    // 内部换路先解除旧句柄身份，再取消；迟到的取消结果不能结束新跟踪。
+    auto previous_follow = follow_goal_;
+    follow_goal_.reset();
+    if (previous_follow) controller_->async_cancel_goal(previous_follow);
     /* 捕获任务代数而非只检查 task_ 非空：旧任务的延迟响应可能在新任务开始后到达。
      * 旧句柄仍要取消，但不能把其路径、状态或结果提交给新的导航任务。 */
     const auto token = generation_;
     Plan::Goal goal; goal.goal = task_->get_goal()->pose; goal.use_start = false;
+    goal.planner_id = replans_ >= 2 ? "AStarDynamic" : "AStar";
     request_pending_ = true; request_started_ = last_plan_ = Clock::now();
     rclcpp_action::Client<Plan>::SendGoalOptions options;
     options.goal_response_callback = [this, token](auto handle) {
@@ -227,7 +232,10 @@ void NavigationManagerNode::plan()
         if (token != generation_ || !task_) return;
         plan_goal_.reset();
         if (wrapped.code != rclcpp_action::ResultCode::SUCCEEDED || wrapped.result->path.poses.empty()) {
-            request_pending_ = false; status("planning_failed"); lease(false); return;
+            request_pending_ = false;
+            status(wrapped.result && wrapped.result->error_code == Plan::Result::START_OCCUPIED ?
+                   "start_in_collision" : "planning_failed");
+            lease(false); return;
         }
         endpoint_ = wrapped.result->path.poses.back();
         Follow::Goal follow; follow.path = wrapped.result->path;
@@ -286,7 +294,8 @@ void NavigationManagerNode::tick()
     const bool healthy = ready();
     bool blocked = !follow_goal_ || !can_follow_ || controller_status_ != "tracking" || !healthy;
     if (!healthy) { lease(false); status("waiting_for_localization_or_sensor"); }
-    else if (follow_goal_ && can_follow_ && controller_status_ == "tracking") lease(true);
+    else if (follow_goal_ && can_follow_ &&
+             (controller_status_ == "tracking" || controller_status_ == "avoiding_obstacle")) lease(true);
     if (motion_enabled_ && current - controller_received_ > std::chrono::milliseconds(800)) {
         lease(false); blocked = true; status("controller_unavailable");
     }

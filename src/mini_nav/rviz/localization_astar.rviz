@@ -20,12 +20,12 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    - Alpha: 0.699999988079071
+    - Alpha: 1
       Binary representation: false
       Binary threshold: 100
       Class: rviz_default_plugins/Map
       Color Scheme: map
-      Draw Behind: false
+      Draw Behind: true
       Enabled: true
       Name: Map
       Topic:
@@ -59,7 +59,7 @@ Visualization Manager:
         Value: /mini_nav/planning_costmap
       Use Timestamp: false
       Value: true
-    - Alpha: 0.65
+    - Alpha: 0.7
       Binary representation: false
       Class: rviz_default_plugins/Map
       Color Scheme: costmap

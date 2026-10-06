@@ -10,6 +10,7 @@
 
 #include "mini_nav_core/map/costmap_2d.hpp"
 #include "mini_nav_core/map/inflation_layer.hpp"
+#include "mini_nav_core/navigator/path_postprocessor.hpp"
 
 namespace mini_nav_core
 {
@@ -67,7 +68,7 @@ namespace mini_nav_core
          * @param stamp 观测时刻，秒。
          * @return 标记成功为 true；未居中、越界或时间非有限为 false。
          */
-        bool MarkObstacle(double x, double y, double stamp);
+        bool MarkObstacle(double x, double y, double stamp, bool precise = true);
         /**
          * @brief 把观测超时或时间回跳后不再可信的格恢复为未知。
          *
@@ -89,10 +90,16 @@ namespace mini_nav_core
          */
         const Costmap2D & Raw() const;
 
+        /** 覆盖图保留未知区，动态 lethal 改由同快照的连续端点表示。 */
+        Costmap2D CollisionGrid() const;
+        std::vector<PathPoint> ObstaclePoints() const;
+
     private:
         Costmap2D raw_;
         InflationParameters inflation_;
         std::vector<double> observed_at_;
+        std::vector<std::vector<PathPoint>> points_;
+        std::vector<bool> opaque_cells_;
         bool centered_ = false;
     };
 }

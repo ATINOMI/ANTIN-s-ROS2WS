@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mini_nav · 跟着 A* 想一步</title>
+<style>
+:root{--bg:#f4f3ee;--paper:#fffefa;--ink:#202a33;--muted:#65717b;--line:#dbdfde;--blue:#245cd0;--orange:#bd531e;--green:#207560;--purple:#7754b4;--mono:ui-monospace,SFMono-Regular,Consolas,monospace; color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,"Noto Sans CJK SC",sans-serif;line-height:1.65}button,input,select{font:inherit}button,select{cursor:pointer}button{color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:8px 13px;font-size:14px}button:hover{border-color:var(--blue)}button:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid #edaa34;outline-offset:3px}button.primary{background:var(--blue);color:white;border-color:var(--blue)}main{max-width:1360px;margin:auto;padding:26px 32px 40px}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:16px;gap:16px}.brand{font:700 12px var(--mono);letter-spacing:.13em;color:var(--blue)}.edition{font-size:12px;color:var(--muted)}.hero{display:flex;justify-content:space-between;align-items:center;gap:32px;padding:24px 0}h1{font-size:clamp(28px,3.5vw,44px);line-height:1.2;letter-spacing:-.045em;margin:0 0 10px}p{margin:0}h2,h3{margin:0;line-height:1.4}.hero p{color:var(--muted);font-size:15px}.hero-equation{white-space:nowrap;font:30px var(--mono);padding:15px 22px;border-left:1px solid var(--line)}.g{color:var(--green)}.h{color:var(--purple)}.f{color:var(--blue)}.scenarios{display:flex;gap:8px;flex-wrap:wrap}.scenarios button{padding:10px 16px}.scenarios button[aria-pressed=true]{background:var(--ink);color:white;border-color:var(--ink)}.brief{display:flex;justify-content:space-between;gap:24px;margin:14px 0 20px;font-size:14px;color:var(--muted)}.brief strong{color:var(--ink)}.parameters{display:flex;gap:18px;align-items:center;flex-wrap:wrap}.parameters label{display:flex;gap:9px;align-items:center;white-space:nowrap;font-size:13px}.parameters input{width:95px;accent-color:var(--blue)}select{border:1px solid var(--line);background:var(--paper);border-radius:5px;padding:4px;color:var(--ink)}.lab{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;align-items:start}.map-card,.reason,.queue-card,.inspector{background:var(--paper);border:1px solid var(--line);border-radius:12px}.lab>div,aside{min-width:0}.map-card{overflow:hidden}.map-toolbar{display:flex;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);align-items:center}.map-toolbar h2{font-size:16px}.map-toolbar label{font-size:12px;color:var(--muted)}.map-scroll{padding:16px 18px 8px;overflow:auto}.map-wrap{position:relative;min-width:448px;width:min(100%,640px);margin:auto;aspect-ratio:16/12}.grid{display:grid;grid-template-columns:repeat(16,1fr);grid-template-rows:repeat(12,1fr);gap:2px;width:100%;height:100%;background:#e9ecea;padding:2px}.cell{border:0;border-radius:3px;background:#fafbf8;padding:0;position:relative;line-height:1;font-family:var(--mono);font-size:11px;min-width:0;min-height:0;isolation:isolate}.cell.wall{background:#35434e;color:white}.cell.hard{background:repeating-linear-gradient(135deg,#d9dedc 0px,#d9dedc 3px,#edf0eb 3px,#edf0eb 6px)}.cell.closed:after{content:"";position:absolute;inset:3px;background:#c7dfd6;border-radius:2px;z-index:-1}.cell.open{box-shadow:inset 0 0 0 2px #7399df}.cell.current{background:#fff1df;box-shadow:inset 0 0 0 3px var(--orange)}.cell.next{box-shadow:inset 0 0 0 3px var(--blue)}.cell.neighbor{box-shadow:inset 0 0 0 3px #a045aa}.cell.route{background:#dce8ff!important}.cell.route:after{display:none}.cell.selected{outline:3px solid #181f27;outline-offset:-3px}.cell.start,.cell.goal{font-size:16px;font-weight:800}.cell.start{color:var(--green)}.cell.goal{color:var(--orange)}.cell .dot{display:block;width:5px;height:5px;border-radius:50%;background:#7b9d92;margin:auto}.cell .label{position:relative;z-index:3;background:inherit}.map-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}.axis-note{font-size:11px;color:var(--muted);margin-top:5px}.legend{display:flex;gap:7px 16px;flex-wrap:wrap;padding:4px 18px 12px;font-size:12px;color:var(--muted)}.legend span{display:flex;align-items:center;gap:5px}.legend i{display:inline-block;width:11px;height:11px;border-radius:2px}.transport{padding:14px 18px;background:#f7f8f4;border-top:1px solid var(--line)}.buttons{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.buttons .end{margin-left:auto}.scrub{display:flex;gap:12px;align-items:center;margin-top:10px}.scrub input{width:100%;accent-color:var(--blue);min-width:30px}.scrub output{font:12px var(--mono);white-space:nowrap;color:var(--muted)}.stage-line{display:flex;gap:10px;margin-top:9px;font-size:12px;color:var(--muted)}.stage-line b{color:var(--blue)}aside{display:grid;gap:14px}.reason{padding:20px;min-height:232px;border-top:3px solid var(--blue)}.eyebrow{font:700 11px var(--mono);letter-spacing:.09em;color:var(--blue);margin-bottom:8px}.reason h2{font-size:22px;margin-bottom:10px}.reason p{font-size:14px;color:#586570}.calculation{margin-top:14px;padding:10px 12px;background:#edf2fb;border-radius:6px;font:13px/1.7 var(--mono);overflow-wrap:anywhere}.queue-card{padding:17px}.card-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:8px}.card-heading h3{font-size:15px}.card-heading small{color:var(--muted);font-size:12px}.queue-head,.queue-row{display:grid;grid-template-columns:30px 1fr 45px 45px 49px;align-items:center;gap:5px}.queue-head{font-size:11px;color:var(--muted);padding:0 8px 6px}.queue-row{width:100%;font:12px var(--mono);padding:8px;margin-bottom:5px;text-align:right}.queue-row span:nth-child(2){text-align:left}.queue-row:first-child{background:#edf2fb;border-color:#a9bfe9}.queue-row .rank{color:var(--blue);font-weight:700}.queue-note{font-size:12px;color:var(--muted);margin-top:8px}.inspector{padding:17px}.inspector p{font-size:13px;color:var(--muted)}.scores{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.scores>div{background:#f2f4ef;border-radius:5px;padding:7px 10px}.scores strong{display:block;font:21px var(--mono)}.scores small{font-size:11px}.parent-value{font:12px var(--mono);padding-top:9px;border-top:1px solid var(--line)}.result-strip{margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 18px;background:#e9efe6;border:1px solid #cedbc8;border-radius:9px;font-size:14px}.result-strip strong{color:var(--green)}.result-strip button{white-space:nowrap}.understand{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;margin:32px 0}.understand article{border-top:2px solid var(--line);padding-top:14px}.understand h3{font-size:16px;margin:5px 0 8px}.understand p{font-size:14px;color:var(--muted)}.number{font:12px var(--mono);color:var(--blue)}details{border-top:1px solid var(--line);padding:15px 0;font-size:13px;color:var(--muted)}summary{cursor:pointer;font-weight:650;color:var(--ink)}details p{margin-top:10px;max-width:980px}details ul{padding-left:22px}a{color:var(--blue)}code{font-family:var(--mono);overflow-wrap:anywhere}footer{font-size:12px;color:var(--muted);margin-top:12px}.mobile-hint{display:none}.case-help{max-width:650px}input[type=checkbox]{accent-color:var(--blue)}
+@media(min-width:1450px){main{padding-top:35px}.hero{padding:30px 0}}
+@media(max-width:1000px){main{padding:22px}.lab{grid-template-columns:minmax(0,1fr) 310px}.map-scroll{padding:12px}.brief{flex-direction:column;gap:12px}.hero-equation{font-size:24px}.queue-head,.queue-row{grid-template-columns:25px 1fr 40px 40px 44px;gap:3px}}
+@media(max-width:800px){main{padding:18px 14px}.hero{padding:22px 0}.hero-equation{display:none}.edition{font-size:10px}.lab{grid-template-columns:1fr}aside{grid-template-columns:1fr 1fr}.reason{grid-column:1/-1;min-height:0}.brief{margin-bottom:15px}.understand{grid-template-columns:1fr;gap:18px}.scenarios{gap:6px}.scenarios button{padding:8px 10px;font-size:13px}.map-toolbar{padding:12px}.result-strip{align-items:start}.cell{font-size:10px}}
+@media(max-width:480px){aside{grid-template-columns:1fr}.reason{grid-column:auto}.mobile-hint{display:inline}.map-scroll{padding:10px}.buttons .end{margin-left:0}.buttons button{font-size:12px;padding:8px 10px}.parameters{gap:10px}.parameters label{font-size:12px}.parameters input{width:82px}.result-strip{display:block}.result-strip button{margin-top:10px}.transport{padding:12px}.hero p{font-size:14px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+@media(min-width:801px) and (max-height:950px){.hero{padding:18px 0}.map-wrap{width:min(100%,510px)}.brief{margin:10px 0 14px}.reason{min-height:0;padding:16px}.reason h2{font-size:20px}.reason p{font-size:13px}.queue-card,.inspector{padding:14px}.calculation{margin-top:10px}}
+@media(max-width:800px){aside{display:contents}.reason{grid-row:1}.lab>div{grid-row:2}.queue-card{grid-row:3}.inspector{grid-row:4}}
+
+.speed-label{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+.tree-window{position:fixed;right:22px;bottom:22px;width:590px;max-width:calc(100vw - 16px);min-width:min(320px,calc(100vw - 16px));height:490px;max-height:calc(100dvh - 16px);min-height:min(380px,calc(100dvh - 16px));z-index:20;background:var(--paper);border:1px solid #aebdd6;border-radius:12px;box-shadow:0 18px 65px #1c304b40;display:flex;flex-direction:column;overflow:hidden}
+.tree-window[hidden]{display:none}.tree-header{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#eaf0fb;border-bottom:1px solid #cdd8eb;padding:12px 15px;cursor:move;touch-action:none;user-select:none}.tree-header h2{font-size:16px}.tree-header small{display:block;font-size:11px;color:var(--muted)}.tree-header button{padding:5px 11px}.tree-body{padding:12px 15px 0}.tree-event{font-size:13px;line-height:1.6;min-height:44px}.tree-meta{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);margin-top:7px}.tree-viewport{margin:10px 15px;flex:1;min-height:80px;overflow:auto;border:1px solid var(--line);border-radius:6px;background:#f7f9fc;overscroll-behavior:contain}.tree-canvas{position:relative;min-width:100%;min-height:100%}.tree-canvas svg{position:absolute;left:0;top:0;pointer-events:none}.tree-node{position:absolute;width:100px;height:43px;padding:3px 6px;background:#edf2fb;border:1px solid #86a6dc;font:12px/1.5 var(--mono);border-radius:6px}.tree-node small{display:block;font-size:10px;color:var(--muted)}.tree-node.expanded{background:#e1eee7;border-color:#8eb9a4}.tree-node.changed{background:#fff0c5;border:2px solid #b9871d}.tree-node.path-node{background:#dbe7ff;border:2px solid var(--blue)}.tree-node.selected{outline:2px solid var(--ink);outline-offset:2px}.tree-depth{position:absolute;top:8px;font-size:10px;color:var(--muted);width:100px;text-align:center}.tree-footer{padding:8px 15px 12px;border-top:1px solid var(--line);background:#f7f8f4}.tree-footer .buttons{gap:6px}.tree-footer button{font-size:12px;padding:6px 9px}.tree-legend{font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.7}.tree-follow{margin-left:auto;font-size:11px;white-space:nowrap}.tree-empty{padding:20px;font-size:13px;color:var(--muted)}
+@media(max-width:600px){.tree-window{right:12px;bottom:12px;height:460px}.tree-header{padding:9px 12px}.tree-body{padding:9px 12px 0}.tree-follow{margin-left:0}.tree-event{min-height:44px}}
+
+.tree-resize{position:absolute;z-index:2;touch-action:none;user-select:none;background:transparent;border:0;padding:0;border-radius:0}
+.tree-resize:hover{background:#245cd022}.tree-resize[data-edge=n],.tree-resize[data-edge=s]{left:12px;right:12px;height:7px;cursor:ns-resize}
+.tree-resize[data-edge=n]{top:0}.tree-resize[data-edge=s]{bottom:0}
+.tree-resize[data-edge=e],.tree-resize[data-edge=w]{top:12px;bottom:12px;width:7px;cursor:ew-resize}
+.tree-resize[data-edge=e]{right:0}.tree-resize[data-edge=w]{left:0}
+.tree-resize[data-edge=nw],.tree-resize[data-edge=ne],.tree-resize[data-edge=sw],.tree-resize[data-edge=se]{width:14px;height:14px}
+.tree-resize[data-edge=nw]{top:0;left:0;cursor:nwse-resize}.tree-resize[data-edge=ne]{top:0;right:0;cursor:nesw-resize}
+.tree-resize[data-edge=sw]{bottom:0;left:0;cursor:nesw-resize}.tree-resize[data-edge=se]{bottom:0;right:0;cursor:nwse-resize}.tree-resize[data-edge=se]::after{content:"";position:absolute;right:2px;bottom:2px;width:12px;height:12px;pointer-events:none;background:repeating-linear-gradient(135deg,transparent 0 3px,#6982ab 3px 4px,transparent 4px 7px);clip-path:polygon(100% 0,100% 100%,0 100%)}
+.tree-resize:focus-visible{outline:2px solid #edaa34;outline-offset:-2px}
+.tree-header,.tree-body,.tree-footer{flex-shrink:0}
+</style></head>
+<body><main>
+<header><div class="brand">MINI_NAV / A* WALKTHROUGH</div><div class="edition">可交互的源码讲解 · 2026.10.05</div></header>
+<section class="hero"><div><h1>跟着 A*，想一步。</h1><p>它还没找到路。它只知道：下一次，哪个格子最值得检查。</p></div><div class="hero-equation"><span class="f">f</span> = <span class="g">g</span> + <span class="h">h</span></div></section>
+<nav class="scenarios" aria-label="选择实验"><button data-case="wall" aria-pressed="true">01 绕过一堵墙</button><button data-case="soft" aria-pressed="false">02 最短，还是更安全？</button><button data-case="corner" aria-pressed="false">03 为什么不能穿角？</button><button data-case="tolerance" aria-pressed="false">04 目标在墙里</button></nav>
+<div class="brief"><p id="case-help" class="case-help"></p><div class="parameters"><label for="weight">软代价 w <input id="weight" type="range" min="0" max="6" step=".5" value="2"><output id="weight-value">2.0</output></label><label for="tolerance">容差 <select id="tolerance"><option value="0">0 m</option><option value="0.5" selected>0.5 m</option><option value="0.8">0.8 m</option></select></label></div></div>
+<section class="lab" aria-label="A 星搜索实验台">
+<div>
+<div class="map-card"><div class="map-toolbar"><h2>搜索发生在这里</h2><label><input type="checkbox" id="show-f"> 显示格子的 f 值</label></div>
+<div class="transport"><div class="buttons"><button id="previous" aria-label="返回上一步">←</button><button class="primary" id="next">下一步 →</button><button id="play">播放</button><label class="speed-label" for="speed">倍速 <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label><button id="open-tree" aria-controls="tree-window" aria-expanded="false">parent 树 ↗</button><button id="jump">下次出队</button><button id="finish" class="end">完整路径</button><button id="reset">重来</button></div><div class="scrub"><label for="timeline" hidden>搜索回放进度</label><input id="timeline" type="range" min="0" max="1" value="0"><output id="progress">0 / 0</output></div><div class="stage-line" id="stages"></div></div>
+<div class="map-scroll"><div class="map-wrap"><div id="grid" class="grid" role="group" aria-label="栅格地图，点击查看代价和父节点"></div><svg id="overlay" class="map-overlay" viewBox="0 0 16 12" aria-hidden="true"></svg></div><div class="axis-note">S 起点 · G 目标 · x 向右，y 向上 · 每格 0.20 m · 橙圆 = 车体安全半径 <span class="mobile-hint">· 可横向滑动地图</span></div></div>
+<div class="legend"><span><i style="background:#35434e"></i>障碍</span><span><i style="background:#d9dedc"></i>硬安全区</span><span><i style="background:#f2d5a3"></i>软代价</span><span><i style="border:2px solid #7399df"></i>待展开</span><span><i style="background:#c7dfd6"></i>已展开</span><span><i style="background:#bd531e"></i>当前格</span><span><i style="background:#a045aa"></i>本次邻居</span><span><i style="background:#245cd0"></i>回溯路径</span></div>
+</div>
+<div class="result-strip"><p id="result"><strong>搜索 ≠ 路径。</strong>绿色格子只是被检查过；选定终点后，才能沿 parent 找回路线。</p><button id="trace">从回溯开始 ↗</button></div>
+</div>
+<aside><section class="reason" aria-live="polite"><div id="phase" class="eyebrow"></div><h2 id="reason-title"></h2><p id="reason-copy"></p><div id="calculation" class="calculation"></div></section>
+<section class="queue-card"><div class="card-heading"><h3>谁会先出队？</h3><small id="queue-count"></small></div><div class="queue-head"><span>顺位</span><span>格子</span><span class="g">g</span><span class="h">h</span><span class="f">f ↓</span></div><div id="queue"></div><p class="queue-note" id="queue-note"></p></section>
+<section class="inspector"><div class="card-heading"><h3 id="picked-title">格子的账本</h3><small>点击地图 / 队列</small></div><div class="scores"><div><small class="g">已经付出 g</small><strong id="g"></strong></div><div><small class="h">剩余下界 h</small><strong id="h"></strong></div><div><small class="f">预计总代价 f</small><strong id="f"></strong></div></div><p id="cell-state"></p><div class="parent-value" id="parent"></div></section></aside>
+</section>
+<section class="understand" aria-label="三个关键理解"><article><span class="number">01 / 选择</span><h3>选全局最小的 f，不是最近的邻居</h3><p>开放队列保存所有已发现、还未展开的格子。每次重新取最小 f，所以搜索前沿可以跳到地图另一处；机器人并没有跟着跳。</p></article><article><span class="number">02 / 更新</span><h3>发现更便宜的走法，才改 parent</h3><p>新 g = 当前 g + 本步代价。比原记录更小，且整段车体扫掠安全，才记录“从当前格来”。parent 保存当前最优的到达方式。</p></article><article><span class="number">03 / 回溯</span><h3>从终点倒着找，最后把顺序反过来</h3><p>搜索树有许多分支，最终路径只有一条。终点 → parent → … → S，反转之后才是机器人需要的 S → 终点。</p></article></section>
+<details><summary>对照 mini_nav 源码：这份演示实现了什么？</summary>
+<p>依据 <a href="../../mini_nav_core/src/navigator/astar_navigator.cpp">astar_navigator.cpp / PlanImpl</a> 的安全重载：八邻域、最小 f 队列、禁止斜向穿角、非负软代价、逐边圆盘扫掠，以及原目标优先的容差终点选择。界面把一次展开拆成“出队 + 八次邻居检查”，方便观察；源码在一个循环里完成这些检查。</p>
+<p><code>step = L × (1 + w × c / 252)</code>，L 为 1 或 √2，c 是进入格的代价。<code>h = max(dx,dy) + (√2−1) × min(dx,dy)</code>，忽略障碍和软代价，因此是剩余代价下界。g、h 按格计；容差按米计。253、254、255 均禁行。</p>
+<p>规划图来自 <a href="../../mini_nav_core/src/map/inflation_layer.cpp">InflateCostmap</a>；扫掠对应 <a href="../../mini_nav_core/src/navigator/path_postprocessor.cpp">IsCircularSweepClear</a>。普通场景采用半径 0.26 m、膨胀半径 0.45 m、衰减 10 /m；穿角场景用 0.06 m 小圆盘，单独突出穿角规则。参数参考 <a href="../../mini_nav_bringup/config/planning_costmap.yaml">planning_costmap.yaml</a>。</p>
+<p>这是 16 × 12 的教学地图与 JavaScript 重现，不运行 ROS。只显示 A* 原始格中心路径，不模拟路径平滑或机器人跟踪。队列表按格去重，只列前五名；C++ 堆保留重复项，出队时跳过已展开格。同 f 时演示按入队顺序排列，C++ 未指定同分顺序，等价路线和展开次序可能不同。</p>
+<p>容差不是“进入圆圈就停”：原目标不可达时，要搜完可达区域，再选容差内距离原目标最近的已展开安全格，同距离再比 g。参数只改变本页。</p>
+</details>
+<footer>阅读路线：先按“下一步”观察一个邻居如何入队，再用“下次出队”看搜索前沿，最后点“从回溯开始”。</footer>
+</main>
+<section id="tree-window" class="tree-window" role="dialog" aria-modal="false" aria-labelledby="tree-title" hidden>
+<div id="tree-drag" class="tree-header" tabindex="0" aria-label="移动 parent 树窗口：拖动标题栏，或使用方向键">
+<div><h2 id="tree-title">parent 树 · 一步步搭建</h2><small>拖动标题栏移动 · 拖动边缘或角落拉伸 · Esc 关闭</small></div><button id="close-tree" aria-label="关闭 parent 树窗口">×</button></div>
+<div class="tree-body"><p id="tree-event" class="tree-event"></p><div class="tree-meta"><span id="tree-count"></span><span id="tree-progress"></span></div></div>
+<div id="tree-viewport" class="tree-viewport" tabindex="0" aria-label="parent 树，可横向和纵向滚动"><div id="tree-canvas" class="tree-canvas"><svg id="tree-edges" aria-hidden="true"></svg><div id="tree-nodes"></div></div></div>
+<div class="tree-footer"><p class="tree-legend">箭头：孩子 → parent · 黄色：本步写入 · 绿线：新连接 · 虚线：被替换的旧连接 · 蓝色：回溯路径</p><div class="buttons"><button id="tree-previous" aria-label="树回放上一步">←</button><button id="tree-next">下一步 →</button><button id="tree-play">播放</button><label class="speed-label" for="tree-speed">倍速 <select id="tree-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label><label class="tree-follow"><input id="tree-follow" type="checkbox" checked> 跟随变化</label></div></div>
+<button class="tree-resize" data-edge="n" aria-label="调整窗口上边缘，方向键调整"></button>
+<button class="tree-resize" data-edge="s" aria-label="调整窗口下边缘，方向键调整"></button>
+<button class="tree-resize" data-edge="e" aria-label="调整窗口右边缘，方向键调整"></button>
+<button class="tree-resize" data-edge="w" aria-label="调整窗口左边缘，方向键调整"></button>
+<button class="tree-resize" data-edge="nw" aria-label="拖动左上角调整窗口大小，方向键调整"></button>
+<button class="tree-resize" data-edge="ne" aria-label="拖动右上角调整窗口大小，方向键调整"></button>
+<button class="tree-resize" data-edge="sw" aria-label="拖动左下角调整窗口大小，方向键调整"></button>
+<button class="tree-resize" data-edge="se" aria-label="拖动右下角调整窗口大小，方向键调整"></button>
+</section>
+<script>
+'use strict';
+const W=16,H=12,RES=.2,N=W*H,DIRS=[[0,1],[1,0],[0,-1],[-1,0],[1,1],[1,-1],[-1,-1],[-1,1]];
+const $=id=>document.getElementById(id),idx=(x,y)=>y*W+x,xy=i=>[i%W,Math.floor(i/W)],fmt=n=>Number.isFinite(n)?n.toFixed(2):'∞',coord=i=>'('+xy(i).join(',')+')';
+function inflate(src,r,unknown){const out=src.slice();for(let i=0;i<N;i++){const [x,y]=xy(i);if(src[i]===255)continue;let c=out[i];for(let j=0;j<N;j++){if(src[j]!==254&&!(src[j]===255&&unknown))continue;const [ox,oy]=xy(j),d=Math.hypot(Math.max(0,Math.abs(x-ox)-.5),Math.max(0,Math.abs(y-oy)-.5))*RES;if(d===0||d>.45)continue;const v=d<=r?253:Math.max(1,Math.floor(252*Math.exp(-10*(d-r))));if(src[j]===255&&v<253)continue;c=Math.max(c,v);}
+const edge=Math.min(x+.5,W-x-.5,y+.5,H-y-.5)*RES;if(edge<=r)c=Math.max(c,253);out[i]=c;}return out;}
+function pointSegment(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy,t=l===0?0:Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l));return (p[0]-a[0]-t*dx)**2+(p[1]-a[1]-t*dy)**2;}
+function pointRect(p,x0,y0,x1,y1){return (p[0]-Math.max(x0,Math.min(x1,p[0])))**2+(p[1]-Math.max(y0,Math.min(y1,p[1])))**2;}
+function segmentRect(a,b,x0,y0,x1,y1){let enter=0,leave=1;const dx=b[0]-a[0],dy=b[1]-a[1];function clip(p,q){if(p===0)return q>=0;const t=q/p;if(p<0){if(t>leave)return false;enter=Math.max(enter,t);}else{if(t<enter)return false;leave=Math.min(leave,t);}return true;}
+if(clip(-dx,a[0]-x0)&&clip(dx,x1-a[0])&&clip(-dy,a[1]-y0)&&clip(dy,y1-a[1])&&enter<=leave)return 0;
+return Math.min(pointRect(a,x0,y0,x1,y1),pointRect(b,x0,y0,x1,y1),...[[x0,y0],[x0,y1],[x1,y0],[x1,y1]].map(p=>pointSegment(p,a,b)));}
+function sweep(src,i,j,r,unknown){const a=xy(i).map(v=>(v+.5)*RES),b=xy(j).map(v=>(v+.5)*RES);if(![a,b].every(p=>p[0]>r&&p[0]<W*RES-r&&p[1]>r&&p[1]<H*RES-r))return false;for(let k=0;k<N;k++){if(src[k]<253||(!unknown&&src[k]===255))continue;const [x,y]=xy(k);if(segmentRect(a,b,x*RES,y*RES,(x+1)*RES,(y+1)*RES)<=r*r+1e-9)return false;}return true;}
+function octile(i,j){const [x,y]=xy(i),[gx,gy]=xy(j),dx=Math.abs(x-gx),dy=Math.abs(y-gy);return Math.max(dx,dy)+(Math.SQRT2-1)*Math.min(dx,dy);}
+
+// Capture real state changes, so each neighbor can be explained before advancing.
+function search(src,planning,s,t,w,r,tol){
+ const g=Array(N).fill(Infinity),parent=Array(N).fill(-1),closed=Array(N).fill(false),open=[],history=[];
+ let seq=0,nearest=-1,nearestD=Infinity,end=-1;
+ function record(phase,current=-1,extra={}){
+   const sorted=open.filter(o=>!closed[o.i]).sort((a,b)=>a.f-b.f||a.seq-b.seq);
+   const queue=sorted.filter((o,k)=>sorted.findIndex(p=>p.i===o.i)===k).map(o=>({...o}));
+   history.push({phase,current,g:g.slice(),parent:parent.slice(),closed:closed.slice(),queue,nearest,path:[],...extra});
+ }
+ if(planning[s]>=253||!sweep(src,s,s,r,false)||(tol===0&&(planning[t]>=253||!sweep(src,t,t,r,false)))){record('invalid');return history;}
+ g[s]=0;open.push({i:s,f:octile(s,t),seq:seq++});record('init');
+ while(open.length){
+   open.sort((a,b)=>a.f-b.f||a.seq-b.seq);const entry=open.shift(),cur=entry.i;if(closed[cur])continue;
+   closed[cur]=true;record('pick',cur,{pickedF:entry.f});
+   if(cur===t){end=t;record('goal',cur);break;}
+   const [x,y]=xy(cur),[gx,gy]=xy(t),d=Math.hypot(x-gx,y-gy)*RES;
+   if(tol>0&&d<=tol&&(d<nearestD||(d===nearestD&&g[cur]<g[nearest]))){nearest=cur;nearestD=d;record('candidate',cur);}
+   for(let direction=0;direction<8;direction++){
+     const [dx,dy]=DIRS[direction],nx=x+dx,ny=y+dy,n=idx(nx,ny),diagonal=dx!==0&&dy!==0;
+     const outside=nx<0||nx>=W||ny<0||ny>=H;
+     let reason='',ng=Infinity,step=Infinity,previousG=outside?Infinity:g[n],previousParent=outside?-1:parent[n];
+     if(outside)reason='越界';
+     else if(planning[n]>=253)reason='硬禁行';
+     else if(diagonal&&(planning[idx(nx,y)]>=253||planning[idx(x,ny)]>=253))reason='斜向穿角';
+     else{
+       step=(diagonal?Math.SQRT2:1)*(1+w*planning[n]/252);ng=g[cur]+step;
+       if(ng>=g[n])reason='没有更低的 g';
+       else if(!sweep(src,cur,n,r,false))reason='车体扫掠碰撞';
+       else{g[n]=ng;parent[n]=cur;open.push({i:n,f:ng+octile(n,t),seq:seq++});}
+     }
+     record(reason?'reject':'update',cur,{neighbor:outside?-1:n,nx,ny,direction,reason,ng,step,previousG,previousParent});
+   }
+ }
+ if(end<0)end=nearest;
+ if(end<0){record('failure');return history;}
+ if(end!==t)record('fallback',end);
+ const path=[];let k=end;
+ while(k!==s){path.push(k);record('trace',k,{path:path.slice()});k=parent[k];}
+ path.push(s);record('trace',s,{path:path.slice()});record('done',end,{path:path.slice().reverse()});
+ return history;
+}
+const descriptions={
+ wall:'先让搜索遇到墙。观察：当前格不能直走时，队列如何把搜索引向墙的两端。',
+ soft:'把 w 从 0 调到 6，再点“完整路径”。比较路线和几何长度：绕远一点，可能避开更贵的格子。',
+ corner:'S 和 G 斜向相邻，但两侧有墙。找出被拒绝的对角邻居：目标格空着，也不代表这一步能走。',
+ tolerance:'G 在贯穿地图的墙上。容差 0 会失败；改成 0.5 m，观察搜索怎样选墙这一侧的安全终点。'
+};
+let scenario='wall',source=[],costs=[],start,goal,radius=.26,frames=[],position=0,selected=null,timer=null;
+const cells=[];
+let discoveryOrder=new Map();
+function loadCase(name){
+ scenario=name;source=Array(N).fill(0);start=idx(3,5);goal=idx(12,5);radius=name==='corner'?.06:.26;
+ $('weight').value=name==='soft'?0:2;$('tolerance').value=name==='tolerance'?0:.5;
+ if(name==='wall')for(let y=3;y<=7;y++)source[idx(8,y)]=254;
+ if(name==='soft')for(let x=6;x<=10;x++){source[idx(x,3)]=254;source[idx(x,7)]=254;}
+ if(name==='corner'){start=idx(7,5);goal=idx(8,6);source[idx(7,6)]=254;source[idx(8,5)]=254;}
+ if(name==='tolerance'){for(let y=0;y<H;y++)source[idx(8,y)]=254;goal=idx(8,5);}
+ document.querySelectorAll('[data-case]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.case===name)));
+ $('case-help').textContent=descriptions[name];recompute();
+}
+function syncPlayback(){for(const id of ['play','tree-play'])$(id).textContent=timer===null?'播放':'暂停';}
+function stop(){clearInterval(timer);timer=null;syncPlayback();}
+function startPlayback(){
+ clearInterval(timer);
+ const base=window.matchMedia('(prefers-reduced-motion: reduce)').matches?1000:500;
+ timer=setInterval(()=>{if(position>=frames.length-1){stop();return;}position++;render();if(position===frames.length-1)stop();},base/+$('speed').value);
+ syncPlayback();
+}
+function togglePlayback(){if(timer!==null){stop();return;}if(position===frames.length-1)position=0;selected=null;render();startPlayback();}
+function changeSpeed(value){$('speed').value=value;$('tree-speed').value=value;if(timer!==null)startPlayback();}
+
+function recompute(){stop();selected=null;position=0;costs=inflate(source,radius,false);frames=search(source,costs,start,goal,+$('weight').value,radius,+$('tolerance').value);discoveryOrder=new Map([[start,0]]);for(const f of frames)if(f.phase==='update'&&!discoveryOrder.has(f.neighbor))discoveryOrder.set(f.neighbor,discoveryOrder.size);$('weight-value').textContent=(+$('weight').value).toFixed(1);$('timeline').max=frames.length-1;render();}
+const point=i=>{const [x,y]=xy(i);return [x+.5,H-y-.5];};
+function line(a,b,color,width=.065,arrow=false){let [x1,y1]=point(a),[x2,y2]=point(b);const length=Math.hypot(x2-x1,y2-y1),ux=(x2-x1)/length,uy=(y2-y1)/length;x1+=ux*.24;y1+=uy*.24;x2-=ux*.28;y2-=uy*.28;return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}" ${arrow?'marker-end="url(#arrow)"':''}/>`;}
+function explain(f){
+ const current=coord(f.current),target=f.neighbor>=0?coord(f.neighbor):`(${f.nx},${f.ny})`,v=fmt;
+ switch(f.phase){
+ case 'init':return ['准备 / 起点入队','先把 S 放进队列','起点的 g = 0；h 是忽略障碍时到 G 的八方向距离。点击“下一步”，取出队列里 f 最小的格子。',`f(S) = 0 + ${v(octile(start,goal))} = ${v(octile(start,goal))}`];
+ case 'pick':return ['01 / 从整个队列选一个',`取出 ${current}`,`它在出队前的 f 最小。现在标记为已展开，接着检查它的八个邻居。橙框是当前格，蓝框 Q1 是队列现有的第一名。`,`f = ${v(f.g[f.current])} + ${v(octile(f.current,goal))} = ${v(f.pickedF)}`];
+ case 'update':return [`02 / 邻居 ${f.direction+1} / 8`,`${target} 值得更新`,`${f.previousParent<0?'首次找到安全走法':'发现更便宜的安全走法'}。更新 g，记下 parent = ${current}，再把这个格子放入开放队列。`,`step = ${f.direction<4?'1':'√2'} × (1 + ${$('weight').value} × ${costs[f.neighbor]}/252)\n     = ${v(f.step)}\ng新 = ${v(f.g[f.current])} + ${v(f.step)} = ${v(f.ng)} < ${v(f.previousG)}
+parent[${target}] ← ${current}`];
+ case 'reject':{
+ const why={'越界':'这个坐标在地图外，没有可访问的栅格。','硬禁行':'目标格代价 ≥ 253，属于硬安全区、障碍或未知格，不能进入。','斜向穿角':'对角移动的两个侧边格至少有一个禁行。即使终点空着，也不能从障碍角上挤过去。','没有更低的 g':'从当前格过去没有改善已知记录。保留原来的 g 和 parent。','车体扫掠碰撞':'两个格中心之间，机器人圆盘会碰到障碍或越过地图边界。这整段移动不安全。'};
+ return [`02 / 邻居 ${f.direction+1} / 8`,`${target}：跳过`,why[f.reason],Number.isFinite(f.ng)?`g新 = ${v(f.ng)} · 原记录 = ${v(f.previousG)}
+${f.reason}`:`拒绝原因：${f.reason}`];}
+ case 'candidate':return ['容差 / 先记一个候选','接近目标，还不能停','这个安全格在目标容差内，暂时是更好的候选。继续搜索：原目标若可达，仍然优先原目标。',`候选 ${current} · 距离 G ${v(Math.hypot(...xy(f.current).map((a,d)=>a-xy(goal)[d]))*RES)} m`];
+ case 'goal':return ['搜索结束 / 原目标出队','找到目标，现在重建路径','G 从队列出队，搜索结束。被展开的绿色格子有许多分支；下面沿 parent 只取出通向终点的那一条。',`目标累计代价 g = ${v(f.g[goal])}`];
+ case 'fallback':return ['搜索结束 / 使用容差终点','原目标不可达，选安全近邻','可达区域已搜完。选容差内最接近 G 的已展开格；距离相同时，再选 g 更小的。安全规则没有放宽。',`替代终点 ${current} · g = ${v(f.g[f.current])}`];
+ case 'trace':return ['03 / 沿 parent 倒着走',`把 ${current} 加入路径`,f.current===start?'已经回到 S。下一步反转序列，得到从起点到终点的路径。':'蓝线只连接已加入路径的格子。紫箭头指向当前格的 parent，下一步就回到那里。',f.current===start?`回溯到起点 · 已记录 ${f.path.length} 格`:`已记录 ${f.path.length} 格
+下一格 parent = ${coord(f.parent[f.current])}`];
+ case 'done':return ['完成 / 起点 → 终点','这才是最终路径','蓝线是 A* 输出的原始格中心路径。绿色区域是搜索付出的工作，不属于最终路线。',`${f.path.length} 个路径格 · g = ${v(f.g[f.path.at(-1)])}`];
+ case 'invalid':return ['拒绝 / 搜索还未开始','没有合法的起终点','起点必须安全；容差为 0 时，目标也必须安全。当前目标在墙上，试把容差改为 0.5 m。','返回空路径'];
+ default:return ['失败 / 队列已空','没有找到可达终点','原目标不可达，容差内也没有已展开的安全格。搜索结束，返回空路径。','返回空路径'];
+ }
+}
+let lastTreeFrame=null;
+function renderTree(f){
+ if($('tree-window').hidden)return;
+ const nodes=f.g.flatMap((g,i)=>Number.isFinite(g)?[i]:[]).sort((a,b)=>discoveryOrder.get(a)-discoveryOrder.get(b)),edges=nodes.filter(i=>f.parent[i]>=0),levels=[],depths=new Map();
+ function depth(i){if(depths.has(i))return depths.get(i);const d=f.parent[i]<0?0:depth(f.parent[i])+1;depths.set(i,d);return d;}
+ for(const i of nodes){const d=depth(i);(levels[d]??=[]).push(i);}
+ const locations=new Map();levels.forEach((level,d)=>level.forEach((i,row)=>locations.set(i,{x:22+d*146,y:34+row*58})));
+ const width=Math.max(200,levels.length*146+24),height=Math.max(130,Math.max(0,...levels.map(l=>l.length))*58+45),changed=f.phase==='update'?f.neighbor:-1,path=new Set(f.path);
+ $('tree-canvas').style.width=width+'px';$('tree-canvas').style.height=height+'px';
+ $('tree-nodes').innerHTML=levels.map((_,d)=>`<span class="tree-depth" style="left:${22+d*146}px">${d===0?'S · 树根':`第 ${d} 层`}</span>`).join('')+nodes.map(i=>{const p=locations.get(i);return `<button class="tree-node${f.closed[i]?' expanded':''}${i===changed?' changed':''}${path.has(i)?' path-node':''}${i===selected?' selected':''}" data-tree-node="${i}" style="left:${p.x}px;top:${p.y}px" aria-label="格子 ${coord(i)}，${f.parent[i]>=0?'parent '+coord(f.parent[i]):'树根'}">${i===start?'S ':''}${coord(i)}<small>g ${fmt(f.g[i])}</small></button>`;}).join('')+(nodes.length?'':'<p class="tree-empty">搜索尚未建立任何节点；当前起终点校验失败。</p>');
+ function edge(child,parent,color,old=false){const a=locations.get(child),b=locations.get(parent);if(!a||!b)return '';return `<path data-child="${child}" data-parent="${parent}" ${old?'data-old="true"':''} d="M ${a.x} ${a.y+21} C ${a.x-24} ${a.y+21}, ${b.x+124} ${b.y+21}, ${b.x+102} ${b.y+21}" fill="none" stroke="${color}" stroke-width="${child===changed?2.5:1.5}" ${old?'stroke-dasharray="5 4"':''} marker-end="url(#tree-arrow-${old?'old':child===changed?'new':path.has(child)&&path.has(parent)?'path':'base'})"/>`;}
+ const markers=[['base','#899ab1'],['new','#207560'],['old','#bd531e'],['path','#245cd0']].map(([name,color])=>`<marker id="tree-arrow-${name}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/></marker>`).join('');
+ const old=changed>=0&&f.previousParent>=0&&f.previousParent!==f.parent[changed];
+ $('tree-edges').setAttribute('width',width);$('tree-edges').setAttribute('height',height);
+ $('tree-edges').innerHTML='<defs>'+markers+'</defs>'+edges.map(i=>edge(i,f.parent[i],i===changed?'#207560':path.has(i)&&path.has(f.parent[i])?'#245cd0':'#899ab1')).join('')+(old?edge(changed,f.previousParent,'#bd531e',true):'');
+ $('tree-count').textContent=`${nodes.length} 个节点 · ${edges.length} 条 parent 连接`;$('tree-progress').textContent=`事件 ${position} / ${frames.length-1}`;
+ $('tree-event').textContent=changed>=0?(f.previousParent<0?`新建连接：${coord(changed)} → ${coord(f.parent[changed])}。这个格子首次被发现。`:`改写 parent：${coord(changed)} 从 ${coord(f.previousParent)} 改指 ${coord(f.parent[changed])}，g 从 ${fmt(f.previousG)} 降为 ${fmt(f.g[changed])}。`):f.phase==='init'?'只有树根 S。点“下一步”：每次成功更新邻居，就会建立或改写一条 parent 连接。':f.phase==='trace'?`回溯 ${coord(f.current)}：蓝色节点已经加入路径，树的其余分支保留。`:f.phase==='done'?'蓝色分支组成最终路径。其他节点也参与了搜索，但没有进入这条路线。':f.phase==='reject'?`邻居被拒绝（${f.reason}），parent 树保持不变。`:f.phase==='invalid'?'起终点校验失败，尚未建立 parent 树。':'本步未修改 parent。绿色节点已展开；浅蓝节点正在等待。';
+ $('tree-previous').disabled=position===0;$('tree-next').disabled=position===frames.length-1;$('tree-play').disabled=frames.length<2;
+ if(lastTreeFrame!==f&&$('tree-follow').checked){
+   const target=changed>=0?changed:f.current>=0?f.current:start,p=locations.get(target),v=$('tree-viewport');
+   if(p){if(p.x<v.scrollLeft||p.x+110>v.scrollLeft+v.clientWidth)v.scrollLeft=Math.max(0,p.x-v.clientWidth/2+50);if(p.y<v.scrollTop||p.y+50>v.scrollTop+v.clientHeight)v.scrollTop=Math.max(0,p.y-v.clientHeight/2+22);}
+ }
+ lastTreeFrame=f;
+}
+function render(){
+ const f=frames[position];renderTree(f);
+ const searching=['init','pick','update','reject','candidate'].includes(f.phase),focus=selected??(f.neighbor>=0?f.neighbor:f.current>=0?f.current:start),pathSet=new Set(f.path),frontier=new Set(f.queue.map(o=>o.i)),q1=searching?f.queue[0]?.i:-1;
+ const [phase,title,copy,calculation]=explain(f);$('phase').textContent=phase;$('reason-title').textContent=title;$('reason-copy').textContent=copy;$('calculation').textContent=calculation;$('calculation').style.whiteSpace='pre-line';
+ for(let i=0;i<N;i++){
+   const cell=cells[i],c=costs[i];cell.className='cell'+(source[i]===254?' wall':c>=253?' hard':'')+(f.closed[i]?' closed':'')+(frontier.has(i)?' open':'')+(f.current===i?' current':'')+(i===q1?' next':'')+(f.neighbor===i?' neighbor':'')+(pathSet.has(i)?' route':'')+(i===start?' start':'')+(i===goal?' goal':'')+(i===selected?' selected':'');
+   cell.style.backgroundColor=c>0&&c<253?`hsl(38 65% ${94-c/252*20}%)`:'';
+   let label=i===start?'S':i===goal?'G':i===q1?'Q1':f.current===i?'●':f.neighbor===i?(f.phase==='update'?'+':'×'):$('show-f').checked&&Number.isFinite(f.g[i])?(f.g[i]+octile(i,goal)).toFixed(1):'';
+   cell.firstChild.textContent=label;
+   cell.setAttribute('aria-label',`${coord(i)}，代价 ${c}，g ${fmt(f.g[i])}${i===start?'，起点':''}${i===goal?'，目标':''}${pathSet.has(i)?'，路径':''}`);
+ }
+ let svg='<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7754b4"/></marker></defs>';
+ if(scenario==='tolerance'&&+$('tolerance').value){const [x,y]=point(goal);svg+=`<circle cx="${x}" cy="${y}" r="${+$('tolerance').value/RES}" fill="none" stroke="#bd531e" stroke-width=".045" stroke-dasharray=".14 .12"/>`;}
+ if(f.path.length>1)svg+=`<polyline points="${f.path.map(i=>point(i).join(',')).join(' ')}" fill="none" stroke="#245cd0" stroke-width=".11" stroke-linejoin="round" stroke-linecap="round"/>`;
+ if(['update','reject'].includes(f.phase)&&f.neighbor>=0)svg+=line(f.current,f.neighbor,f.phase==='update'?'#207560':'#bd531e',.06);
+ const parentFocus=f.phase==='trace'?f.current:focus;
+ if(f.parent[parentFocus]>=0)svg+=line(parentFocus,f.parent[parentFocus],'#7754b4',.06,true);
+ if(f.current>=0&&searching){const [x,y]=point(f.current);svg+=`<circle cx="${x}" cy="${y}" r="${radius/RES}" fill="#bd531e" fill-opacity=".04" stroke="#bd531e" stroke-opacity=".55" stroke-width=".035"/>`;}
+ $('overlay').innerHTML=svg;
+ $('queue-count').textContent=`${f.queue.length} 格待展开`;
+ $('queue').innerHTML=f.queue.slice(0,5).map((o,k)=>`<button class="queue-row" data-inspect="${o.i}" aria-label="查看队列第 ${k+1} 名 ${coord(o.i)}"><span class="rank">${k+1}</span><span>${coord(o.i)}</span><span class="g">${fmt(f.g[o.i])}</span><span class="h">${fmt(octile(o.i,goal))}</span><strong class="f">${fmt(o.f)}</strong></button>`).join('');
+ $('queue-note').textContent=!f.queue.length?'队列为空。':searching?`按 f 从小到大，显示前 ${Math.min(5,f.queue.length)} 名。检查邻居可能改变排名；下一次出队前会重新取最小值。`:'这些格子仍留在队列中，但搜索已停止，无须再展开。';
+ $('picked-title').textContent=`格子 ${coord(focus)}`;$('g').textContent=fmt(f.g[focus]);$('h').textContent=fmt(octile(focus,goal));$('f').textContent=fmt(f.g[focus]+octile(focus,goal));
+ $('cell-state').textContent=`代价 c = ${costs[focus]} · ${costs[focus]>=253?'禁止进入':f.closed[focus]?'已展开':frontier.has(focus)?'等待展开':'尚未发现'}${selected!==null?' · 手动选中（下一步恢复跟随）':''}`;
+ $('parent').textContent=f.parent[focus]>=0?`parent[${coord(focus)}] = ${coord(f.parent[focus])}`:focus===start?'起点没有 parent':'尚无 parent 记录';
+ $('timeline').value=position;$('progress').textContent=`${position} / ${frames.length-1}`;$('previous').disabled=position===0;$('next').disabled=position===frames.length-1;$('play').disabled=frames.length<2;
+ $('jump').disabled=!frames.slice(position+1).some(t=>t.phase==='pick');$('trace').disabled=!frames.some(t=>t.phase==='trace');
+ const n=f.closed.filter(Boolean).length;$('stages').innerHTML=`<span><b>${n}</b> 格已展开</span><span>·</span><span><b>${f.path.length}</b> 格加入路径</span><span>· 一步 = 一个源码事件</span>`;
+ if(f.phase==='done'){const length=f.path.slice(1).reduce((sum,k,j)=>sum+Math.hypot(...xy(k).map((a,d)=>a-xy(f.path[j])[d]))*RES,0);$('result').innerHTML=`<strong>${f.path.at(-1)===goal?'到达 G':'到达容差终点'}</strong> · 长度 ${length.toFixed(2)} m · 加权 g ${fmt(f.g[f.path.at(-1)])}<br><small>修改 w 后，比较路线和长度；不同权重下的 g 不能直接比大小。</small>`;}
+ else if(['failure','invalid'].includes(f.phase))$('result').innerHTML='<strong>空路径。</strong>参数不允许安全到达目标。';
+ else if(f.phase==='trace')$('result').innerHTML=`<strong>正在倒着找路。</strong>已从终点取出 ${f.path.length} 格；紫箭头指向下一个 parent。`;
+ else $('result').innerHTML='<strong>搜索 ≠ 路径。</strong>绿色格子只是被检查过；选定终点后，才能沿 parent 找回路线。';
+}
+function seek(n){stop();selected=null;position=Math.max(0,Math.min(frames.length-1,n));render();}
+for(let y=H-1;y>=0;y--)for(let x=0;x<W;x++){const i=idx(x,y),button=document.createElement('button');button.type='button';button.className='cell';button.append(document.createElement('span'));button.firstChild.className='label';button.dataset.cell=i;button.addEventListener('click',()=>{stop();selected=i;render();});$('grid').append(button);cells[i]=button;}
+for(const button of document.querySelectorAll('[data-case]'))button.addEventListener('click',()=>loadCase(button.dataset.case));
+$('weight').addEventListener('input',recompute);$('tolerance').addEventListener('change',recompute);$('show-f').addEventListener('change',render);
+$('previous').addEventListener('click',()=>seek(position-1));$('next').addEventListener('click',()=>seek(position+1));$('reset').addEventListener('click',()=>seek(0));$('finish').addEventListener('click',()=>seek(frames.length-1));
+$('jump').addEventListener('click',()=>{const n=frames.findIndex((f,i)=>i>position&&f.phase==='pick');if(n>=0)seek(n);});
+$('trace').addEventListener('click',()=>{const n=frames.findIndex(f=>f.phase==='trace');if(n>=0)seek(n);});
+$('timeline').addEventListener('input',()=>seek(+$('timeline').value));
+$('play').addEventListener('click',togglePlayback);$('tree-play').addEventListener('click',togglePlayback);
+for(const id of ['speed','tree-speed'])$(id).addEventListener('change',()=>changeSpeed($(id).value));
+$('queue').addEventListener('click',event=>{const b=event.target.closest('[data-inspect]');if(b){stop();selected=+b.dataset.inspect;render();}});
+function closeTree(){ $('tree-window').hidden=true;$('open-tree').setAttribute('aria-expanded','false');$('open-tree').focus(); }
+$('open-tree').addEventListener('click',()=>{if(!$('tree-window').hidden){closeTree();return;}$('tree-window').hidden=false;$('open-tree').setAttribute('aria-expanded','true');lastTreeFrame=null;renderTree(frames[position]);$('tree-drag').focus({preventScroll:true});});
+$('close-tree').addEventListener('click',closeTree);
+$('tree-previous').addEventListener('click',()=>seek(position-1));$('tree-next').addEventListener('click',()=>seek(position+1));
+$('tree-nodes').addEventListener('click',event=>{const b=event.target.closest('[data-tree-node]');if(b){stop();selected=+b.dataset.treeNode;render();$('tree-nodes').querySelector(`[data-tree-node="${selected}"]`)?.focus({preventScroll:true});}});
+$('tree-follow').addEventListener('change',()=>{lastTreeFrame=null;renderTree(frames[position]);});
+function moveTree(left,top){const w=$('tree-window'),r=w.getBoundingClientRect();w.style.left=Math.max(8,Math.min(innerWidth-r.width-8,left))+'px';w.style.top=Math.max(8,Math.min(innerHeight-r.height-8,top))+'px';w.style.right='auto';w.style.bottom='auto';}
+function resizeTree(rect,edge,dx,dy){
+ const margin=8,minWidth=Math.min(320,innerWidth-2*margin),minHeight=Math.min(380,innerHeight-2*margin);
+ let left=rect.left,right=rect.right,top=rect.top,bottom=rect.bottom;
+ if(edge.includes('w'))left=Math.max(margin,Math.min(right-minWidth,rect.left+dx));
+ if(edge.includes('e'))right=Math.min(innerWidth-margin,Math.max(left+minWidth,rect.right+dx));
+ if(edge.includes('n'))top=Math.max(margin,Math.min(bottom-minHeight,rect.top+dy));
+ if(edge.includes('s'))bottom=Math.min(innerHeight-margin,Math.max(top+minHeight,rect.bottom+dy));
+ const w=$('tree-window');w.style.width=(right-left)+'px';w.style.height=(bottom-top)+'px';
+ w.style.left=left+'px';w.style.top=top+'px';w.style.right='auto';w.style.bottom='auto';
+}
+for(const handle of document.querySelectorAll('.tree-resize')){
+ let resizing=null;
+ handle.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizing={rect:$('tree-window').getBoundingClientRect(),x:event.clientX,y:event.clientY};handle.setPointerCapture(event.pointerId);});
+ handle.addEventListener('pointermove',event=>{if(resizing)resizeTree(resizing.rect,handle.dataset.edge,event.clientX-resizing.x,event.clientY-resizing.y);});
+ for(const name of ['pointerup','pointercancel','lostpointercapture'])handle.addEventListener(name,()=>{resizing=null;});
+ handle.addEventListener('keydown',event=>{const delta={ArrowLeft:[-20,0],ArrowRight:[20,0],ArrowUp:[0,-20],ArrowDown:[0,20]}[event.key];if(!delta)return;event.preventDefault();resizeTree($('tree-window').getBoundingClientRect(),handle.dataset.edge,...delta);});
+}
+let drag=null;
+$('tree-drag').addEventListener('pointerdown',event=>{if(event.target.closest('button')||event.button!==0)return;const r=$('tree-window').getBoundingClientRect();drag={x:event.clientX-r.left,y:event.clientY-r.top};$('tree-drag').setPointerCapture(event.pointerId);});
+$('tree-drag').addEventListener('pointermove',event=>{if(drag)moveTree(event.clientX-drag.x,event.clientY-drag.y);});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])$('tree-drag').addEventListener(name,()=>{drag=null;});
+$('tree-drag').addEventListener('keydown',event=>{const delta={ArrowLeft:[-20,0],ArrowRight:[20,0],ArrowUp:[0,-20],ArrowDown:[0,20]}[event.key];if(!delta||event.target!==$('tree-drag'))return;event.preventDefault();const r=$('tree-window').getBoundingClientRect();moveTree(r.left+delta[0],r.top+delta[1]);});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('tree-window').hidden){event.preventDefault();closeTree();}});
+window.addEventListener('resize',()=>{if(!$('tree-window').hidden){const r=$('tree-window').getBoundingClientRect();moveTree(r.left,r.top);}});
+window.AStarLesson={snapshot:()=>({W,H,RES,source:source.slice(),planning:costs.slice(),start,goal,radius,weight:+$('weight').value,tolerance:+$('tolerance').value,frame:frames[position],last:frames.at(-1),position,total:frames.length}),search,inflate,sweep};
+loadCase('wall');
+</script></body></html>

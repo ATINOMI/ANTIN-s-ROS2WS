@@ -1,0 +1,976 @@
+{
+  "cpp_comparisons": [
+    {
+      "scenario": "wall",
+      "path_cells": 18,
+      "g": 21.970562748477146,
+      "frames": 115
+    },
+    {
+      "scenario": "soft",
+      "path_cells": 21,
+      "g": 23.976990984134027,
+      "frames": 152
+    },
+    {
+      "scenario": "tolerance",
+      "path_cells": 8,
+      "g": 8.333333333333332,
+      "frames": 160
+    },
+    {
+      "scenario": "corner",
+      "path_cells": 8,
+      "g": 12.48835863537889,
+      "frames": 83
+    },
+    {
+      "scenario": "unknown",
+      "path_cells": 18,
+      "g": 20.313708498984763,
+      "frames": 112
+    },
+    {
+      "scenario": "soft",
+      "weight": 0,
+      "path_cells": 18,
+      "g": 17,
+      "frames": 37
+    },
+    {
+      "scenario": "soft",
+      "weight": 6,
+      "path_cells": 23,
+      "g": 24.071067811865476,
+      "frames": 156
+    },
+    {
+      "scenario": "tolerance",
+      "tolerance": 0,
+      "path_cells": 0,
+      "g": null,
+      "frames": 1
+    },
+    {
+      "scenario": "tolerance",
+      "tolerance": 0.3,
+      "path_cells": 0,
+      "g": null,
+      "frames": 152
+    },
+    {
+      "scenario": "unknown",
+      "unknown": true,
+      "path_cells": 18,
+      "g": 21.142135623730955,
+      "frames": 108
+    },
+    {
+      "scenario": "wall",
+      "radius": 0.4,
+      "path_cells": 18,
+      "g": 21.970562748477146,
+      "frames": 102
+    },
+    {
+      "scenario": "corner",
+      "path_cells": 8,
+      "g": 12.48835863537889,
+      "frames": 83
+    },
+    {
+      "scenario": "wall",
+      "path_cells": 18,
+      "g": 21.970562748477146,
+      "frames": 115
+    }
+  ],
+  "controls": "step, previous, playback, finish, reset, timeline through input, inspect, wall, start, goal, costs",
+  "viewports": [
+    1440,
+    390
+  ],
+  "pageErrors": [],
+  "verified_at": "2026-10-04",
+  "implementation": "Current mini_nav C++ sources compiled directly into a temporary probe",
+  "scope": "Educational maps; inflation, reachability, optimal weighted cost, endpoint distance and continuous edge safety checked. Equal-f expansion order and equal-cost path shape can differ.",
+  "sha256": {
+    "src/mini_nav/docs/visualizations/astar_explainer.html": "8d6542348617f84c63375e3d3b796e402a3c944b415f112fe876db451eac6211",
+    "src/mini_nav/mini_nav_core/src/navigator/astar_navigator.cpp": "6dfaaf0f18711b748a36b14e7e817314251c83f67280dbca4282f5efa773354f",
+    "src/mini_nav/mini_nav_core/src/map/inflation_layer.cpp": "fba88a03675c484a8e19bf30af7a372b6b06bc6abc48a59e0c60045f0a31d9b0",
+    "src/mini_nav/mini_nav_core/src/navigator/path_postprocessor.cpp": "3839fe9988d579f87ae71aa156d8e3a2507206b7e4a3fc8273fc7418d7d7d3cb"
+  },
+  "ui_verification": {
+    "verified_at": "2026-10-04",
+    "checks": [
+      "queue rank matches frontier priority",
+      "queue-to-map selection",
+      "parent assignment and child-to-parent arrow",
+      "follow parent reaches root",
+      "parent changes and full tree visibility",
+      "path grows during reconstruction and shrinks on rewind",
+      "every path cell labelled P in final order",
+      "non-path cells have no P label",
+      "clickable path node inspection",
+      "390px viewport without horizontal overflow"
+    ],
+    "pageErrors": []
+  },
+  "readability_verification": {
+    "measurements": [
+      {
+        "viewport": 1920,
+        "pageWidth": 1920,
+        "panelWidth": 520,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 472,
+        "queueWidth": 472,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 520
+      },
+      {
+        "viewport": 1440,
+        "pageWidth": 1440,
+        "panelWidth": 446.390625,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 398,
+        "queueWidth": 398,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 446.390625
+      },
+      {
+        "viewport": 1280,
+        "pageWidth": 1280,
+        "panelWidth": 440,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 392,
+        "queueWidth": 392,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 440
+      },
+      {
+        "viewport": 1100,
+        "pageWidth": 1100,
+        "panelWidth": 508,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 460,
+        "queueWidth": 460,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 508
+      },
+      {
+        "viewport": 1024,
+        "pageWidth": 1024,
+        "panelWidth": 470,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 422,
+        "queueWidth": 422,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 470
+      },
+      {
+        "viewport": 851,
+        "pageWidth": 851,
+        "panelWidth": 393.5,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 346,
+        "queueWidth": 346,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 393.5
+      },
+      {
+        "viewport": 820,
+        "pageWidth": 820,
+        "panelWidth": 776,
+        "queueText": 17,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 728,
+        "queueWidth": 728,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 776
+      },
+      {
+        "viewport": 390,
+        "pageWidth": 390,
+        "panelWidth": 362,
+        "queueText": 15,
+        "paragraphText": 16,
+        "queueHeight": 428,
+        "queueScrollWidth": 326,
+        "queueWidth": 326,
+        "parentWritesScrolls": false,
+        "parentChainWrap": "wrap",
+        "parentWidth": 362
+      }
+    ],
+    "checks": [
+      "desktop sidebar at least 440px",
+      "desktop node text at least 17px",
+      "panel prose 16px",
+      "no page or queue column horizontal overflow at tested widths",
+      "parent writes visible without nested scrolling",
+      "parent chain wraps"
+    ]
+  },
+  "tree_layout_verification": {
+    "algorithm_script_unchanged": true,
+    "states": [
+      {
+        "phase": "init",
+        "frame": 0,
+        "nodes": 1,
+        "edges": 0
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "done",
+        "frame": 114,
+        "nodes": 158,
+        "edges": 157
+      },
+      {
+        "phase": "init",
+        "frame": 0,
+        "nodes": 1,
+        "edges": 0
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "expand",
+        "frame": 10,
+        "nodes": 34,
+        "edges": 33
+      },
+      {
+        "phase": "done",
+        "frame": 159,
+        "nodes": 150,
+        "edges": 149
+      },
+      {
+        "phase": "done",
+        "frame": 82,
+        "nodes": 118,
+        "edges": 117
+      },
+      {
+        "phase": "invalid",
+        "frame": 0,
+        "nodes": 0,
+        "edges": 0
+      }
+    ],
+    "layouts": [
+      {
+        "viewport": 1920,
+        "pageWidth": 1920,
+        "map": {
+          "left": 152,
+          "right": 1220,
+          "top": -394.671875,
+          "bottom": 796.515625,
+          "width": 1068
+        },
+        "ledger": {
+          "left": 152,
+          "right": 676,
+          "top": 1507.109375,
+          "bottom": 1957.984375,
+          "width": 524
+        },
+        "neighbors": {
+          "left": 696,
+          "right": 1220,
+          "top": 1507.109375,
+          "bottom": 1929.109375,
+          "width": 524
+        },
+        "safety": {
+          "left": 152,
+          "right": 1220,
+          "top": 1977.984375,
+          "bottom": 2272.984375,
+          "width": 1068
+        },
+        "tree": {
+          "left": 152,
+          "right": 1220,
+          "top": 872.109375,
+          "bottom": 1487.109375,
+          "width": 1068
+        },
+        "queue": {
+          "left": 1248,
+          "right": 1768,
+          "top": -394.671875,
+          "bottom": 359.890625,
+          "width": 520
+        },
+        "parent": {
+          "left": 1248,
+          "right": 1768,
+          "top": 379.890625,
+          "bottom": 1130.859375,
+          "width": 520
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 1662,
+        "pageWidth": 1662,
+        "map": {
+          "left": 32,
+          "right": 1086.78125,
+          "top": -392.671875,
+          "bottom": 789.15625,
+          "width": 1054.78125
+        },
+        "ledger": {
+          "left": 32,
+          "right": 549.390625,
+          "top": 1499.75,
+          "bottom": 1950.625,
+          "width": 517.390625
+        },
+        "neighbors": {
+          "left": 569.390625,
+          "right": 1086.78125,
+          "top": 1499.75,
+          "bottom": 1921.75,
+          "width": 517.390625
+        },
+        "safety": {
+          "left": 32,
+          "right": 1086.78125,
+          "top": 1970.625,
+          "bottom": 2265.625,
+          "width": 1054.78125
+        },
+        "tree": {
+          "left": 32,
+          "right": 1086.78125,
+          "top": 864.75,
+          "bottom": 1479.75,
+          "width": 1054.78125
+        },
+        "queue": {
+          "left": 1114.78125,
+          "right": 1630,
+          "top": -392.671875,
+          "bottom": 361.890625,
+          "width": 515.21875
+        },
+        "parent": {
+          "left": 1114.78125,
+          "right": 1630,
+          "top": 381.890625,
+          "bottom": 1132.859375,
+          "width": 515.21875
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 1440,
+        "pageWidth": 1440,
+        "map": {
+          "left": 32,
+          "right": 933.609375,
+          "top": -367.671875,
+          "bottom": 705.65625,
+          "width": 901.609375
+        },
+        "ledger": {
+          "left": 32,
+          "right": 472.796875,
+          "top": 1416.25,
+          "bottom": 1888.90625,
+          "width": 440.796875
+        },
+        "neighbors": {
+          "left": 492.796875,
+          "right": 933.609375,
+          "top": 1416.25,
+          "bottom": 1838.25,
+          "width": 440.8125
+        },
+        "safety": {
+          "left": 32,
+          "right": 933.609375,
+          "top": 1908.90625,
+          "bottom": 2203.90625,
+          "width": 901.609375
+        },
+        "tree": {
+          "left": 32,
+          "right": 933.609375,
+          "top": 781.25,
+          "bottom": 1396.25,
+          "width": 901.609375
+        },
+        "queue": {
+          "left": 961.609375,
+          "right": 1408,
+          "top": -367.671875,
+          "bottom": 413.140625,
+          "width": 446.390625
+        },
+        "parent": {
+          "left": 961.609375,
+          "right": 1408,
+          "top": 433.140625,
+          "bottom": 1184.109375,
+          "width": 446.390625
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 1280,
+        "pageWidth": 1280,
+        "map": {
+          "left": 32,
+          "right": 780,
+          "top": -341.875,
+          "bottom": 650.796875,
+          "width": 748
+        },
+        "ledger": {
+          "left": 32,
+          "right": 780,
+          "top": 1389.390625,
+          "bottom": 1800.515625,
+          "width": 748
+        },
+        "neighbors": {
+          "left": 32,
+          "right": 780,
+          "top": 1820.515625,
+          "bottom": 2242.515625,
+          "width": 748
+        },
+        "safety": {
+          "left": 32,
+          "right": 780,
+          "top": 2262.515625,
+          "bottom": 2557.515625,
+          "width": 748
+        },
+        "tree": {
+          "left": 32,
+          "right": 780,
+          "top": 726.390625,
+          "bottom": 1369.390625,
+          "width": 748
+        },
+        "queue": {
+          "left": 808,
+          "right": 1248,
+          "top": -341.875,
+          "bottom": 438.9375,
+          "width": 440
+        },
+        "parent": {
+          "left": 808,
+          "right": 1248,
+          "top": 458.9375,
+          "bottom": 1209.90625,
+          "width": 440
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 1100,
+        "pageWidth": 1100,
+        "map": {
+          "left": 32,
+          "right": 1068,
+          "top": -2696.484375,
+          "bottom": -1527.953125,
+          "width": 1036
+        },
+        "ledger": {
+          "left": 32,
+          "right": 540,
+          "top": -817.359375,
+          "bottom": -379.6875,
+          "width": 508
+        },
+        "neighbors": {
+          "left": 560,
+          "right": 1068,
+          "top": -817.359375,
+          "bottom": -395.359375,
+          "width": 508
+        },
+        "safety": {
+          "left": 32,
+          "right": 1068,
+          "top": -359.6875,
+          "bottom": -64.6875,
+          "width": 1036
+        },
+        "tree": {
+          "left": 32,
+          "right": 1068,
+          "top": -1452.359375,
+          "bottom": -837.359375,
+          "width": 1036
+        },
+        "queue": {
+          "left": 32,
+          "right": 540,
+          "top": -36.6875,
+          "bottom": 717.875,
+          "width": 508
+        },
+        "parent": {
+          "left": 560,
+          "right": 1068,
+          "top": -36.6875,
+          "bottom": 714.28125,
+          "width": 508
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 1024,
+        "pageWidth": 1024,
+        "map": {
+          "left": 32,
+          "right": 992,
+          "top": -2642.671875,
+          "bottom": -1527.984375,
+          "width": 960
+        },
+        "ledger": {
+          "left": 32,
+          "right": 502,
+          "top": -817.390625,
+          "bottom": -379.71875,
+          "width": 470
+        },
+        "neighbors": {
+          "left": 522,
+          "right": 992,
+          "top": -817.390625,
+          "bottom": -395.390625,
+          "width": 470
+        },
+        "safety": {
+          "left": 32,
+          "right": 992,
+          "top": -359.71875,
+          "bottom": -64.71875,
+          "width": 960
+        },
+        "tree": {
+          "left": 32,
+          "right": 992,
+          "top": -1452.390625,
+          "bottom": -837.390625,
+          "width": 960
+        },
+        "queue": {
+          "left": 32,
+          "right": 502,
+          "top": -36.71875,
+          "bottom": 717.84375,
+          "width": 470
+        },
+        "parent": {
+          "left": 522,
+          "right": 992,
+          "top": -36.71875,
+          "bottom": 714.25,
+          "width": 470
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 851,
+        "pageWidth": 851,
+        "map": {
+          "left": 22,
+          "right": 829,
+          "top": -2687.9375,
+          "bottom": -1653.484375,
+          "width": 807
+        },
+        "ledger": {
+          "left": 22,
+          "right": 415.5,
+          "top": -914.890625,
+          "bottom": -394.03125,
+          "width": 393.5
+        },
+        "neighbors": {
+          "left": 435.5,
+          "right": 829,
+          "top": -914.890625,
+          "bottom": -492.890625,
+          "width": 393.5
+        },
+        "safety": {
+          "left": 22,
+          "right": 829,
+          "top": -374.03125,
+          "bottom": -79.03125,
+          "width": 807
+        },
+        "tree": {
+          "left": 22,
+          "right": 829,
+          "top": -1577.890625,
+          "bottom": -934.890625,
+          "width": 807
+        },
+        "queue": {
+          "left": 22,
+          "right": 415.5,
+          "top": -51.03125,
+          "bottom": 729.78125,
+          "width": 393.5
+        },
+        "parent": {
+          "left": 435.5,
+          "right": 829,
+          "top": -51.03125,
+          "bottom": 755.125,
+          "width": 393.5
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 820,
+        "pageWidth": 820,
+        "map": {
+          "left": 22,
+          "right": 798,
+          "top": -3728.234375,
+          "bottom": -2715.734375,
+          "width": 776
+        },
+        "ledger": {
+          "left": 22,
+          "right": 798,
+          "top": -1977.140625,
+          "bottom": -1567.46875,
+          "width": 776
+        },
+        "neighbors": {
+          "left": 22,
+          "right": 798,
+          "top": -1547.46875,
+          "bottom": -1125.46875,
+          "width": 776
+        },
+        "safety": {
+          "left": 22,
+          "right": 798,
+          "top": -1105.46875,
+          "bottom": -810.46875,
+          "width": 776
+        },
+        "tree": {
+          "left": 22,
+          "right": 798,
+          "top": -2640.140625,
+          "bottom": -1997.140625,
+          "width": 776
+        },
+        "queue": {
+          "left": 22,
+          "right": 798,
+          "top": -782.46875,
+          "bottom": -27.90625,
+          "width": 776
+        },
+        "parent": {
+          "left": 22,
+          "right": 798,
+          "top": -7.90625,
+          "bottom": 687.875,
+          "width": 776
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      },
+      {
+        "viewport": 390,
+        "pageWidth": 390,
+        "map": {
+          "left": 14,
+          "right": 376,
+          "top": -3614.484375,
+          "bottom": -2744.59375,
+          "width": 362
+        },
+        "ledger": {
+          "left": 14,
+          "right": 376,
+          "top": -1903.8125,
+          "bottom": -1408.140625,
+          "width": 362
+        },
+        "neighbors": {
+          "left": 14,
+          "right": 376,
+          "top": -1388.140625,
+          "bottom": -978.140625,
+          "width": 362
+        },
+        "safety": {
+          "left": 14,
+          "right": 376,
+          "top": -958.140625,
+          "bottom": -619.140625,
+          "width": 362
+        },
+        "tree": {
+          "left": 14,
+          "right": 376,
+          "top": -2649.203125,
+          "bottom": -1923.8125,
+          "width": 362
+        },
+        "queue": {
+          "left": 14,
+          "right": 376,
+          "top": -591.140625,
+          "bottom": 177.671875,
+          "width": 362
+        },
+        "parent": {
+          "left": 14,
+          "right": 376,
+          "top": 197.671875,
+          "bottom": 976.28125,
+          "width": 362
+        },
+        "treeFont": 17,
+        "tinyFont": 16,
+        "clippedNodeLabels": 0
+      }
+    ],
+    "pageErrors": [],
+    "checks": [
+      "tree checkbox has adjacent live feedback",
+      "all current discovered nodes and parent edges shown exactly once",
+      "map tree arrows strengthened",
+      "initial, expanded, finished, rewind and invalid frames synchronized",
+      "tree node click selects same map cell and parent record",
+      "tree path colors agree with map membership",
+      "ledger, neighbor checks and safety cards moved below map",
+      "readable fixed size diagram nodes with internal scrolling",
+      "no page horizontal overflow at nine viewport widths"
+    ],
+    "original_reproduction": {
+      "passed": true,
+      "frame": 10,
+      "map_offscreen": true,
+      "adjacent_status_changed": true,
+      "actual_parent_edges": 33,
+      "map_arrow_width": 0.09,
+      "map_arrow_opacity": 0.9
+    }
+  },
+  "last_ui_verified_at": "2026-10-04T15:49:43.001371+00:00",
+  "guided_walkthrough_20261005": {
+    "verified_at": "2026-10-04T16:46:51.439000+00:00",
+    "cpp_comparison": {
+      "cpp_comparisons": [
+        {
+          "scenario": "wall",
+          "path_cells": 18,
+          "g": 21.970562748477146,
+          "frames": 115
+        },
+        {
+          "scenario": "soft",
+          "path_cells": 21,
+          "g": 23.976990984134027,
+          "frames": 152
+        },
+        {
+          "scenario": "tolerance",
+          "path_cells": 8,
+          "g": 8.333333333333332,
+          "frames": 160
+        },
+        {
+          "scenario": "corner",
+          "path_cells": 8,
+          "g": 12.48835863537889,
+          "frames": 83
+        },
+        {
+          "scenario": "unknown",
+          "path_cells": 18,
+          "g": 20.313708498984763,
+          "frames": 112
+        },
+        {
+          "scenario": "soft",
+          "weight": 0,
+          "path_cells": 18,
+          "g": 17,
+          "frames": 37
+        },
+        {
+          "scenario": "soft",
+          "weight": 6,
+          "path_cells": 23,
+          "g": 24.071067811865476,
+          "frames": 156
+        },
+        {
+          "scenario": "tolerance",
+          "tolerance": 0,
+          "path_cells": 0,
+          "g": null,
+          "frames": 1
+        },
+        {
+          "scenario": "tolerance",
+          "tolerance": 0.3,
+          "path_cells": 0,
+          "g": null,
+          "frames": 152
+        },
+        {
+          "scenario": "unknown",
+          "unknown": true,
+          "path_cells": 18,
+          "g": 21.142135623730955,
+          "frames": 108
+        },
+        {
+          "scenario": "wall",
+          "radius": 0.4,
+          "path_cells": 18,
+          "g": 21.970562748477146,
+          "frames": 102
+        },
+        {
+          "scenario": "corner",
+          "path_cells": 8,
+          "g": 12.48835863537889,
+          "frames": 83
+        },
+        {
+          "scenario": "wall",
+          "path_cells": 18,
+          "g": 21.970562748477146,
+          "frames": 115
+        }
+      ],
+      "controls": "step, previous, playback, finish, reset, timeline through input, inspect, wall, start, goal, costs",
+      "viewports": [
+        1440,
+        390
+      ],
+      "pageErrors": []
+    },
+    "guided_controls": [
+      "expand",
+      "cost",
+      "trace"
+    ],
+    "guided_viewports": [
+      1440,
+      390
+    ],
+    "page_errors": [],
+    "screenshots_reviewed": [
+      "/tmp/mini_nav_astar_guided_1440.png",
+      "/tmp/mini_nav_astar_guided_390.png"
+    ],
+    "notes": "C++ probe rebuilt from current AStarPlanner, inflation, sweep and costmap source. Existing queue, parent and path replay checks passed."
+  }
+}

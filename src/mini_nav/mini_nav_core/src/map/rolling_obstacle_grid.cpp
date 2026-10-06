@@ -41,7 +41,9 @@ namespace mini_nav_core
         double resolution,
         const InflationParameters & inflation): raw_(width, height, resolution, 0.0, 0.0, kUnknown), 
                                                 inflation_(inflation),
-                                                observed_at_(raw_.GetCellCount(), kNeverObserved)
+                                                observed_at_(raw_.GetCellCount(), kNeverObserved),
+                                                points_(raw_.GetCellCount()),
+                                                opaque_cells_(raw_.GetCellCount(), false)
     {
         // 在首次使用前校验膨胀参数，避免扫描回调中才暴露配置错误。
         (void)InflateCostmap(raw_, inflation_);
@@ -81,6 +83,8 @@ namespace mini_nav_core
                              kUnknown);
 
             std::fill(observed_at_.begin(), observed_at_.end(), kNeverObserved);
+            for (auto & points : points_) points.clear();
+            std::fill(opaque_cells_.begin(), opaque_cells_.end(), false);
             centered_ = true;
             return;
         }
@@ -101,6 +105,8 @@ namespace mini_nav_core
                              kUnknown);
 
             std::fill(observed_at_.begin(), observed_at_.end(), kNeverObserved);
+            for (auto & points : points_) points.clear();
+            std::fill(opaque_cells_.begin(), opaque_cells_.end(), false);
             return;
         }
         // 只在位移达到整格时滚动，避免定位抖动让窗口在半格附近来回跳。
@@ -125,6 +131,8 @@ namespace mini_nav_core
 
         // 搬移观测时间，超出新窗口范围的格恢复为未知。
         std::vector<double> moved_observed_at(raw_.GetCellCount(), kNeverObserved);
+        std::vector<std::vector<PathPoint>> moved_points(raw_.GetCellCount());
+        std::vector<bool> moved_opaque(raw_.GetCellCount(), false);
         const std::size_t width = raw_.GetSizeInCellsX();
 
         for (unsigned int y_cell = 0; y_cell < raw_.GetSizeInCellsY(); ++y_cell) 
@@ -149,11 +157,22 @@ namespace mini_nav_core
 
                     moved_observed_at[static_cast<std::size_t>(new_y) * width + new_x] =
                         observed_at_[static_cast<std::size_t>(y_cell) * width + x_cell];
+                    moved_opaque[static_cast<std::size_t>(new_y) * width + new_x] =
+                        opaque_cells_[static_cast<std::size_t>(y_cell) * width + x_cell];
                 }
             }
         }
         // 更新窗口和观测时间。
         raw_ = std::move(moved);
+        for (std::size_t index = 0; index < points_.size(); ++index) {
+            for (const auto & point : points_[index]) {
+                unsigned int mx, my;
+                if (raw_.WorldToMap(point.x, point.y, mx, my))
+                    moved_points[static_cast<std::size_t>(my) * width + mx].push_back(point);
+            }
+        }
+        points_ = std::move(moved_points);
+        opaque_cells_ = std::move(moved_opaque);
         observed_at_ = std::move(moved_observed_at);
     }
 
@@ -164,6 +183,8 @@ namespace mini_nav_core
     {
         raw_.Fill(kUnknown);
         std::fill(observed_at_.begin(), observed_at_.end(), kNeverObserved);
+        for (auto & points : points_) points.clear();
+        std::fill(opaque_cells_.begin(), opaque_cells_.end(), false);
     }
 
     /**
@@ -233,6 +254,8 @@ namespace mini_nav_core
                          static_cast<unsigned int>(cell_y), 0);
             // 记录观测时间，使用一维索引计算。
             observed_at_[static_cast<std::size_t>(cell_y) * raw_.GetSizeInCellsX() + cell_x] = stamp;
+            points_[static_cast<std::size_t>(cell_y) * raw_.GetSizeInCellsX() + cell_x].clear();
+            opaque_cells_[static_cast<std::size_t>(cell_y) * raw_.GetSizeInCellsX() + cell_x] = false;
 
             // 根据谁先碰到自己对应的边界，更新比例和下一个边界的比例。
             if (next_x < next_y) 
@@ -270,13 +293,21 @@ namespace mini_nav_core
      * @param stamp 观测时刻，秒。
      * @return 标记成功为 true；未居中、越界或时间非有限为 false。
      */
-    bool RollingObstacleGrid::MarkObstacle(double x, double y, double stamp)
+    bool RollingObstacleGrid::MarkObstacle(double x, double y, double stamp, bool precise)
     {
         unsigned int mx = 0;
         unsigned int my = 0;
         if (!centered_ || !std::isfinite(stamp) || !raw_.WorldToMap(x, y, mx, my)) 
         {
             return false;
+        }
+        const auto index = static_cast<std::size_t>(my) * raw_.GetSizeInCellsX() + mx;
+        if (!precise) {
+            points_[index].clear();
+            opaque_cells_[index] = true;
+        } else {
+            if (observed_at_[index] != stamp) points_[index].clear();
+            points_[index].push_back({x, y});
         }
         raw_.SetCost(mx, my, kObstacle);
         observed_at_[static_cast<std::size_t>(my) * raw_.GetSizeInCellsX() + mx] = stamp;
@@ -312,6 +343,8 @@ namespace mini_nav_core
                 raw_.IndexToMap(index, location);
                 raw_.SetCost(location.x, location.y, kUnknown);
                 observed_at_[index] = kNeverObserved;
+                points_[index].clear();
+                opaque_cells_[index] = false;
             }
         }
     }
@@ -332,5 +365,25 @@ namespace mini_nav_core
     const Costmap2D & RollingObstacleGrid::Raw() const
     {
         return raw_;
+    }
+
+    Costmap2D RollingObstacleGrid::CollisionGrid() const
+    {
+        auto coverage = raw_;
+        for (std::size_t index = 0; index < points_.size(); ++index) {
+            if (!opaque_cells_[index] && !points_[index].empty()) {
+                MapLocation cell{};
+                coverage.IndexToMap(index, cell);
+                coverage.SetCost(cell.x, cell.y, 0);
+            }
+        }
+        return coverage;
+    }
+
+    std::vector<PathPoint> RollingObstacleGrid::ObstaclePoints() const
+    {
+        std::vector<PathPoint> result;
+        for (const auto & points : points_) result.insert(result.end(), points.begin(), points.end());
+        return result;
     }
 }

@@ -1,16 +1,36 @@
 # mini_nav 项目状态
 
-最后更新：2026-10-04
+最后更新：2026-10-06
 目标平台：ROS 2 Jazzy
 
 `mini_nav` 是用于逐步理解移动机器人导航链路的自研学习项目。它以小而可验证的模块推进，并在后期与 `nav2_learning` 中的官方 Nav2 案例对照；`nav2_learning` 不属于本项目的运行依赖。
+
+本次依据 `logs/` 下全部 15 个日期目录（2026-08-27 至 2026-10-06）补充。下文区分调研方案、已实现能力、实际验收及撤回实验；历史记录中的参数、测试数量和未完成项只表示对应轮次。测试与仿真结果来自已有日志，本次文档整理未重新构建、测试或运行机器人。
+
+## 当前状态摘要（截至 2026-10-06）
+
+- 已形成自研基础单目标导航闭环：定位、全局规划、路径跟踪、局部障碍处理、重规划、取消/抢占、有限失败与独立失联停车。不能再把当前项目描述为只有静态路径可视化。
+- 定位有三个独立使用方向：默认自研 AMCL；FAST-LIVO2 融合前端加 GICP 旧图定位；SCURM FAST-LIO2 的 ICP 初始化和固定先验定位。后两者复用自研导航核心，均保留人工初值和质量/会话失效门控。
+- 显示膨胀已对齐 Nav2 learning；安全判定采用独立的连续车体几何。最新修复保留静态地图定位预算，同时将实时 LaserScan 端点留在 `odom` 检查相对距离，避免重复叠加绝对地图定位误差。
+- 最新日志验收为 **103 个实际用例通过**（core 75、nodes 27、RViz 1）；隔离 Gazebo 中 7 次任务成功、7 次停车后重新规划成功。该结果对应 10 月 6 日的有限场景，不代表所有定位后端、地图和长期运行均已验收。见 [复发问题评估](../logs/26-10-6/recurrent_failure_assessment.md)及[测试计数](../logs/26-10-6/recurrent_failure/current_test_counts.json)。
+
+| 使用方向 | 入口 | 当前边界 |
+|---|---|---|
+| 默认 AMCL 导航 | `ros2 launch mini_nav_bringup mini_localization_astar.launch.py` | 自研 AMCL 与导航核心；默认域 61、分区 `mini_nav` |
+| FAST-LIVO2 建图 / 旧图导航 | `fastlivo_mapping.launch.py` / `fastlivo_navigation.launch.py`（`mini_nav_bringup`） | 建图与导航独立启动；绑定三维/二维资产，导航只读旧图、人工初值 GICP；见 [包说明](../mini_nav_fastlivo/README.md) |
+| SCURM FAST-LIO2 先验导航 | `ros2 launch scurm_sim fastlio2_navigation.launch.py` | 使用 `install_mini_nav_fastlio`；默认域 227、分区 `scurm_mini_nav`；见 [定位后端说明](localization_backends.md) |
+
+构建完成不会热替换已有进程。10 月 6 日增加了 `CollisionMap.points_frame_id`，使用该修复需一起重启整套导航 launch，再初始化定位；日志中保留的现场进程不能视为已自动升级。
 
 ## 文档入口
 
 - [架构说明](architecture.md)：模块职责、依赖方向、ROS 接口、TF 和启动链路。
 - [贡献指南](contributing.md)：修改位置、代码风格、测试命令、运行验收和提交检查清单。
-- [官方 AMCL 代码导读](amcl_code_walkthrough.md)：从节点启动、地图和初始位姿，到粒子更新、激光模型和 `map -> odom` 发布的源码承接关系。
+- [官方 AMCL 代码导读](../logs/26-8-30/amcl_code_walkthrough.md)：从节点启动、地图和初始位姿，到粒子更新、激光模型和 `map -> odom` 发布的源码承接关系。
 - [规划代价地图](planning_costmap.md)：障碍膨胀、安全余量、A* 代价与 RViz 显示。
+- [单目标导航任务](navigation_tasks.md)：Action、重规划、定位门控、取消和速度保护。
+- [局部代价地图](local_costmap.md)：滚动窗口、观测清除、连续端点与失效策略。
+- [定位后端目录说明](localization_backends.md)：AMCL / FAST-LIO2 源码归属及独立构建入口。
 
 ## 当前单目标任务版本（2026-09-30）
 
@@ -35,6 +55,9 @@ SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定�
   - 静态障碍物膨胀、安全区与软代价 A* 规划。
   - 代价地图与 A* 规划器的单元测试。
   - `localization/` 中的 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`。
+  - 规划、后处理与跟踪器共用连续圆盘扫掠；静态格按面积检查，实时二维扫描保留连续端点。
+  - 安全起点可连接所属或八邻接格中心；终点检查覆盖控制器允许的 0.12 m 停车圆盘。
+  - 小规模差分候选运动选择、反应/制动预测与有界避障；没有安全候选时停车。
 - `mini_nav_nodes`
   - 从 map_server 的 `/map` 接收 `nav_msgs/msg/OccupancyGrid`，转换为 `Costmap2D`。
   - 通过 `map_file` 参数直接加载标准 trinary YAML/PGM 地图，并发布 `/mini_nav/map`。
@@ -43,10 +66,19 @@ SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定�
   - 独立发布 `/mini_nav/planning_costmap`，不改变原始地图和 AMCL 输入。
   - `AmclNode` 生命周期节点及 `/amcl_pose`、`/particle_cloud`、`map -> odom` 适配。
   - AMCL 定位更新与 TF 发布解耦：未达运动阈值时，仍按激光时间戳重发缓存的 `map -> odom`。
+  - 单目标任务管理、三个标准 Action、任务暂停、取消/抢占、动态受阻重规划与有限超时。
+  - `CollisionMap` 原子传递原始格、连续端点、观测帧、误差预算和有效性；失效时撤销运动许可。
+  - 独立 `velocity_guard_node` 唯一发布 `/cmd_vel`，命令/任务心跳超时、时钟异常和非法速度归零。
+- 三维定位与地图实验
+  - `mini_nav_fastlivo` 建图/旧图导航、成对资产校验、完整会话记录和离线概率射线重放。
+  - SCURM FAST-LIO2 固定先验定位、`/initialpose` 与后端会话重启；源码和独立部署归入 `mini_nav`。
 - 可视化
   - 已有 RViz 配置可显示静态地图、全局路径和地图坐标轴。
+  - 导航状态面板提供任务反馈和取消；PS5 面板提供手动开关和限速。最新避障状态显示为“正在避障”。
 
-## 本次完成记录
+## 历史完成记录
+
+以下保留原有阶段记录；其中“尚未接入”“未验收”等描述不用于判断后续版本。全日期日志补充及当前边界见后文。
 
 ### 默认地图切换（2026-09-30）
 
@@ -133,53 +165,156 @@ SCURM FAST-LIO2 先验定位已接入自研导航并支持 `/initialpose`。定�
 - 新增 9 项粒子滤波单元测试；与原有地图/A* 测试一起通过，测试结果为 26 项、0 错误、0 失败、0 跳过。
 - 该记录描述 2026-08-27 的核心阶段；当前已继续完成差分运动模型、激光模型、`PoseBinIndex`、ROS 适配节点和自研 launch 接入。
 
+## 全日期日志补充
+
+按日志日期排序；同一天先调研、再实现或撤回的记录分别说明。`before/` 和 `source_before_rollback/` 是历史源码/文档备份，不重复算作功能完成记录。日志中的运行 PID、窗口和“当前正在运行”只表示采集当时状态。
+
+### 2026-08-27：AMCL 学习与自研定位路线
+
+完成 [AMCL 学习资料](../logs/26-8-27/amcl_research.md)，梳理地图、激光、里程计、初始位姿、生命周期及动态 `map -> odom`，形成运动模型、传感器模型、粒子滤波与 ROS 接入的阶段路线。它是学习和设计依据，不能把官方 KLD、恢复或服务接口都计为当日自研能力；自研 M1 的实现和测试见前面的历史记录。
+
+### 2026-08-29：AMCL 源码细节与模块分工
+
+补充 [源码细节串联](../logs/26-8-29/technicial-detail-elaboration.md)：扫描时间 TF / MessageFilter、地图距离场、KLD 位姿分箱、协方差、主簇选择及参数归属。明确核心算法与 ROS 消息/TF 适配分离；本记录为解释资料，没有新增运行验收。
+
+### 2026-08-30：官方 AMCL 输入到输出导读
+
+完成 [官方代码导读](../logs/26-8-30/amcl_code_walkthrough.md)，串联生命周期、地图转换、粒子初始化、运动/观测更新、重采样、聚类和 TF 输出；引用项目内 Jazzy 参考源码，区分真实代码片段与伪代码。自研 ROS 接入、回调组修复和基础定位验证见前面的同日记录，导读本身不证明与官方全部功能等价。
+
+### 2026-08-31：官方路径规划方案调研
+
+[规划方案调研](../logs/26-8-31/official_path_planning_research.md)明确以 SmacPlanner2D 作为二维基线，先补安全代价语义、八邻域与后处理，再按需求评估 Theta*、Hybrid-A* 或 Lattice。动态避障还需观测层、控制与重规划；调研未修改代码或执行构建。当天 AMCL TF 连续刷新修复另见历史完成记录。
+
+### 2026-09-02：完整导航路线与验收基线
+
+[路径规划路线报告](../logs/26-9-2/nav2_path_planning_roadmap.md)提出官方基线、代价地图、A* 升级、路径后处理、插件边界、控制/恢复及 A/B 指标。这是当时的路线设计，后来实际采用自研 Action 状态机与导航核心；不能把报告提出的 Planner Server 插件、官方 Controller 或行为树视为已经接入。
+
+### 2026-09-12：定位命名、数值保护与位姿推导
+
+- [命名与魔法数字整改](../logs/26-9-12/localization_naming_and_magic_number_audit.md)修复类型定义顺序和 BeamModel 命名空间，增加 `ComposePose2D()`、`PoseBinIndex`、地图三态接口、具名常量与非有限输入保护；兼容旧接口和 ROS 参数名。
+- 六个定位源文件语法检查、三包构建、launch 参数及所选包 26 个测试通过；当时全工作区汇总为 35 条记录，不能与实际用例重复累计。该轮仍未实现的主簇/随机恢复项，应按后续源码和 9 月 30 日报告判断。
+- [位姿复合矩阵推导](../logs/26-9-12/pose_transform_matrix_derivation.md)解释 `T_parent_child = T_parent_base × T_base_child` 及平移/角度复合，属于学习文档，没有独立运动验收。
+
+### 2026-09-28：从当前位置安全规划的下一步研究
+
+[完整导航差距调研](../logs/26-9-28/navigation_completion_research.md)指出 `/initialpose` 缓存不能充当移动车辆的实时起点，提出规划时查询当前 TF、路径朝向、失效清理与安全间距验收。该报告后来标注 9 月 29 日已实现实时起点；它记录的四邻域、缺少控制器等描述属于当时快照。
+
+### 2026-09-29：A*、后处理、局部图及闭环分工
+
+- [A* 改进研究](../logs/26-9-29/astar_upgrade_research.md)提出八邻域、禁止穿角、连续车体校验、实际起点连接和可回退后处理；调研时未修改规划器或运行测试。
+- [平滑与局部图研究](../logs/26-9-29/path_smoothing_local_costmap_research.md)区分全局几何路径和 `odom` 滚动观测图，要求射线清除、观测过期和后处理复核。[局部图后的导航缺口](../logs/26-9-29/navigation_gap_after_local_costmap_research.md)继续定义跟踪、停车、动态重规划和任务结束的职责。
+- 实时起点、AMCL bond、滚动原点边界及 Gazebo 障碍出现/清除的实现验收已记录在前文；报告中的建议不能单独视为这些实现的证据。
+- `map_diff_research.md` 和 `plan_next.md` 当前为空文件，没有可补充的结论或验收结果。
+
+### 2026-09-30：基础单目标导航闭环完成
+
+- [差距研究](../logs/26-9-30/navigation_gap_research.md)及[完成度审计](../logs/26-9-30/navigation_completion_audit.md)确认已有跟踪器，同时指出任务身份、取消、有限受阻处理、定位门控和独立停车边界的缺口。
+- [碰撞误停诊断](../logs/26-9-30/collision_risk_diagnosis.md)与[修复报告](../logs/26-9-30/collision_risk_fix_report.md)将前视直线检查改为实际候选弧线扫掠；冻结快照误停由 84/84 变为 0/84，并有隔离节点闭环和单轮 Gazebo 到达停车。该轮测试为 51 个 gtest，通过不代表长期路线已验收。
+- [闭环实施报告](../logs/26-9-30/navigation_completion_implementation.md)完成三个 Action、取消/抢占、激光融合重规划、20 s 受阻/无进展和 180 s 总期限、定位质量/会话门控、独立 0.35 s 命令看门狗与统一任务启停。修复局部栅格二次投影导致掉头起点被拒绝，改为原始端点单次投影。
+- 最终四包构建、**60 个 gtest + 9 个隔离 ROS 集成场景，共 69 项通过**；干净隔离 Gazebo 中连续前进、前进、掉头三个任务成功并零速。到达误差按实时地图 TF 计算，不是 Gazebo 真值定位精度；重复仿真服务器污染的一轮没有计入通过结果。
+- [RViz 导航面板](../logs/26-9-30/rviz_navigation_status_panel.md)与[入口环境内置](../logs/26-9-30/launch_environment_update.md)提供状态/任务控制及默认域、分区、DDS 配置。系统 RViz 完整窗口退出异常仍有记录，隔离插件测试通过不能代替整窗退出验收。速度、目标容差及入口细节保留在后面的同日历史记录。
+
+### 2026-10-01：FAST-LIVO2 后端和独立分支研究
+
+[接入调研](../logs/26-10-1/fastlivo_localizer_integration_research.md)、[分支方案](../logs/26-10-1/fastlivo_navigation_branch_plan.md)及[参考项目清单](../logs/26-10-1/fastlivo_reference_projects.md)固定算法/移植版本，明确真正三维 LiDAR、IMU、相机输入，以及先验地图配准、私有坐标、外参、质量和代际协议。推荐官方 FAST-LIVO2 作算法基线、RDR ROS 2 移植加 Jazzy 补丁；普通里程计或 PCD 保存不等于旧图定位。这一天仅研究，未创建分支、安装、构建或运行前端。
+
+### 2026-10-02：FAST-LIVO2 仿真前端部署
+
+[部署验收](../logs/26-10-2/fastlivo2_gazebo_deployment.md)在 `src/fastlivo2_deploy` 固定 RDR 提交 `837b7bbc1431cb04cf936528e52c83c835efba8e` 及依赖，完成 Jazzy 构建、Waffle 三维传感器、最终融合状态/测量时间和 QoS 适配。视觉匹配与 EKF 更新实际执行，不是 LIO-only 冒充 LIVO。
+
+五包构建、3 个实际 gtest 通过；短程直行/转向的 249 对有效真值样本，相对位置 RMSE 0.01918 m、最大 0.02985 m，终点相对姿态误差 0.675°。这是首帧对齐后的短程仿真结果，当天尚无旧图定位或 mini_nav 导航闭环。
+
+### 2026-10-03：累计地图、手柄、双入口与墙厚实验
+
+- **几何和彩色地图保留。** [三维地图存盘](../logs/26-10-3/fastlivo2_persistent_mapping.md)保留完整世界扫描，体素累计、持久 QoS、原子 PCD 与独立会话目录；新增 6 个 pytest 加原 3 个 gtest 通过。修复 x86 Eigen/PCL 对齐导致的退出崩溃后，427 帧处理及退出存盘通过。[彩色地图](../logs/26-10-3/fastlivo2_persistent_color_mapping.md)保留首次 XYZ/RGB，9 个 pytest 加 3 个 gtest 通过，真实输入中历史位置/颜色、存盘和退出验证通过。累计 PCD 不恢复完整视觉/滤波器状态。
+- **合并启动和手动控制。** [Gazebo/RViz 合并入口](../logs/26-10-3/gazebo_rviz_combined_launch.md)完成窗口启动及地图/轨迹数据链，但严格全部进程正常退出验收失败，系统 RViz 问题未修复。[PS5 USB 控制](../logs/26-10-3/ps5_dualforge_gazebo_control.md)复用用户驱动，L1 切换、蓝/红灯与振动获用户实测确认，唯一 guard 输出速度；2 m/s、2 rad/s 是手动指令上限，不是实际高速性能指标。[PS5 面板](../logs/26-10-3/ps5_rviz_control_panel.md)完成开关、原子限速、单轴零速、断连停车和真实 RViz 插件测试；模拟 USB 测试不能替代真实面板操作体验验收。
+- **独立建图与旧图导航。** [三维到二维方案](../logs/26-10-3/fastlivo_3d_to_2d_navigation_plan.md)随后落实为[双入口原型](../logs/26-10-3/fastlivo_two_launch_implementation.md)：保存三维/二维绑定包，导航重启后只读 GICP 定位，保持一套导航核心。11 个新包用例、19 个节点用例、9 个仿真存储用例通过；短程建图、原/偏移出生点导航、前端暂停撤销任务并停车通过，地图哈希不变。尚无全局自动地点搜索或长程精度验收。
+- **墙厚复现与撤回。** [两次复现](../logs/26-10-3/wall_thickness_reproduction/report.md)记录原始黑墙占用带约 11.83–11.84 cm 增至 16.16 cm，支持投影偏差、永久命中累积和二维噪声命中叠加。[在线修复实验](../logs/26-10-3/wall_thickness_fix_report.md)曾实现 GICP、分层证据、有限首帧平面融合与历史重建，18 个 pytest 和短程回归通过，但墙带增长仅勉强低于半格门限；**随后按用户要求撤回**，见[撤回说明](../logs/26-10-3/wall_fix_rollback_20261003_233723/README.md)。恢复原布尔建图和 schema 1，实验地图/记录保留，不能将撤回功能列为当前能力。
+- [墙厚与膨胀研究](../logs/26-10-3/wall_thickness_inflation_research.md)跨 10 月 3–4 日提出逐帧记录、离线联合优化、概率射线重放与成对地图导出；该研究并不证明 HBA、Global-LVBA 或 GLIM 已成功改善本机地图。
+
+### 2026-10-04：离线地图、稠密对照与 FAST-LIO2 接入
+
+- **离线概率候选图。** [实施与 A/B](../logs/26-10-4/offline_wall_validation_report.md)记录存档 `42551e8`、实验分支 `experiment/fastlivo_offline_wall_map`，实现完整 IMU 系扫描/同时间位姿记录、真实 LiDAR 原点射线重放、2 cm 三维概率体素和 5 cm 高度图。三轮新图墙带约 11.83 cm，旧在线最终约 13.66–14.34 cm；通道内侧误占并非每轮改善，不能声称漂移消失。HBA CLI 已构建并试跑，首轮墙带变差，因此默认使用原轨迹重放，HBA 保留显式对照。17 个 pytest 加 5 个包装记录通过，偏移起点旧图短程导航成功；在线预览和原保存服务仍是布尔累计图。
+- **SLAM 与轨迹基准研究。** [SLAM Toolbox 比较](../logs/26-10-4/fastlivo_vs_slam_toolbox.md)区分融合里程计、概率图重放与自动回环/历史全局校正；[轨迹与基准接口核对](../logs/26-10-4/trajectory_benchmark_reference.md)明确 small_gicp `T_target_source`、射线原点和 SLAM Toolbox 2.8.5 旁路配置/保存陷阱。两份记录是源码研究，没有同数据 SLAM Toolbox 性能 A/B 或完整全局回环验收。
+- **高度与图片实验。** [车高调查](../logs/26-10-4/gazebo_vehicle_height.md)及[快照/浏览器投影](../logs/26-10-4/lidar_snapshot_height_projection.md)核实当前 collision 顶高约 0.1485 m，提供独立 `lidarmap.pcd` 快照、地面基准和高度切片界面；14 个 pytest 加 2 个包装结果通过，实际浏览器生成/下载和快照哈希验证通过。[断点处理](../logs/26-10-4/projection_gap_processing.md)补入 165 个推断障碍格，保留原黑点及未知语义，19 个 pytest 加 2 个包装结果通过。图片没有自由空间证明、未切换为导航地图；原输入地面基准约偏差 20 cm，补点不能修正它。后续用户取消高度界面方向，转用既有二维地图。
+- **稠密输出和上游对照。** [稠密输出](../logs/26-10-4/fastlivo_dense_output.md)开启后修复 VIO 清空临时扫描造成的空帧，使用 LIO 缓存完整扫描再按最终位姿投影；世界云每帧约 2403 → 21368 点，定位/累计保存仍用 10 cm 体素。[独立上游对照](../logs/26-10-4/upstream_dense_reference.md)隔离 `fast_livo_reference` 和构建目录，保留移植基线的四个算法/发布/保存函数，真实静止保存约 230 万原始 RGB 点。用户一轮退出竞态导致的新地图未保存、无法恢复；修复信号处理后新会话存盘成功，不能把新验证图冒充失败会话的恢复结果。
+- **既有二维图 + FAST-LIVO2。** [静态图绑定验收](../logs/26-10-4/static_map_fastlivo_navigation.md)保持 `tb3_learning` 像素、尺寸和原点，将三维先验对齐并绑定；新增 4 个测试通过，当轮包汇总 32 条、2 条离线依赖测试跳过。独立域 226 偏移出生点导航成功、地图哈希不变、无 AMCL/建图节点；该组合显式关闭三维 collision cloud，局部障碍使用二维扫描。
+- **战队开源方案核查。** [SCURM 调查](../logs/26-10-4/scurm_sentry_navigation_research.md)和[与默认 AMCL 链比较](../logs/26-10-4/scurm_vs_mini_nav_navigation_analysis.md)确认上游是 FAST-LIO2、Theta*、MPPI Omni 与恢复/比赛决策；当前接入定位不等于引入整套战队导航。[TDT 组件核验](../logs/26-10-4/tdt_navigation_open_source_research.md)及[固定版本比较](../logs/26-10-4/tdt_vs_mini_nav_navigation_analysis.md)分析 A*/动力学搜索与 MinimumSnap。普通 A* 小地图探针编译运行通过，完整示例因 OsqpEigen 缺失配置失败；没有双方导航性能排名。限定探针与失败记录见[证据说明](../logs/26-10-4/tdt_comparison_evidence/README.md)。
+- **SCURM 部署与自研导航。** [建图部署](../logs/26-10-4/scurm_fastlio2_gazebo_deployment.md)完成三维 LiDAR/IMU FAST-LIO2 建图和短程运动，轮式相对位移差约 4.39 mm 只表示一致性。[先验定位接入](../logs/26-10-4/scurm_fastlio2_mini_nav_localization.md)采用 ICP 初始化与固定 ikd-tree 定位，发布动态 `map -> odom`、同时间匹配质量和 epoch，复用原二维地图、自研 Action 与 guard。往返导航、暂停前端约 0.4245 s 后定位失效/零速及恢复不续跑通过；加入终点转向迟滞以处理到达边界振荡，成功容差仍为 0.12 m。
+- **人工初值、源码整理与直接入口。** [initialpose 接入](../logs/26-10-4/scurm_fastlio2_initialpose.md)替代自动初始化：未初始化拒绝目标，重新设置立即撤销任务并重启自身 ICP/FAST-LIO2，会话隔离；24 个 pytest 及隔离 Gazebo 验收通过。[源码整理](../logs/26-10-4/scurm_source_reorganization.md)归档 AMCL/FAST-LIO2 内核、ROS 接入和 `mini_nav_fastlio`，97 个实际用例通过并复验重置/到达；原算法和注释按哈希保留。[直接 launch](../logs/26-10-4/scurm_direct_launch.md)正式提供 `scurm_sim/fastlio2_navigation.launch.py`，设置域/分区与子进程环境，24 个 pytest 和独立无界面导航通过。默认 AMCL 保留，FAST-LIO2 入口不启动 LIVO2。
+
+### 2026-10-05：膨胀对齐、统一碰撞几何与边界修复
+
+- **膨胀核和默认参数分两轮对齐。** [同图差异研究](../logs/26-10-5/mini_nav_vs_nav2_inflation_and_motion.md)区分硬圈、软圈与控制策略；[膨胀核实现](../logs/26-10-5/inflation_alignment_implementation.md)对齐 Nav2 1.3.12 全图传播/代价/未知接收规则，默认地图 11536 格及随机地图逐格一致，80 个实际回归用例通过。[learning 默认对齐](../logs/26-10-5/inflation_defaults_learning_alignment.md)再设置显示内切半径 `0.22549849949589046 m`、外半径 `0.70 m`、衰减 `3.0`，83 个用例通过；真实车体 `0.24 + 0.02 m` 安全约束独立保留。此阶段曾让跟踪器读取双安全膨胀图，后续统一几何阶段改为原始碰撞快照。
+- **现场碰撞误停诊断与方案。** [冻结现场诊断](../logs/26-10-5/collision_risk_live_diagnosis.md)复现中心格允许、连续车体拒绝，以及动态端点扩大成整个栅格和旧候选反复重试。[SCURM 碰撞/恢复源码核查](../logs/26-10-5/scurm_collision_handling_source_review.md)指出多候选/地图分工可借鉴，Omni 和自定义恢复不能原样复制；[修复方案](../logs/26-10-5/collision_risk_solution_proposal.md)提出统一几何、连续端点、静态与稳定动态分工和有界恢复。
+- **统一几何与多候选实施。** [实施评估](../logs/26-10-5/collision_risk_implementation_assessment.md)完成 `CollisionGeometry`、原子 `CollisionMap`、`static_then_stable`、合法差分候选及重规划前取消旧 FollowPath；受阻/总期限不随重试清零，未启用自动倒车或初始重叠脱离。实测约 4 cm 定位误差促使增加显式 map 定位预算 0.03 m。93 个实际用例通过；隔离 Gazebo 四段静态路线和真实箱体绕行成功，前端冻结约 0.411 s 后零速、停车位移约 0.0313 m，独立真值几何审计通过。该轮 map 动态端点 0.32 m 判据后来在 10 月 6 日按观测来源修正。
+- **安全终点与停车圆盘。** [到达后起点拒绝评估](../logs/26-10-5/start_rejection_after_path_assessment.md)修复规划/控制快照端点遗漏和首轮终点只查静态几何，增加覆盖 0.12 m 停车圆盘的终点净空；96 个实际用例通过。第一轮仍失败并保留证据，第二轮原五目标 5/5 到达、5/5 停稳后规划成功、0 次 `collision_risk`；到达指实际安全终点，可能在原目标 0.5 m 容差内替代。
+- **未知状态与安全起点连接。** [显示/起点修复](../logs/26-10-5/unknown_state_stop_assessment.md)将 `avoiding_obstacle` 显示为“正在避障”，并允许实际安全位置连接多个安全邻接中心，避免所属中心不安全导致无路。100 个实际用例通过；冻结现场、无底盘真实规划节点、真实 RViz 插件和隔离 Gazebo 五次完整任务通过。所有阶段保持真实车体和未知禁行约束，不宣称有限回归覆盖了后续所有复发。
+
+### 2026-10-06：实时激光与静态地图误差预算分离
+
+[复发诊断与验收](../logs/26-10-6/recurrent_failure_assessment.md)先核验原进程确为上轮新版，再复现同一实时点在 map 判据下需 0.32 m、在 odom 下只需 0.29 m 的冲突；冻结最近点距车约 0.31147 m，静态格安全，却被多加的 map 定位预算拒绝。本次不是简单把问题归因于未重启。
+
+`CollisionMap.points_frame_id` 明确端点观测帧。实际 LaserScan 端点按扫描时刻投影并保留在 `odom`，规划/平滑/控制将轨迹变换到该帧检查；静态地图继续在 `map` 按格面积和绝对定位预算检查。同帧 map 端点兼容路径仍保留原保守预算，未知帧、非法点、TF/输入失效继续拒绝。
+
+| 当前几何来源 | 基础检查距离 | 预算含义 |
+|---|---:|---|
+| map 静态格、边界与未知格 | 0.29 m | 车体 0.24 + 安全 0.02 + 地图定位 0.03 |
+| odom 原始实时 LaserScan 端点 | 0.29 m | 车体 0.24 + 安全 0.02 + 观测 0.03 |
+| 原 map 同帧端点兼容输入 | 0.32 m | 保留原定位和观测两项预算 |
+
+终点另加 0.12 m 停车圆盘约束，显示膨胀值保持 10 月 5 日 learning 对齐结果。该预算针对当前仿真，观测 0.03 m 来源于 1 cm Gaussian 噪声的三倍标准差，并非绝对噪声界。
+
+四包构建及 13 个当前注册 CTest 目标通过，共 **103 个实际用例**。冻结完整地图得到安全 12 格路径；无底盘真实规划/控制节点成功，注入真正危险端点仍 `collision_risk` 并输出零速。独立域 228 Gazebo 复建物理位置后 **7 次任务及 7 次停车后规划全部成功**。2181 个真值样本的保守几何审计中，中心到柱/墙表面的距离下界分别为 0.326228 / 0.504675 m，均大于 0.26 m；最大定位误差 0.037688 m。测试环境已清理，用户现场保留；没有复现用户五小时运行的全部历史，也没有证明任意障碍和误差下都能通行。
+
 ## 当前边界
 
-当前 A* 可以接收 map_server 提供的静态 `/map` 并进行规划，AMCL 基础定位链路已经打通，但仍是静态地图上的规划与可视化演示，尚未构成可移动机器人的完整导航闭环。以下能力尚未接入：
+当前已具备低速基础单目标导航，规划和执行仍分别承担职责：`/mini_nav/global_path` 是几何参考与显示，不能绕过 FollowPath、定位/观测门控和 guard 直接作为运动许可。
 
-- Gazebo 长时间运动下的 AMCL 粒子收敛指标、定位误差和丢失恢复验证。
-- 路径跟踪、碰撞规避、恢复行为和 `/cmd_vel` 速度控制。
-- 局部图的障碍更新已独立验收；尚未接入路径执行时的局部避障和安全停车。
+- 尚无全部 Nav2 行为树、动态控制器插件、多目标巡航/对接、统一全栈 Lifecycle cleanup、实时调度或硬件急停；已有有限候选避障不等于完整 MPPI 或自动碰撞脱离。
+- AMCL KLD 仍为简化实现，beam-skip/位姿持久化等兼容参数不等于已生效；长期真值误差、收敛、错误但自信的定位和搬移恢复仍缺少全面量化验收。
+- FAST-LIVO2 / FAST-LIO2 旧图定位要求合格三维先验与人工邻域初值；未知位置全局搜索、重复走廊歧义、绑架恢复、实车时序/标定、坡道/多层/负障碍尚未验收。不能把近邻残差或轮式一致性当作绝对定位精度。
+- 在线 FAST-LIVO 高度图仍是布尔累积预览；离线概率重放改善了部分墙带指标，尚未证明全部通道净宽和长程漂移解决。日志没有完整自动回环/历史全局校正的通过记录；HBA 首轮未改善，不能作为默认成功后端。
+- 独立 guard 能处理命令/任务失联，不保证自身、DDS、bridge、系统或驱动故障时机械停车。已测有限仿真停车位移和指令响应，实车仍需驱动超时、制动测量与硬件保护。
+- 系统 RViz 完整数据窗口退出异常仍未闭合；Wayland/XWayland 黑图不算截图验收。已有真实插件和部分浏览器测试通过，不能推断所有 GUI 和真实手柄面板体验已验收。
+- 10 月 5–6 日成功路线对应 SCURM/FAST-LIO2 平地 Waffle 与指定地图；没有据此完成默认 AMCL、FAST-LIVO2、全部地图/动态场景的同等运动验收和长期成功率统计。
 
-因此，当前阶段不能把 `/mini_nav/global_path` 视为机器人可执行轨迹。
+## 下一里程碑：重复路线与跨后端安全验收
 
-原 `maps/turtlebot3_map.yaml` 已接入官方 map_server 和自研 AMCL，初始位姿、激光、TF 和 `map -> odom` 基础链路已验证，低速 teleop 下的 TF 连续刷新也已通过；仍需用长时间和可量化的运动轨迹评估定位误差、收敛速度和丢失恢复能力。
+下一步应在保留自研核心和当前安全预算的基础上，把最新修复纳入可重复系统验收：
 
-## 下一里程碑：路径跟踪与安全停止
-
-下一步利用已经建立的 `map -> odom -> base_*` 链路实现路径跟踪，不直接接入 Nav2 控制器：
-
-1. 在已验证的 `map -> odom -> base_*` 链路上接入路径跟踪。
-2. 将 `/mini_nav/global_path` 转换为受限 `/cmd_vel`，先实现低速路径跟踪。
-3. 加入目标到达、超时和零速度安全停止。
-4. 保持 `astar_demo` 与仿真、定位入口边界清晰：路径规划和路径执行仍然是两个可独立验证的模块。
+1. 固定同一地图、底盘、目标序列和判定口径，记录原目标、实际终点、逐帧候选、TF/scan 和独立真值，重复验证连续任务、窄通道、柱边与临时/持续阻挡。
+2. 分别在 AMCL、FAST-LIVO2 和 FAST-LIO2 入口验证重定位、取消/抢占、扫描/TF/时钟失效及进程冻结，报告失败原因、停车时延/距离、最小净空和定位误差。
+3. 对地图实验分别验收在线预览、离线候选和静态图绑定；固定参考墙与通道净宽，保留低障碍/未知，不用缩小真实车体预算掩盖地图误占。
+4. 使用同一底盘与运动约束做 Nav2 对照，区分膨胀逐格等价与驾驶性能；补齐长时间统计后再考虑速度、轨迹优化或更复杂恢复。
 
 ### 接口与坐标系约束
 
 - 固定使用 Waffle，以对齐现有官方对照案例和机器人尺寸。
-- Waffle 的 `/cmd_vel` 消息类型是 `geometry_msgs/msg/TwistStamped`；后续控制器必须从该接口开始设计。
+- Waffle 的 `/cmd_vel` 消息类型是 `geometry_msgs/msg/TwistStamped`；原始命令经唯一速度 guard 转发。
 - 仿真阶段使用真实的 `odom -> base_*` 变换。
-- 不发布静态 `map -> odom`。该变换由 AMCL 根据地图、激光和里程计估计产生，避免引入错误的地图坐标语义。
+- 不发布静态 `map -> odom`。由当前选择的 AMCL、FAST-LIVO2 适配器或 FAST-LIO2 适配器动态估计，同一运行图中只有一个来源。
+- 实时扫描端点保留扫描时间和观测帧；地图定位误差用于静态先验关系，不重复加入同一次相对激光几何。
 
 ## 后续学习顺序
 
 1. **Astar 可视化**（已完成）：静态地图、选点和全局路径。
 2. **仿真接口基座**（已完成）：Waffle、时钟、TF、里程计、激光与速度接口。
-3. **定位与坐标系**（官方入口、自研基础链路和 TF 平滑刷新已验证）：继续量化评估 `map -> odom -> base_*` 链路下的定位误差、收敛和丢失恢复。
-4. **路径跟踪与安全停止**：将路径转换为受限速度命令，并加入目标到达、超时和零速度保护。
-5. **代价地图与障碍处理**（局部图构建与 Gazebo 验收已完成）：后续接入局部避障和安全停车。
-6. **官方 Nav2 对照**：将自研模块与 `nav2_learning` 的 AMCL、规划、控制和恢复行为逐项比较。
+3. **定位与坐标系**（三种定位方向已有有限验收）：继续量化定位误差、收敛、重新初始化和失位恢复。
+4. **路径跟踪与安全停止**（基础单目标闭环已完成）：继续验证跨后端故障停车与实际底盘动力学。
+5. **代价地图与障碍处理**（滚动观测、候选避障、重规划和连续几何已接入）：扩展窄道、长期动态环境及误差边界验收。
+6. **官方 Nav2 对照**（膨胀核和 learning 默认参数已逐格验证）：继续同底盘控制/恢复性能 A/B，不以色圈一致推断导航性能一致。
+7. **地图与轨迹实验**：在可重放会话上评估全局历史校正、通道净宽和带时间轨迹，不将设计报告直接计为实施。
 
 ## 验收记录方式
 
 每完成一个里程碑，在本文件补充：完成日期、启动命令、验证过的话题/TF、测试结果、已知限制，以及下一步的唯一目标。
 
 
-## 2026-09-30：提高速度与不可达目标容差
+## 早期记录补充（2026-09-30）：提高速度与不可达目标容差
 
 本次在已有路径跟踪器上调整配置，并扩展自研 A* 的目标选择；保持原有安全检查。
-当前完整能力与缺口以 `logs/26-9-30/navigation_gap_research.md` 的代码核查为准，
-上文早期阶段描述不代表当前路径跟踪器尚未实现。
+本段保留当轮配置与验证；随后同日闭环实施及 10 月 5–6 日安全修复见上面的全日期记录。
 
 - `path_follower.yaml`：线速度上限从 0.10 提高到 0.15 m/s，角速度上限从
   0.40 提高到 0.55 rad/s，接近目标、转弯减速和安全停车逻辑保持有效。
@@ -215,7 +350,7 @@ bringup 是资源包，无测试用例。`colcon test-result` 汇总显示 101 �
 配置在启动时读取，需重启导航入口使其生效。
 
 
-## 2026-09-30：修复接近终点时的 collision_risk 误停
+## 早期记录补充（2026-09-30）：修复接近终点时的 collision_risk 误停
 
 跟踪器改为先计算候选速度，再对最多 1 秒且不超过前视距离的实际运动做连续碰撞检查。
 每步不超过 0.05 秒，并计入圆弧到弦的偏离上界；原地转向保留当前位置检查。
@@ -231,7 +366,7 @@ bringup 是资源包，无测试用例。`colcon test-result` 汇总显示 101 �
 详情见 `logs/26-9-30/collision_risk_fix_report.md`。
 
 
-## 2026-09-30：RViz 常驻导航状态面板
+## 早期记录补充（2026-09-30）：RViz 常驻导航状态面板
 
 新增独立包 `mini_nav_rviz_plugins`，通过 RViz Panel/pluginlib 提供中文只读监控。
 `localization_astar.rviz` 默认在右侧加载“导航状态”，显示控制器状态及原因、
@@ -245,7 +380,7 @@ bringup 是资源包，无测试用例。`colcon test-result` 汇总显示 101 �
 后续导航入口自动加载面板，当前旧 RViz 需重新加载工作区环境并重开。
 
 
-## 2026-09-30：完整导航入口内置环境
+## 早期记录补充（2026-09-30）：完整导航入口内置环境
 
 `mini_localization_astar.launch.py` 默认设置域 61、Gazebo 分区 `mini_nav`、
 Cyclone DDS 和 Waffle，无需在完整启动命令里逐项 export。

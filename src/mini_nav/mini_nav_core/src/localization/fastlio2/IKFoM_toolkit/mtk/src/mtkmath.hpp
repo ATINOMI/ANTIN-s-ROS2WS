@@ -75,6 +75,12 @@
  * @brief several math utility functions.
  */
 
+/**
+ * @file mtkmath.hpp
+ * @brief 流形运算的数值容差、周期归一化、叉乘矩阵与旋转指数/对数工具。角度及旋转向量均以弧度表示。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef MTKMATH_H_
 #define MTKMATH_H_
 
@@ -93,6 +99,9 @@ namespace MTK {
 
 namespace internal {
 
+/**
+ * @brief 从流形提取标量、自由度和对应向量/方阵类型。
+ */
 template<class Manifold>
 struct traits {
 	typedef typename Manifold::scalar scalar;
@@ -101,8 +110,14 @@ struct traits {
 	typedef Eigen::Matrix<scalar, DOF, DOF> matrix_type;
 };
 
+/**
+ * @brief 将 float 作为一维 Scalar 流形取得数学类型。
+ */
 template<>
 struct traits<float> : traits<Scalar<float> > {};
+/**
+ * @brief 将 double 作为一维 Scalar 流形取得数学类型。
+ */
 template<>
 struct traits<double> : traits<Scalar<double> > {};
 
@@ -116,9 +131,21 @@ struct traits<double> : traits<Scalar<double> > {};
 //! constant @f$ \pi @f$
 const double pi = M_PI;
 
+/**
+ * @brief 取得标量类型的流形数值容差。
+ * @return float 为 1e-5，double 为 1e-11；其他类型仅声明，未提供通用定义。
+ */
 template<class scalar> inline scalar tolerance();
 
+/**
+ * @brief 返回 float 容差为 1e-5。
+ * @return float 容差为 1e-5。
+ */
 template<> inline float  tolerance<float >() { return 1e-5f; }
+/**
+ * @brief 返回 double 容差为 1e-11。
+ * @return double 容差为 1e-11。
+ */
 template<> inline double tolerance<double>() { return 1e-11; }
 
 
@@ -126,6 +153,13 @@ template<> inline double tolerance<double>() { return 1e-11; }
  * normalize @a x to @f$[-bound, bound] @f$.
  * 
  * result for @f$ x = bound + 2\cdot n\cdot bound @f$ is arbitrary @f$\pm bound @f$.
+ */
+/**
+ * @brief 将周期为 2·bound 的数值归一到 [-bound,bound]。
+ * @param x 待归一化数值。
+ * @param bound 正半周期，角度使用 π（rad）。
+ * @return 等价周期值；端点 ±bound 不保证唯一符号。
+ * @note 要求 bound>0 且 x/bound 可表示为 int；没有超范围或非有限值防护。
  */
 template<class scalar>
 inline scalar normalize(scalar x, scalar bound){ //not used
@@ -139,11 +173,18 @@ inline scalar normalize(scalar x, scalar bound){ //not used
  * @param x2 the squared angle must be non-negative
  * @return a pair containing cos and sinc of sqrt(x2)
  */
+/**
+ * @brief 稳定计算 cos(sqrt(x2)) 和 sinc(sqrt(x2))。
+ * @param x2 非负角度平方，负值触发 assert。
+ * @return 依次为 cos(x)、sin(x)/x 的二元组，x=sqrt(x2)；零处 sinc=1。
+ * @note 小量使用 Taylor 展开，避免零除；阈值依赖标量机器精度。
+ */
 template<class scalar>
 std::pair<scalar, scalar> cos_sinc_sqrt(const scalar &x2){
 	using std::sqrt;
 	using std::cos;
 	using std::sin;
+	/* 用机器精度的逐次平方根决定小角分支；Taylor 同时计算 cos 与 sinc，保留零处的连续极限。 */
 	static scalar const taylor_0_bound = boost::math::tools::epsilon<scalar>();
 	static scalar const taylor_2_bound = sqrt(taylor_0_bound);
 	static scalar const taylor_n_bound = sqrt(taylor_2_bound);
@@ -173,6 +214,11 @@ std::pair<scalar, scalar> cos_sinc_sqrt(const scalar &x2){
 	
 }
 
+/**
+ * @brief 生成向量的三维叉乘矩阵。
+ * @param v 可索引前三分量的向量。
+ * @return 满足 hat(v)·a=v×a 的 3×3 矩阵。
+ */
 template<typename Base>
 Eigen::Matrix<typename Base::scalar, 3, 3> hat(const Base& v) {
     Eigen::Matrix<typename Base::scalar, 3, 3> res;
@@ -182,6 +228,12 @@ Eigen::Matrix<typename Base::scalar, 3, 3> hat(const Base& v) {
 	return res;
 }
 
+/**
+ * @brief 计算旋转微分矩阵的逆转置。
+ * @param v 三维旋转向量（rad）。
+ * @return I+[v]×/2+[1-theta·cot(theta/2)/2][v]×²/theta²；小量返回 I。
+ * @note theta=|v|；接近非零 2π 倍数时含 sin(theta/2) 分母，调用方需限制局部误差。
+ */
 template<typename Base>
 Eigen::Matrix<typename Base::scalar, 3, 3> A_inv_trans(const Base& v){
     Eigen::Matrix<typename Base::scalar, 3, 3> res;
@@ -198,6 +250,12 @@ Eigen::Matrix<typename Base::scalar, 3, 3> A_inv_trans(const Base& v){
     return res;
 }
 
+/**
+ * @brief 计算旋转微分矩阵的逆。
+ * @param v 三维旋转向量（rad）。
+ * @return I-[v]×/2+[1-theta·cot(theta/2)/2][v]×²/theta²；小量返回 I。
+ * @note theta=|v|；接近非零 2π 倍数时含 sin(theta/2) 分母，调用方需限制局部误差。
+ */
 template<typename Base>
 Eigen::Matrix<typename Base::scalar, 3, 3> A_inv(const Base& v){
     Eigen::Matrix<typename Base::scalar, 3, 3> res;
@@ -214,6 +272,13 @@ Eigen::Matrix<typename Base::scalar, 3, 3> A_inv(const Base& v){
     return res;
 }
 
+/**
+ * @brief 构造球面局部坐标的 2×3 微分矩阵。
+ * @param v 二维局部角度向量（rad）。
+ * @param length 球面半径，必须非零。
+ * @return 当前实现计算 res 后没有 return，不能依赖返回值。
+ * @note 这是现有实现缺口，注释仅记录；非零分支还需避开 sin(norm)=0。
+ */
 template<typename scalar>
 Eigen::Matrix<scalar, 2, 3> S2_w_expw_( Eigen::Matrix<scalar, 2, 1> v, scalar length)
 	{
@@ -232,6 +297,11 @@ Eigen::Matrix<scalar, 2, 3> S2_w_expw_( Eigen::Matrix<scalar, 2, 1> v, scalar le
     	}	
 	}
 
+/**
+ * @brief 计算 SO3 指数映射的微分矩阵。
+ * @param v 三维旋转向量（rad）。
+ * @return I+(1-cos(theta))[v]×/theta²+(1-sin(theta)/theta)[v]×²/theta²；小量返回 I。
+ */
 template<typename Base>
 Eigen::Matrix<typename Base::scalar, 3, 3> A_matrix(const Base & v){
     Eigen::Matrix<typename Base::scalar, 3, 3> res;
@@ -246,6 +316,13 @@ Eigen::Matrix<typename Base::scalar, 3, 3> A_matrix(const Base & v){
     return res;
 }
 
+/**
+ * @brief 由向量和缩放量构造指数的标量/向量部分。
+ * @param result 输出 sin(scale·|vec|)·vec/|vec|，零处用连续极限。
+ * @param vec 待指数映射的向量。
+ * @param scale 指数角度缩放量；构造四元数时使用半角。
+ * @return 标量部分 cos(scale·|vec|)。
+ */
 template<class scalar, int n>
 scalar exp(vectview<scalar, n> result, vectview<const scalar, n> vec, const scalar& scale = 1) {
 	scalar norm2 = vec.squaredNorm();
@@ -264,6 +341,15 @@ scalar exp(vectview<scalar, n> result, vectview<const scalar, n> vec, const scal
  * @param vec    vector part of input
  * @param scale  scale result by this value
  * @param plus_minus_periodicity if true values @f$[w, vec]@f$ and @f$[-w, -vec]@f$ give the same result 
+ */
+/**
+ * @brief 将指数的标量/向量部分转换回局部向量。
+ * @param result 写入逆映射的局部向量。
+ * @param w 输入标量部分。
+ * @param vec 输入向量部分。
+ * @param scale 结果缩放量；SO3 逆半角使用 2。
+ * @param plus_minus_periodicity true 时将 [w,vec] 和 [-w,-vec] 视为等价旋转。
+ * @note 小向量模长用 tolerance 保护除法；无符号等价且 w<0 时选最大分量轴表达负实轴分支。
  */
 template<class scalar, int n>
 void log(vectview<scalar, n> result,

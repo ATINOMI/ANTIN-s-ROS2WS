@@ -57,7 +57,7 @@ namespace mini_nav_core
         }
 
         /**
-         * @brief 在 map 与 odom 两张膨胀图上检查候选速度的连续运动。
+         * @brief 在 map 与 odom 两份原始碰撞几何上检查候选速度的连续运动。
          *
          * 预测时长取 min(1 秒, 前视点行程时间) 与制动时间的较大者，
          * 因此制动要求可使预测超出前视点；每段最多 0.05 秒，并补偿圆弧到弦的偏离。
@@ -65,8 +65,8 @@ namespace mini_nav_core
          * @param command 已限幅的非负前向速度和偏航角速度。
          * @param map_pose map 系当前机器人位姿。
          * @param odom_pose odom 系当前机器人位姿。
-         * @param static_map map 系膨胀安全图。
-         * @param local_map odom 系膨胀安全图。
+         * @param static_map map 系原始静态格面积与连续端点。
+         * @param local_map odom 系观测覆盖与连续端点。
          * @param carrot_distance 到前视点的直线距离，米。
          * @param braking_distance 反应行程加制动距离，米。
          * @return 当前位置与全部预测段均安全为 true；非法预测期限或冲突为 false。
@@ -75,17 +75,19 @@ namespace mini_nav_core
             const VelocityCommand & command,
             const localization::Pose2D & map_pose,
             const localization::Pose2D & odom_pose,
-            const Costmap2D & static_map,
-            const Costmap2D & local_map,
-            double carrot_distance, double braking_distance)
+            const CollisionGeometry & static_map,
+            const CollisionGeometry & local_map,
+            double carrot_distance, double braking_distance,
+            double extra_radius = 0.0, CollisionConflict * conflict = nullptr)
         {
             PathPoint map_previous{map_pose.x, map_pose.y};
             PathPoint odom_previous{odom_pose.x, odom_pose.y};
-            if (!IsCircularSweepClear(static_map, map_previous, map_previous, kCenterlineRadius) ||
-                !IsCircularSweepClear(local_map, odom_previous, odom_previous, kCenterlineRadius)) {
+            if (!static_map.IsClear(map_previous, map_previous, extra_radius, conflict)) return false;
+            if (!local_map.IsClear(odom_previous, odom_previous, extra_radius, conflict)) {
+                if (conflict) conflict->local = true;
                 return false;
             }
-            // 两张图已按外接圆膨胀，原地转向只需验证当前中心，不能被远处前视点挡住。
+            // 车体采用外接圆，原地转向只需验证当前位置的完整圆盘。
             if (command.linear_x == 0.0) return true;
 
             // 参考官方 RPP：检查候选速度的短期运动，范围不超过前视目标距离。
@@ -101,7 +103,7 @@ namespace mini_nav_core
             const double advance = command.linear_x * dt *
                 (half_turn == 0.0 ? 1.0 : std::sin(half_turn) / half_turn);
             // 连续圆弧到其弦的偏离上界，计入扫掠半径以免漏掉弦外的碰撞。
-            const double sweep_radius = kCenterlineRadius +
+            const double sweep_radius =
                 std::abs(command.linear_x * command.angular_z) * dt * dt / 8.0;
             PathPoint relative{0.0, 0.0};
             double relative_yaw = 0.0;
@@ -111,8 +113,9 @@ namespace mini_nav_core
                 relative_yaw += command.angular_z * dt;
                 const PathPoint map_next = TransformPoint(map_pose, relative);
                 const PathPoint odom_next = TransformPoint(odom_pose, relative);
-                if (!IsCircularSweepClear(static_map, map_previous, map_next, sweep_radius) ||
-                    !IsCircularSweepClear(local_map, odom_previous, odom_next, sweep_radius)) {
+                if (!static_map.IsClear(map_previous, map_next, sweep_radius + extra_radius, conflict)) return false;
+                if (!local_map.IsClear(odom_previous, odom_next, sweep_radius + extra_radius, conflict)) {
+                    if (conflict) conflict->local = true;
                     return false;
                 }
                 map_previous = map_next;
@@ -193,6 +196,8 @@ namespace mini_nav_core
         goal_yaw_ = NormalizeAngle(goal_yaw);
         aligning_goal_yaw_ = false;
         terminal_status_ = TrackingStatus::kTracking;
+        blocked_ = false;
+        recovery_started_ = -1.0;
         PauseProgress();
     }
 
@@ -204,6 +209,8 @@ namespace mini_nav_core
         path_.clear();
         aligning_goal_yaw_ = false;
         terminal_status_ = TrackingStatus::kNoPath;
+        blocked_ = false;
+        recovery_started_ = -1.0;
         PauseProgress();
     }
 
@@ -238,9 +245,12 @@ namespace mini_nav_core
      * @param distance_to_path 输出到最近线段的欧氏距离，单位为米。
      * @return 前视点；剩余路径不足前视距离时为末点。
      */
-    PathPoint PathTracker::Lookahead(const PathPoint & robot, double & distance_to_path) const
+    PathPoint PathTracker::Lookahead(const PathPoint & robot, double & distance_to_path, double lookahead_distance,
+        std::vector<PathPoint> * prefix) const
     {
+        if (prefix) { prefix->clear(); prefix->push_back(robot); }
         if (path_.size() == 1) {
+            if (prefix) prefix->push_back(path_.front());
             distance_to_path = std::hypot(robot.x - path_.front().x, robot.y - path_.front().y);
             return path_.front();
         }
@@ -265,7 +275,10 @@ namespace mini_nav_core
         }
         distance_to_path = std::sqrt(nearest_squared);
         /* 前视距离沿折线弧长累计，不是绕机器人画圆；这样折弯后的目标仍保持路径顺序。 */
-        double remaining = parameters_.lookahead_distance;
+        double remaining = lookahead_distance;
+        if (prefix) prefix->push_back({
+            path_[nearest_segment].x + nearest_fraction * (path_[nearest_segment + 1].x - path_[nearest_segment].x),
+            path_[nearest_segment].y + nearest_fraction * (path_[nearest_segment + 1].y - path_[nearest_segment].y)});
         for (std::size_t index = nearest_segment; index + 1 < path_.size(); ++index) {
             const double dx = path_[index + 1].x - path_[index].x;
             const double dy = path_[index + 1].y - path_[index].y;
@@ -274,10 +287,13 @@ namespace mini_nav_core
             const double available = (1.0 - start_fraction) * length;
             if (remaining <= available && length > 0.0) {
                 const double fraction = start_fraction + remaining / length;
-                return {path_[index].x + fraction * dx,
-                        path_[index].y + fraction * dy};
+                const PathPoint target{path_[index].x + fraction * dx,
+                    path_[index].y + fraction * dy};
+                if (prefix) prefix->push_back(target);
+                return target;
             }
             remaining -= available;
+            if (prefix) prefix->push_back(path_[index + 1]);
         }
         return path_.back();
     }
@@ -345,6 +361,22 @@ namespace mini_nav_core
         const Costmap2D & local_safety_map,
         double steady_seconds)
     {
+        // 保留旧膨胀图调用接口供历史回放；生产节点使用下方显式几何重载。
+        const std::vector<PathPoint> empty;
+        return Step(map_pose, odom_pose, odom_from_map,
+                    CollisionGeometry{static_safety_map, empty, kCenterlineRadius},
+                    CollisionGeometry{local_safety_map, empty, kCenterlineRadius}, steady_seconds);
+    }
+
+    VelocityCommand PathTracker::Step(
+        const localization::Pose2D & map_pose,
+        const localization::Pose2D & odom_pose,
+        const localization::Pose2D & odom_from_map,
+        const CollisionGeometry & static_safety_map,
+        const CollisionGeometry & local_safety_map,
+        double steady_seconds, TrackingDiagnostics * diagnostics)
+    {
+        if (diagnostics) diagnostics->candidates.clear();
         if (!HasPath()) {
             return {0.0, 0.0, TrackingStatus::kNoPath};
         }
@@ -359,6 +391,20 @@ namespace mini_nav_core
         }
 
         const PathPoint map_robot{map_pose.x, map_pose.y};
+        CollisionConflict body_conflict;
+        const bool static_clear = static_safety_map.IsClear(map_robot, map_robot, 0.0, &body_conflict);
+        const bool body_clear = static_clear && local_safety_map.IsClear(
+            {odom_pose.x, odom_pose.y}, {odom_pose.x, odom_pose.y}, 0.0, &body_conflict);
+        if (!body_clear) {
+            body_conflict.local = static_clear;
+            if (diagnostics) diagnostics->candidates.push_back({{}, false, 0.0, 0.0, body_conflict});
+            if (!blocked_) { blocked_ = true; blocked_time_ = steady_seconds; blocked_command_ = {}; }
+            previous_command_ = {}; have_command_ = true; command_time_ = steady_seconds;
+            if (steady_seconds - blocked_time_ > parameters_.progress_timeout)
+                terminal_status_ = TrackingStatus::kProgressTimeout;
+            return {0.0, 0.0, terminal_status_ == TrackingStatus::kProgressTimeout ?
+                terminal_status_ : TrackingStatus::kCollisionRisk};
+        }
         const PathPoint goal = path_.back();
         const double goal_distance = std::hypot(goal.x - map_pose.x, goal.y - map_pose.y);
         const double goal_yaw_error = NormalizeAngle(goal_yaw_ - map_pose.yaw);
@@ -377,7 +423,7 @@ namespace mini_nav_core
             aligning_goal_yaw_ = true;
         }
         double distance_to_path = 0.0;
-        const PathPoint target = aligning_goal_yaw_ ?
+        PathPoint target = aligning_goal_yaw_ ?
             /**
              * @brief 从机器人到折线的最近投影处沿路径弧长寻找前视点。
              *
@@ -387,10 +433,44 @@ namespace mini_nav_core
              * @param distance_to_path 输出到最近线段的欧氏距离，单位为米。
              * @return 前视点；剩余路径不足前视距离时为末点。
              */
-            map_robot : Lookahead(map_robot, distance_to_path);
+            map_robot : Lookahead(map_robot, distance_to_path, parameters_.lookahead_distance);
         if (distance_to_path > parameters_.max_path_deviation) {
             PauseProgress();
             return {0.0, 0.0, TrackingStatus::kOffPath};
+        }
+        if (!aligning_goal_yaw_) {
+            const auto segment_clear = [&](const PathPoint & from, const PathPoint & to) {
+                return static_safety_map.IsClear(from, to) && local_safety_map.IsClear(
+                    TransformPoint(odom_from_map, from), TransformPoint(odom_from_map, to));
+            };
+            const auto target_clear = [&](const PathPoint & point) {
+                return static_safety_map.IsClear(map_robot, point) &&
+                    local_safety_map.IsClear({odom_pose.x, odom_pose.y}, TransformPoint(odom_from_map, point));
+            };
+            if (!target_clear(target)) {
+                std::vector<PathPoint> prefix;
+                Lookahead(map_robot, distance_to_path, parameters_.lookahead_distance, &prefix);
+                bool prefix_clear = true;
+                for (std::size_t i = 1; i < prefix.size(); ++i) {
+                    if (!segment_clear(prefix[i - 1], prefix[i])) { prefix_clear = false; break; }
+                }
+                // 仅修正安全折线的危险捷径；路径本身受阻仍交给原有候选扫掠与停车。
+                if (prefix_clear) {
+                    double lookahead_distance = parameters_.lookahead_distance;
+                    for (int reductions = 0; reductions < 12 && !target_clear(target); ++reductions) {
+                        lookahead_distance *= .5;
+                        target = Lookahead(map_robot, distance_to_path, lookahead_distance);
+                    }
+                    if (!target_clear(target)) {
+                        if (!blocked_) { blocked_ = true; blocked_time_ = steady_seconds; blocked_command_ = {}; }
+                        previous_command_ = {}; have_command_ = true; command_time_ = steady_seconds;
+                        if (steady_seconds - blocked_time_ > parameters_.progress_timeout)
+                            terminal_status_ = TrackingStatus::kProgressTimeout;
+                        return {0.0, 0.0, terminal_status_ == TrackingStatus::kProgressTimeout ?
+                            terminal_status_ : TrackingStatus::kCollisionRisk};
+                    }
+                }
+            }
         }
         VelocityCommand command{0.0, 0.0, TrackingStatus::kTracking};
         if (aligning_goal_yaw_) {
@@ -419,12 +499,85 @@ namespace mini_nav_core
             braking_distance = command.linear_x * parameters_.command_reaction_time +
                 command.linear_x * command.linear_x / (2.0 * parameters_.max_linear_deceleration);
         }
-        if (!IsVelocitySweepClear(command, map_pose, odom_pose,
-                                  static_safety_map, local_safety_map,
-                                  std::hypot(target.x - map_pose.x, target.y - map_pose.y), braking_distance)) {
-            PauseProgress();
-            return {0.0, 0.0, TrackingStatus::kCollisionRisk};
+        const double carrot_distance = std::hypot(target.x - map_pose.x, target.y - map_pose.y);
+        const auto sweep_clear = [&](const VelocityCommand & candidate, double margin = 0.0,
+                                     CollisionConflict * conflict = nullptr) {
+            const double brake = candidate.linear_x * parameters_.command_reaction_time +
+                candidate.linear_x * candidate.linear_x / (2.0 * parameters_.max_linear_deceleration);
+            return IsVelocitySweepClear(candidate, map_pose, odom_pose,
+                static_safety_map, local_safety_map, carrot_distance,
+                parameters_.max_linear_acceleration > 0.0 ? brake : 0.0, margin, conflict);
+        };
+        const auto checked_sweep = [&](const VelocityCommand & candidate) {
+            CollisionConflict conflict;
+            const bool safe = sweep_clear(candidate, 0.0, &conflict);
+            if (diagnostics) diagnostics->candidates.push_back({candidate, safe, 0.0, 0.0, conflict});
+            return safe;
+        };
+        (void)braking_distance;
+        // 受阻后重查原失败轨迹；不能因为停车复位成更短预测便宣称恢复 tracking。
+        if (blocked_ && !checked_sweep(blocked_command_)) {
+            previous_command_ = {}; have_command_ = true; command_time_ = steady_seconds;
+            if (steady_seconds - blocked_time_ > parameters_.progress_timeout)
+                terminal_status_ = TrackingStatus::kProgressTimeout;
+            return {0.0, 0.0, terminal_status_ == TrackingStatus::kProgressTimeout ?
+                terminal_status_ : TrackingStatus::kCollisionRisk};
         }
+        blocked_ = false;
+        if (!checked_sweep(command)) {
+            if (recovery_started_ < 0.0) recovery_started_ = steady_seconds;
+            VelocityCommand best{};
+            double best_score = std::numeric_limits<double>::infinity();
+            const double dt = have_command_ ? std::clamp(steady_seconds - command_time_, 0.0, 0.2) : 0.1;
+            // 少量差分候选保持 vx/wz 约束；所有最终候选先限加速度再作完整扫掠。
+            std::vector<VelocityCommand> candidates;
+            for (double ratio : {.75, .5, .25})
+                candidates.push_back({command.linear_x * ratio, command.angular_z * ratio, TrackingStatus::kTracking});
+            for (double delta : {-.30, -.15, .15, .30})
+                candidates.push_back({command.linear_x * .5,
+                    std::clamp(command.angular_z + delta, -parameters_.max_angular_speed,
+                               parameters_.max_angular_speed), TrackingStatus::kTracking});
+            const double heading_error = NormalizeAngle(std::atan2(target.y-map_pose.y, target.x-map_pose.x)-map_pose.yaw);
+            if (!aligning_goal_yaw_ && std::abs(heading_error) > .03)
+                candidates.push_back({0.0, std::clamp(1.5 * heading_error,
+                    -parameters_.max_angular_speed, parameters_.max_angular_speed), TrackingStatus::kTracking});
+            if (static_safety_map.radius > 1e-5 && steady_seconds - recovery_started_ <= 3.0) {
+                for (auto candidate : candidates) {
+                    if (parameters_.max_linear_acceleration > 0.0) {
+                        candidate.linear_x = std::clamp(candidate.linear_x,
+                            std::max(0.0, previous_command_.linear_x - parameters_.max_linear_deceleration * dt),
+                            previous_command_.linear_x + parameters_.max_linear_acceleration * dt);
+                        candidate.angular_z = std::clamp(candidate.angular_z,
+                            previous_command_.angular_z - parameters_.max_angular_acceleration * dt,
+                            previous_command_.angular_z + parameters_.max_angular_acceleration * dt);
+                    }
+                    if ((candidate.linear_x == 0.0 && std::abs(candidate.angular_z) < .001) || !checked_sweep(candidate)) continue;
+                    double clearance = 0.0;
+                    for (const double margin : {.01, .025, .05}) {
+                        if (!sweep_clear(candidate, margin)) break;
+                        clearance = margin;
+                    }
+                    // 在已通过硬安全检查的集合内优先沿路径运动并避免左右跳变。
+                    const double yaw = map_pose.yaw + candidate.angular_z;
+                    const double distance = std::hypot(target.x - map_pose.x - candidate.linear_x * std::cos(yaw),
+                        target.y - map_pose.y - candidate.linear_x * std::sin(yaw));
+                    const double score = distance + .10 * std::abs(NormalizeAngle(heading_error-candidate.angular_z)) +
+                        .05 * std::abs(candidate.angular_z-previous_command_.angular_z) + .5 * (.05-clearance);
+                    if (diagnostics) {
+                        diagnostics->candidates.back().clearance = clearance;
+                        diagnostics->candidates.back().score = score;
+                    }
+                    if (score < best_score) { best = candidate; best_score = score; }
+                }
+            }
+            if (!std::isfinite(best_score)) {
+                blocked_ = true; blocked_command_ = command; blocked_time_ = steady_seconds;
+                previous_command_ = {}; have_command_ = true; command_time_ = steady_seconds;
+                return {0.0, 0.0, TrackingStatus::kCollisionRisk};
+            }
+            command = best;
+            command.status = TrackingStatus::kAvoidingObstacle;
+        } else recovery_started_ = -1.0;
         const auto checked = CheckProgress(command, odom_pose, steady_seconds);
         previous_command_ = checked; command_time_ = steady_seconds; have_command_ = true;
         return checked;

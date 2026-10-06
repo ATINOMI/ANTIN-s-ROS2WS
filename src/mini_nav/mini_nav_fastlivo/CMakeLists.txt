@@ -11,10 +11,14 @@ endif()
 install(FILES ${SMALL_GICP_MODULE} DESTINATION lib/${PROJECT_NAME}/deps)
 install(DIRECTORY "${SMALL_GICP_PYTHON_ROOT}/small_gicp.libs"
   "${SMALL_GICP_PYTHON_ROOT}/small_gicp-1.0.1.dist-info" DESTINATION lib/${PROJECT_NAME}/deps)
-install(PROGRAMS scripts/height_mapper scripts/prior_localizer scripts/finalize_map DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/height_mapper scripts/prior_localizer scripts/finalize_map scripts/bind_static_map DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_static_map test/test_static_map.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR})
+  ament_add_pytest_test(test_pose_graph test/test_pose_graph.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:${SMALL_GICP_PYTHON_ROOT})
   ament_add_pytest_test(test_occupancy_backend test/test_occupancy_backend.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR})
   ament_add_pytest_test(test_offline test/test_offline.py

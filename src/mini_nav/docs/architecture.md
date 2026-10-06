@@ -1,634 +1,316 @@
 # mini_nav 架构说明
 
-当前主 launch 的任务链、速度输出关系、Action 接口和故障处理以 [单目标导航任务](navigation_tasks.md) 为准。下方目录说明保留项目演进过程中的模块介绍。
+最后更新：2026-10-06
 
-最后更新：2026-08-31
+目标平台：ROS 2 Jazzy / TurtleBot3 Waffle
 
-## 1. 项目定位
+本文描述当前源码的模块职责、数据流和安全接口。阶段记录与各日期验收见 [项目状态](project_status.md)；具体任务操作见 [单目标导航任务](navigation_tasks.md)。当前实现以源码、实际 launch 和日志为准，旧调研方案不直接等同于已实现能力。本次仅更新文档，没有重新构建或运行仿真。
 
-`mini_nav` 是一个用于学习移动机器人导航链路的 ROS 2 Jazzy 项目。它把算法实现、ROS 适配和运行编排拆成三个独立模块，并使用官方 Nav2 的地图服务与 AMCL 作为对照基础。
+## 1. 项目定位与依赖边界
 
-当前项目已经可以完成：
+`mini_nav` 已具备基础单目标导航闭环：定位、八邻域 A*、路径后处理、差分路径跟踪、局部障碍处理、重规划、取消/抢占和失联停车。规划、跟踪及默认 AMCL 核心为项目自研实现；FAST-LIVO2 / FAST-LIO2 使用归档或独立部署的上游算法，经项目适配后复用同一导航链。
 
-- 从静态地图构建内部 `Costmap2D`。
-- 使用自研四邻域 A* 生成全局路径。
-- 在 Gazebo Waffle 仿真中运行官方或自研 map_server、AMCL、传感器和 TF。
-- 在 RViz 中设置初始位姿和目标点并显示路径。
+基础依赖方向为 `mini_nav_bringup → mini_nav_nodes → mini_nav_core`。核心库不依赖 ROS 消息、节点、TF、PCL 或三维前端。节点负责 ROS 适配，bringup 负责配置和运行编排。RViz 插件是观察和操作入口，不承担控制算法。
 
-当前项目还不能完成：
+系统复用安装的 Nav2 地图服务、生命周期管理和 `nav2_msgs` Action 类型，复用 Waffle、Gazebo、桥接及机器人状态发布。标准 Action 接口不意味着已经实现 Nav2 全套行为树、插件或恢复行为。`nav2_learning`、教程包及 `reference/` 中的固定源码快照用于学习和对照，生产代码不依赖它们的私有文件。
 
-- 路径跟踪和 `/cmd_vel` 控制。
-- 动态障碍更新、局部避障和恢复行为。
-- 把 `/mini_nav/global_path` 作为机器人可直接执行的轨迹。
-
-## 2. 顶层目录
-
-`src/mini_nav/` 本身不是 ROS 包，而是三个 ROS 包和项目资源的集合。下面列出当前需要维护的具体文件；`build/`、`install/`、`log/` 等生成目录不属于源码架构。
-
-~~~text
-src/mini_nav/                                      # mini_nav 项目集合根目录，本身不是 ROS 包
-├── mini_nav_core/                                 # ROS 无关的地图、A* 与 AMCL 算法包
-│   ├── include/mini_nav_core/                     # mini_nav_core 对外公开的 C++ 头文件
-│   │   ├── localization/                          # 自研 AMCL 的 ROS 无关算法接口
-│   │   │   ├── types.hpp                         # 位姿、协方差、粒子和定位估计数据类型
-│   │   │   ├── laser_scan_data.hpp               # 激光扫描的 ROS 无关数据结构
-│   │   │   ├── localization_map.hpp               # 定位地图、距离场、采样和射线查询接口
-│   │   │   ├── motion_model.hpp                   # 粒子运动模型抽象接口
-│   │   │   ├── differential_motion_model.hpp      # 差速里程计运动模型声明
-│   │   │   ├── laser_model.hpp                    # 激光观测模型抽象接口
-│   │   │   ├── likelihood_field_model.hpp         # 似然场激光模型声明
-│   │   │   ├── beam_model.hpp                     # Beam 激光模型声明
-│   │   │   ├── kd_tree.hpp                        # ParticleFilter 专用空间分箱与 KLD 统计接口
-│   │   │   └── particle_filter.hpp                # 粒子滤波主流程及节点层调用接口
-│   │   ├── navigator/                             # 全局路径规划算法接口
-│   │   │   └── astar_navigator.hpp                # 四邻域 A* 规划器声明
-│   │   └── map/                                   # 通用二维栅格地图接口
-│   │       └── costmap_2d.hpp                     # Costmap2D 存储、坐标转换和绘图接口
-│   ├── src/                                       # mini_nav_core 算法实现
-│   │   ├── localization/                          # 自研 AMCL 算法实现
-│   │   │   ├── localization_map.cpp               # 距离场、自由空间采样和射线投射实现
-│   │   │   ├── differential_motion_model.cpp      # 差速运动分解、噪声采样和粒子预测实现
-│   │   │   ├── likelihood_field_model.cpp         # 似然场权重计算实现
-│   │   │   ├── beam_model.cpp                     # Beam 模型概率与预期量程实现
-│   │   │   ├── kd_tree.cpp                        # 粒子空间分箱和占用 bin 统计实现
-│   │   │   └── particle_filter.cpp                # 初始化、更新、归一化、重采样和估计实现
-│   │   ├── navigator/                             # 全局路径规划算法实现
-│   │   │   └── astar_navigator.cpp                # A* 搜索、代价记录和路径回溯实现
-│   │   └── map/                                   # 二维栅格地图实现
-│   │       └── costmap_2d.cpp                     # 栅格存储、边界检查和坐标转换实现
-│   ├── test/                                      # mini_nav_core 的 ROS 无关单元测试
-│   │   ├── test_astar_planner.cpp                 # A* 绕障和路径生成测试
-│   │   ├── test_costmap_2d.cpp                    # 地图边界、坐标转换和绘图测试
-│   │   └── test_particle_filter.cpp               # 粒子初始化、权重、重采样和估计测试
-│   ├── CMakeLists.txt                             # core 库、依赖、安装和测试构建规则
-│   └── package.xml                                # mini_nav_core ROS 包清单与依赖声明
-├── mini_nav_nodes/                                # ROS 消息、TF、生命周期和算法适配节点包
-│   ├── include/                                   # 节点类的公开头文件
-│   │   ├── costmap_publisher.hpp                  # 地图加载、A* 请求和可视化节点声明
-│   │   └── mini_nav_nodes/                        # 使用包命名空间组织的节点头文件
-│   │       └── amcl_node.hpp                      # 自研 AMCL 生命周期节点与 TF 缓存声明
-│   ├── src/                                       # ROS 节点实现与进程入口
-│   │   ├── costmap_publisher.cpp                  # 地图转换、交互选点和路径发布实现
-│   │   ├── amcl_node.cpp                          # AMCL 生命周期、消息适配、滤波调度和 TF 发布实现
-│   │   └── main.cpp                               # 初始化、构造节点、spin 和 shutdown 的统一入口
-│   ├── test/                                      # mini_nav_nodes 的节点层单元测试
-│   │   └── test_amcl_tf_cache.cpp                 # TF 缓存、重时间戳和失效行为测试
-│   ├── CMakeLists.txt                             # 两个节点可执行文件及节点测试的构建规则
-│   └── package.xml                                # mini_nav_nodes ROS 包清单与依赖声明
-├── mini_nav_bringup/                              # 仿真、地图、参数和节点组合的运行编排包
-│   ├── launch/                                    # ROS 2 启动入口
-│   │   ├── official_localization_astar.launch.py  # 官方 AMCL 对照组完整入口
-│   │   ├── mini_localization_astar.launch.py      # 自研 AMCL 被测组完整入口
-│   │   ├── waffle_sim.launch.py                   # 官方 TurtleBot3 Waffle Gazebo 仿真入口
-│   │   └── sim_check.launch.py                    # 仅启动 RViz 检查现有仿真与 TF
-│   ├── config/                                    # 运行参数文件
-│   │   └── amcl_waffle.yaml                       # 官方与自研 AMCL 共用的 Waffle 对照参数
-│   ├── maps/                                      # map_server 使用的静态地图资源
-│   │   ├── turtlebot3_map.yaml                    # 地图图像路径、分辨率、原点和阈值元数据
-│   │   └── turtlebot3_map.pgm                     # 官方示例环境的占用栅格图像
-│   ├── CMakeLists.txt                             # launch、config、maps 和 RViz 的安装规则
-│   └── package.xml                                # bringup 包清单与运行依赖声明
-├── rviz/                                          # 项目级 RViz 显示配置
-│   ├── astar_navigation.rviz                      # 静态地图与 A* 路径演示布局
-│   └── localization_astar.rviz                    # 定位粒子、机器人、激光和路径联合布局
-├── scripts/                                       # 项目环境和便捷启动脚本
-│   ├── env_mini_nav.sh                            # 设置 ROS_DOMAIN_ID、GZ_PARTITION 和模型环境
-│   └── start_astar_navigation.sh                  # 不启动仿真和 AMCL 的独立 A* 演示脚本
-├── reference/                                     # 只用于阅读对照、不作为生产依赖的参考源码
-│   └── nav2_amcl_jazzy/                           # Jazzy 官方 Nav2 AMCL 源码快照
-│       ├── include/nav2_amcl/                     # 官方 AMCL 头文件
-│       │   ├── map/                               # 官方地图与距离空间接口
-│       │   ├── motion_model/                      # 官方运动模型接口
-│       │   ├── pf/                                # 官方粒子滤波与 KD-tree 接口
-│       │   └── sensors/laser/                     # 官方激光传感器模型接口
-│       ├── src/amcl_node.cpp                      # 官方生命周期节点和 ROS 适配实现
-│       ├── src/main.cpp                           # 官方 AMCL 进程入口
-│       ├── src/map/                               # 官方地图、距离场和射线实现
-│       ├── src/motion_model/                      # 官方差速与全向运动模型实现
-│       ├── src/pf/                                # 官方粒子滤波、KD-tree 和概率工具实现
-│       ├── src/sensors/laser/                     # 官方激光观测模型实现
-│       ├── COLCON_IGNORE                          # 阻止参考快照参与当前工作区构建
-│       ├── README.md                              # 上游源码包说明
-│       └── REFERENCE.md                           # 快照来源、版本和使用边界说明
-└── docs/                                          # mini_nav 设计、调研、状态和协作文档
-    ├── architecture.md                            # 当前架构、目录、接口、数据流和启动边界
-    ├── amcl_code_walkthrough.md                   # 官方 AMCL 源码调用链导读
-    ├── amcl_research.md                           # AMCL 算法与模块拆分调研
-    ├── contributing.md                            # 构建、测试、修改和提交规范
-    ├── project_status.md                          # 已完成里程碑、验收结果和当前限制
-    └── technicial-detail-elaboration.md           # 细节推导和补充实现说明
-~~~
-
-### 2.1 `mini_nav_core`：算法模块
-
-- `navigator/astar_navigator.hpp` 是 A* 的外部接缝：调用者只需提供 `Costmap2D`、起点和终点。
-- `navigator/astar_navigator.cpp` 隐藏 open list、代价记录、父节点回溯和无路径处理。
-- `map/costmap_2d.hpp/.cpp` 隐藏栅格内存、世界坐标转换、越界检查和地图绘制。
-- `localization/` 提供 `LocalizationMap`、差分运动模型、激光模型、`PoseBinIndex` 和 `ParticleFilter`；定位算法不依赖 ROS。
-- `test/` 只通过核心模块接口测试行为，不依赖 ROS 节点、Gazebo 或 RViz。
-
-### 2.1.1 `localization/`：AMCL 算法文件职责
-
-`localization/` 是自研 AMCL 的 ROS 无关核心。它只接收普通 C++ 数据结构和 `Costmap2D`，不包含 `rclcpp`、ROS 消息或 TF 代码。这样 `ParticleFilter` 可以在单元测试中独立运行，`AmclNode` 只承担 ROS 到核心数据的适配。
-
-| 文件 | 模块角色 | 主要职责和接口 |
-|---|---|---|
-| `types.hpp` | 核心数据模型 | 定义 `Pose2D`、`Covariance3`、`Particle` 和 `PoseEstimate`。统一使用米和弧度，并提供带范围检查的协方差访问、角度归一化和角距离计算。 |
-| `laser_scan_data.hpp` | 激光数据模型 | 保存距离数组、角度起点、角度增量、最小量程和最大量程；它是 `sensor_msgs/msg/LaserScan` 到算法核心之间的轻量数据接缝。 |
-| `localization_map.hpp/.cpp` | 定位地图模块 | 从 `Costmap2D` 构造只读地图快照，保存原点、分辨率和栅格代价；提供世界坐标到栅格查询、自由/障碍判断、障碍距离查询、自由栅格采样和射线投射。构造函数内部用优先队列传播障碍距离场，供似然场模型快速查询。 |
-| `motion_model.hpp` | 运动模型接口 | 定义 `UpdateParticles()` 抽象接口。调用者只提供上一帧和当前帧里程计位姿，具体噪声模型由实现隐藏。 |
-| `differential_motion_model.hpp/.cpp` | 差速运动模型 | 将里程计增量分解为第一次旋转、平移和第二次旋转，依据 `alpha1` 到 `alpha5` 为每个粒子注入高斯噪声，然后原地更新粒子位姿。 |
-| `laser_model.hpp` | 激光模型接口 | 定义 `ApplyMeasurementLikelihood()` 抽象接口，使粒子滤波器不依赖某一种激光观测模型。 |
-| `likelihood_field_model.hpp/.cpp` | 似然场模型 | 将有效激光束投影到地图，查询命中点到最近障碍物的距离，并按 `z_hit`、`z_rand` 和 `sigma_hit` 累积粒子权重；按 `max_beams` 降采样以控制计算量。 |
-| `beam_model.hpp/.cpp` | Beam 模型 | 通过 `LocalizationMap::CastRay()` 计算地图预期量程，再组合命中、短测距、最大量程和随机测量概率。它与似然场模型共享 `LaserModel` 接口，目前由参数选择。 |
-| `kd_tree.hpp/.cpp` | 粒子空间统计 | 按线性和角度分辨率把粒子量化到空间 bin，并统计占用 bin 数。当前实现使用哈希分箱，不是对外暴露的通用搜索树；公共接口只有 `BuildPoseBinIndex()`、兼容入口 `Build()` 和 `GetOccupiedBinCount()`，只服务 `ParticleFilter` 的 KLD 自适应粒子数计算。 |
-| `particle_filter.hpp/.cpp` | AMCL 主算法模块 | 持有 `MotionModel`、`LaserModel` 和 `PoseBinIndex`，统一实现局部高斯初始化、全局自由栅格初始化、运动更新、传感器更新、权重归一化、系统重采样和位姿/协方差估计。它是算法核心对节点层的主要接缝。 |
-| `test_particle_filter.cpp` | 核心测试 | 验证粒子数量、协方差采样、权重校验与归一化、重采样偏好、圆周角度均值和未初始化状态。 |
-
-### 2.1.2 AMCL 核心调用顺序
-
-定位核心的一次更新遵循固定顺序，ROS 节点不直接操作粒子：
-
-```text
-OccupancyGrid
-     │  AmclNode 转换
-     ▼
-Costmap2D ──► LocalizationMap
-                  │
-/initialpose ──────┴──► ParticleFilter::InitializeLocalized
-                              │
-odom TF ───────────────► MotionModel::UpdateParticles
-                              │
-LaserScan + 激光 TF ───► LaserModel::ApplyMeasurementLikelihood
-                              │
-                              ├── NormalizeWeights
-                              ├── PoseBinIndex 分箱 + Resample
-                              └── Estimate
-                                      │
-                                      ├── /amcl_pose
-                                      ├── /particle_cloud
-                                      └── map -> odom
+```mermaid
+flowchart TD
+  Bringup["mini_nav_bringup：launch / config / maps"] --> Nodes["mini_nav_nodes：ROS 适配与任务编排"]
+  Nodes --> Core["mini_nav_core：二维算法与自研 AMCL"]
+  Panel["mini_nav_rviz_plugins"] -->|Action / 状态接口| Nodes
+  Livo["mini_nav_fastlivo：地图资产与旧图定位"] -->|TF / 定位质量| Nodes
+  Livo --> Frontend["独立 FAST-LIVO2 / small_gicp"]
+  Lio["scurm_sim / FAST-LIO2 适配"] -->|TF / 定位质量| Nodes
+  Lio --> Vendor["归档 FAST-LIO2 / ICP 内核"]
 ```
 
-`ParticleFilter` 的接口是外部接缝：节点只负责按时序提供地图、里程计、扫描和传感器安装位姿；运动噪声、激光权重和粒子组织细节都留在核心实现内部。`PoseBinIndex` 不应被 `AmclNode` 或其他调用者直接使用。
+## 2. 目录与模块归属
 
-### 2.2 `mini_nav_nodes`：ROS 适配模块
-
-- `costmap_publisher.hpp` 声明节点的 ROS 参数、发布器、订阅器和内部地图状态。
-- `costmap_publisher.cpp` 是主要实现：接收 `/map` 或读取 `map_file`，转换成原始图与膨胀规划图；收到 `/goal_pose` 时从 `map -> base_footprint` TF 取得当前起点，调用 `AStarPlanner`，发布 `/mini_nav/map`、`/mini_nav/planning_costmap` 和 `/mini_nav/global_path`。收到 `/initialpose` 时清除旧路径，等待定位 TF 更新。
-- `amcl_node.cpp` 负责 `AmclNode` 的生命周期、消息、TF、服务和结果发布；`main.cpp` 只负责初始化 ROS、构造对应节点和 spin。
-- 该包不负责 Gazebo、AMCL 或 RViz 启动；这些属于 `mini_nav_bringup`。
-
-### 2.2.1 `mini_nav_nodes` 中的 AMCL 文件职责
-
-| 文件 | 模块角色 | 主要职责 |
-|---|---|---|
-| `include/mini_nav_nodes/amcl_node.hpp` | ROS 适配节点接口 | 声明 `AmclNode` 生命周期回调、地图/初始位姿/激光回调、服务回调、TF 查询、消息转换和结果发布函数；保存 ROS 通信对象、生命周期发布器、TF 对象、最近一次有效的 `map -> odom` 缓存，以及 `mini_nav_core` 的 `LocalizationMap` 和 `ParticleFilter`。 |
-| `src/amcl_node.cpp` | ROS 适配节点实现 | 负责参数声明与校验、生命周期资源管理、QoS、地图转换、MessageFilter 激光接入、初始位姿处理、ParticleFilter 调用、`/amcl_pose`、`/particle_cloud` 和 `map -> odom` 发布。粒子滤波未达到运动更新阈值时，它仍按激光帧时间戳重发缓存 TF；算法计算不在这里重新实现。 |
-| `src/main.cpp` | 进程入口 | 只负责 `rclcpp::init()`、节点构造、spin 和 shutdown。通过 CMake 为不同目标设置的宏选择 `AmclNode` 或 `CostmapPublisherNode`，不加载地图、不绘制迷宫，也不把业务逻辑写入入口。 |
-| `test/test_amcl_tf_cache.cpp` | 节点层 TF 单元测试 | 验证首次有效估计前不生成 TF、缓存几何值在重发时保持不变且时间戳向前刷新，以及状态重置后旧缓存不可复用。 |
-| `CMakeLists.txt` | 构建接缝 | 将 `main.cpp + amcl_node.cpp` 编译为 `mini_nav_amcl_node`，将 `main.cpp + costmap_publisher.cpp` 编译为 `costmap_publisher_node`；同时链接 `mini_nav_core` 和 AMCL 所需的生命周期、消息、TF、服务和 MessageFilter 依赖，并在 `BUILD_TESTING` 下构建 `test_amcl_tf_cache`。 |
-| `package.xml` | 依赖声明 | 声明 `mini_nav_core`、`rclcpp_lifecycle`、`sensor_msgs`、`nav2_msgs`、`tf2`、`tf2_ros`、`message_filters` 等构建和运行依赖，以及 `ament_cmake_gtest` 测试依赖。 |
-
-### 2.2.2 `AmclNode` 的生命周期和运行职责
-
-`AmclNode` 是 ROS 侧的适配器，状态变化由 `nav2_lifecycle_manager` 驱动：
-
-1. **构造阶段**：声明 AMCL 和 Nav2 风格参数，但不创建地图、激光订阅或粒子滤波器。
-2. **`on_configure()`**：读取并校验帧名、话题名、粒子数、激光模型和噪声参数；创建 `LocalizationMap`、运动模型、激光模型、`ParticleFilter`、TF Buffer/Listener/Broadcaster、订阅器、发布器和服务。
-3. **回调组配置**：地图、初始位姿和激光输入使用同一个 `MutuallyExclusiveCallbackGroup`，并设置为自动加入节点 executor。`main.cpp` 使用普通 `rclcpp::spin()`，所以该回调组必须被 executor 调度；否则 ROS 图虽然存在订阅连接，回调不会执行。
-4. **`on_activate()`**：激活 `/amcl_pose` 和 `/particle_cloud` 两个生命周期发布器，并允许激光回调进入滤波流程。
-5. **地图回调**：校验地图 frame、原点旋转、尺寸和数据长度，把 `OccupancyGrid` 转成 `Costmap2D`，再构造 `LocalizationMap`。地图准备好后，等待 `/initialpose` 或初始化服务。
-6. **初始位姿回调**：校验消息 frame 和地图自由空间，将 ROS 的 6×6 协方差提取为核心使用的 3×3 协方差，调用 `ParticleFilter::InitializeLocalized()`，并允许后续激光更新。当前配置使用 RViz 的 `/initialpose`；`set_initial_pose` 和 `initial_pose.*` 参数主要用于保持 Nav2 风格参数可加载，尚不代表节点启动时自动完成初始化。
-7. **激光回调**：`MessageFilter` 等待 `base_scan -> odom` 在扫描时间戳可用；节点再查询 `odom -> base_footprint` 和 `base_footprint -> base_scan`。达到 `update_min_d` 或 `update_min_a` 时，调用运动模型和激光模型，完成权重归一化、重采样和位姿估计；未达阈值时不运行这组较重的计算，但仍用当前激光时间戳重发缓存的 `map -> odom`。
-8. **输出阶段**：一次有效滤波更新会发布 `/amcl_pose` 和 `/particle_cloud`，并用估计的 `map -> base_footprint` 与里程计的 `odom -> base_footprint` 计算 `map -> odom`。该变换的几何值被缓存，发布时间戳是当前激光时间加 `transform_tolerance`。
-9. **重置与清理阶段**：首次有效估计前不存在可发布的缓存。成功替换地图、处理新初始位姿、执行全局定位、`on_cleanup()` 或 `on_shutdown()` 时必须使旧 TF 缓存失效，防止新定位周期误用旧的坐标关系。`on_deactivate()` 停止处理并停用发布器；`on_cleanup()` 还会断开 MessageFilter 并释放订阅器、TF、地图和粒子滤波器。
-
-#### TF 计算频率与发布频率分离
-
-`update_min_d` 和 `update_min_a` 只决定何时运行粒子滤波更新，不应同时限制 TF 刷新。如果未达运动阈值就直接返回，最后一条 `map -> odom` 会逐渐超出 `transform_tolerance`，RViz 不能用它与持续更新的 `odom -> base_footprint` 组合，视觉上便会出现暂停后跳动。
-
-节点将“定位估计是否更新”与“TF 是否持续可用”拆成两个状态：
+以下是职责目录，省略生成文件、备份和第三方库内部文件：
 
 ```text
-达到运动阈值
-    └── ParticleFilter 更新
-            └── 计算并缓存 map -> odom
-                    └── 以 scan_stamp + transform_tolerance 发布
-
-未达运动阈值，且缓存有效
-    └── 保持变换几何值不变
-            └── 以新的 scan_stamp + transform_tolerance 重发
+mini_nav/
+├── mini_nav_core/
+│   ├── include/mini_nav_core/
+│   │   ├── map/                         # 地图、膨胀、滚动观测
+│   │   ├── navigator/                   # A*、碰撞几何、后处理、跟踪
+│   │   └── localization/                # 自研 AMCL 的公开接口
+│   ├── src/map/
+│   ├── src/navigator/
+│   ├── src/localization/
+│   │   ├── amcl/                        # 自研粒子滤波和模型实现
+│   │   └── fastlio2/                    # 归档 IKFoM、ikd-Tree 等内核
+│   └── test/
+├── mini_nav_nodes/
+│   ├── include/mini_nav_nodes/           # 节点、消息校验与显示转换
+│   ├── include/costmap_publisher.hpp
+│   ├── msg/CollisionMap.msg
+│   ├── src/main.cpp                     # C++ 节点进程统一入口
+│   ├── src/*_node.cpp / costmap_publisher.cpp
+│   ├── src/localization/fastlio2/
+│   │   ├── fast_lio/                    # 独立 ROS 包
+│   │   ├── icp_relocalization/           # 独立 ROS 包
+│   │   └── adapter/                     # TF、质量、初始化与会话管理
+│   └── test/
+├── mini_nav_bringup/                     # launch / config / maps / rviz
+├── mini_nav_rviz_plugins/                # 导航状态、反馈与取消面板
+├── mini_nav_fastlivo/                    # 地图包、建图、配准与离线重放
+├── mini_nav_fastlio/                     # scurm_sim、构建工具与源文件清单
+├── mini_nav_pf_debug/                    # 粒子滤波调试工具
+├── scripts/                             # 环境及独立 A* 演示入口
+├── docs/
+├── logs/                                # 按日期保存的报告与复现证据
+└── reference/                           # 隔离的官方源码对照
 ```
 
-因此 `/amcl_pose` 和 `/particle_cloud` 仍按定位计算节奏更新，`map -> odom` 则在每帧可处理的激光数据上保持时间新鲜。机器人在两次定位估计之间的连续运动由 `odom -> base_footprint` 表达，RViz 可以沿完整 TF 链平滑显示。
+`mini_nav_nodes` 的六个 C++ 可执行程序都由 [main.cpp](../mini_nav_nodes/src/main.cpp) 按构建宏选择节点；AMCL 没有另设 `amcl_main.cpp`。FAST-LIO2 目录中的独立包使用自身入口，它们不加入基础核心库。
 
-### 2.3 `mini_nav_bringup`：运行编排模块
+`mini_nav_fastlio/COLCON_IGNORE` 隔离独立三维部署，构建脚本显式指定 `--base-paths`。`src/scurm_deploy` 保留兼容链接。手柄包 `mini_nav_teleop` 位于工作区同级 [src/mini_nav_teleop](../../mini_nav_teleop/)，不在本目录内部。源文件迁移与固定版本见 [定位后端目录说明](localization_backends.md)。
 
-`mini_nav_bringup` 只描述“启动哪些现成模块以及如何连接它们”，不实现地图、定位或规划算法。启动文件使用包共享目录查找资源，不依赖工作区绝对路径。
+## 3. 单目标导航数据流
 
-#### 2.3.1 启动文件职责
+完整导航入口使用下列链路。RViz 目标先转为有身份的任务；完整入口关闭规划器的直接 topic 目标，跟踪器启用 Action 模式，避免两条控制路径竞争。
 
-| 文件 | 入口类型 | 主要职责 |
+```mermaid
+flowchart LR
+  Goal["goal_pose / NavigateToPose"] --> Manager["navigation_manager"]
+  Manager -->|ComputePathToPose| Planner["costmap_publisher / A*"]
+  Planner -->|安全路径| Manager
+  Manager -->|FollowPath| Follower["path_follower / PathTracker"]
+  Follower -->|cmd_vel_raw| Guard["velocity_guard"]
+  Manager -->|task_active 心跳| Guard
+  Guard -->|cmd_vel| Base["Waffle / 底盘桥接"]
+  Map["静态 map"] --> Planner
+  Scan["LaserScan / 可选 3D 碰撞云"] --> Local["local_costmap"]
+  Scan --> Planner
+  Local -->|CollisionMap / 有效性| Follower
+  Planner -->|静态 CollisionMap| Follower
+  Localization["定位 TF / 质量 / 三维会话 epoch"] --> Manager
+  Localization --> Follower
+  Follower -->|受阻 / 避障 / 进展| Manager
+```
+
+| 节点 | 主职责 | 不应承担的职责 |
 |---|---|---|
-| `launch/official_localization_astar.launch.py` | 官方对照入口 | 启动同一套 Waffle Gazebo 仿真，然后包含系统 `nav2_bringup/launch/localization_launch.py`，由官方 `nav2_amcl` 和官方 map server 提供定位；再启动自研 `costmap_publisher_node` 和项目 RViz。 |
-| `launch/mini_localization_astar.launch.py` | 自研入口 | 启动同一套 Waffle Gazebo 仿真和官方 `nav2_map_server/map_server`，将 `mini_nav_nodes/mini_nav_amcl_node` 命名为 `amcl`，由 `nav2_lifecycle_manager` 管理 `map_server` 和自研 `amcl` 的 configure/activate；不启动 `nav2_amcl`。 |
-| `launch/waffle_sim.launch.py` | 仿真适配入口 | 复用系统安装的 TurtleBot3 Waffle world，提供机器人、`/scan`、`/odom`、仿真 TF 和 `/clock`。它不启动地图服务、不启动 AMCL，也不发布 `map -> odom`。 |
-| `launch/sim_check.launch.py` | RViz 检查入口 | 只打开 RViz 检查已有仿真和 TF 环境，不能代替地图服务、AMCL 或 A* 节点。 |
+| `costmap_publisher_node` | 接收或加载地图，生成规划代价，融合观测，提供 ComputePathToPose，发布路径与静态碰撞快照 | 发布底盘速度、修改定位输入地图 |
+| `mini_nav_amcl_node` | 生命周期、消息转换、初值、激光时间 TF、粒子滤波调用、定位质量 | 访问位姿分箱内部、编排导航任务 |
+| `local_costmap_node` | 维护 odom 滚动观测、连续扫描端点、覆盖和有效性 | 把显示膨胀图当作原始观测再次融合 |
+| `path_follower_node` | FollowPath、输入新鲜度门控、调用跟踪器、输出已检查候选 | 直接接受完整入口的 RViz 目标、绕过守卫 |
+| `navigation_manager_node` | NavigateToPose、子 Action、目标身份、取消/抢占、重规划、期限与运动许可 | 直接计算速度、执行无限重试 |
+| `velocity_guard_node` | 独立稳态时钟看门狗，唯一转发到 `/cmd_vel` | 再次平滑候选、在失效时恢复旧命令 |
 
-两个完整入口的可替换部分只有定位实现：
+任务节点使用任务代次与子目标 UUID 排除迟到结果。重规划前撤销运动许可并取消旧 FollowPath；新规划失败时不能恢复旧路径。地图变化、重新设置初值、三维定位 epoch 变化或暂停都会使旧任务失效，恢复后需要新目标。
 
-~~~text
-official_localization_astar.launch.py
-    └── nav2_bringup/localization_launch.py
-            └── nav2_amcl + nav2_map_server
+默认服务器响应期限为 3 s，重规划间隔至少 1 s，持续受阻或无进展期限为 20 s，总任务期限为 180 s。期限用稳态时钟，重规划不重置总期限。跟踪器另有局部进展检查，不能用其重置替代任务总期限。
 
-mini_localization_astar.launch.py
-    └── nav2_map_server/map_server
-        + mini_nav_nodes/mini_nav_amcl_node
-        + nav2_lifecycle_manager
-~~~
+## 4. 二维核心接口
 
-这样可以在相同地图、Gazebo 模型、初始仿真位置、RViz 配置和 A* 节点下比较官方 AMCL 与自研 AMCL。
+### 4.1 地图与规划
 
-#### 2.3.2 配置、地图和安装文件
+[Costmap2D](../mini_nav_core/include/mini_nav_core/map/costmap_2d.hpp) 保存二维几何和格代价，负责边界、容量、有限数与坐标转换校验。静态占用输入转换后，自由格为 0、致命障碍为 254、未知为 255；显示/规划膨胀另行生成，定位用原图保持不变。
 
-| 文件 | 模块角色 | 主要职责 |
+[InflationLayer](../mini_nav_core/include/mini_nav_core/map/inflation_layer.hpp) 生成膨胀代价；[AStarPlanner](../mini_nav_core/include/mini_nav_core/navigator/astar_navigator.hpp) 使用八邻域搜索和八方向几何启发式。步长为 1 或 √2，软代价按 `步长 × (1 + cost_travel_multiplier × 目标格代价 / 252)` 累加。对角边禁止穿过侧方禁行区域。
+
+生产规划调用带 `CollisionGeometry`、真实起点、可选起点/终点专用几何的 Plan 重载。显示图提供路径偏好，连续几何决定硬安全；仅检查格代价的旧重载仍保留，不能代替完整入口的车体校验。
+
+真实起点先检查当前车体，再以安全连续连接接入所属或八邻接格中心，允许多个搜索根。原目标优先；不可达时在默认 0.5 m 目标容差内选最近可达安全格，距离相同再比较路径代价。越界目标仍失败，不通过容差放宽障碍规则。
+
+[路径后处理](../mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp) 简化、加密并有限轮平滑路径，每次改点检查相邻段，最终复查整条路径。平滑不安全时退回已经验证的原路径；原路径本身不安全则返回空。发布路径包含实际起点连接，不能凭“有 Path 消息”认定可执行。
+
+### 4.2 路径跟踪
+
+[PathTracker](../mini_nav_core/include/mini_nav_core/navigator/path_tracker.hpp) 接收连续路径和终点朝向，Step 输入 map/odom 位姿、两帧关系、静态及局部碰撞几何、稳态时间，返回速度及诊断。ROS 新鲜度和 Action 生命周期由节点处理。
+
+默认名义控制采用前视点方向与差分运动约束。0.35 m 前视点的直达捷径若不安全，只有当前点至最近路径投影和原折线前段均安全时，才沿原折线逐次减半前视距离，最多 12 次。原路径受阻时仍执行原有候选检查和停车逻辑；这项修复保留了硬安全预算。
+
+候选先限速和限加速度，再检查真实转弯运动、反应距离、制动行程及圆弧离散补偿。静态与局部几何都通过才输出。名义候选失败时尝试少量合法替代候选，单轮替代最多 3 s；无安全候选输出零速，阻挡状态锁存避免反复零速重试。未实现默认倒车或初始车体重叠脱离。
+
+默认完整入口为 10 Hz、线速度上限 0.15 m/s、角速度上限 0.55 rad/s，线加速度 0.30 m/s²、减速度 0.50 m/s²、角加速度 1.0 rad/s²。终点位置容差 0.12 m、朝向容差 0.15 rad。以上来自运行 YAML；核心参数默认值和独立节点模式可能不同。SCURM 入口另外设置 0.03 m 终点位置滞回。
+
+## 5. 观测、碰撞几何与误差预算
+
+### 5.1 三种地图语义
+
+| 数据 | 作用 | 安全解释 |
 |---|---|---|
-| `config/amcl_waffle.yaml` | AMCL 参数配置 | 保存帧名、激光模型、粒子数、运动噪声、更新阈值和 `use_sim_time` 之外的 AMCL 参数。参数采用 Nav2 风格命名，官方入口和自研入口共用以便对照。 |
-| `maps/turtlebot3_map.yaml` | 地图元数据 | 指向同目录的 `turtlebot3_map.pgm`，声明分辨率、原点、占用阈值和地图模式；由官方 `map_server` 读取，不由 `main.cpp` 或 AMCL 绘制。 |
-| `maps/turtlebot3_map.pgm` | 地图栅格 | 官方示例使用的静态地图图像，作为 map server 的输入；自研 AMCL 通过 `/map` 接收其转换后的 `OccupancyGrid`。 |
-| `CMakeLists.txt` | 资源安装规则 | 安装 `launch/`、`config/`、`maps/`，并把上级 `mini_nav/rviz/` 安装到包共享目录的 `rviz/` 下；不编译算法代码。 |
-| `package.xml` | bringup 运行依赖 | 声明 launch、map server、lifecycle manager、RViz 和仿真相关的运行依赖。 |
+| 原始静态地图 | 定位输入和静态几何 | 障碍与未知按整个格面积检查，包含地图边界 |
+| 膨胀规划/显示图 | 软代价、RViz 显示与对照 | 膨胀颜色不替代连续车体检查 |
+| 局部观测与 CollisionMap | 当前覆盖、动态端点、原始碰撞格 | 二维端点连续检查；未知和不透明格保守检查 |
 
-`map`、`params_file`、`use_sim_time`、`autostart`、`x_pose` 和 `y_pose` 是入口层参数。地图路径和参数文件默认值通过 `get_package_share_directory("mini_nav_bringup")` 解析，避免把当前机器的工作区路径写入启动接口。
+[RollingObstacleGrid](../mini_nav_core/include/mini_nav_core/map/rolling_obstacle_grid.hpp) 按整数格移动窗口，同时维护格状态、观测时间和连续端点。射线清除后登记命中；过期观测恢复未知，不当作自由。默认 odom 窗口为 4 × 4 m、0.05 m/格，发布 5 Hz，观测保留 2 s；扫描最大年龄 1 s，跟踪器局部快照最大年龄 0.8 s。
 
-### 2.4 项目级资源、参考源码和文档
+LaserScan 端点用扫描时间的 TF 变换，当前生产链保留真实端点于 `odom`。格用于索引、软代价、显示及观测覆盖，不能把已经栅格化/膨胀的局部图再次面积投影到全局。可选三维碰撞云生成的障碍格仍按格面积保守检查，不能假定与精确二维端点具有相同的量化误差。
 
-#### 2.4.1 RViz 和脚本
+### 5.2 统一连续几何
 
-| 文件 | 作用 |
+`CollisionGeometry` 位于 [path_postprocessor.hpp](../mini_nav_core/include/mini_nav_core/navigator/path_postprocessor.hpp)，由原始格、连续点、车体半径、观测误差和帧关系组成。它允许格和端点分别使用误差预算，把待检查运动转换到端点帧。A* 边、真实起点连接、路径后处理和控制候选共用 `IsClear` 圆盘扫掠。
+
+当前预算为：
+
+| 几何对象 | 基础预算 | 额外约束 |
+|---|---|---|
+| map 静态障碍格、未知与边界 | 0.24 m 车体 + 0.02 m 安全余量 + 0.03 m 地图定位误差 = 0.29 m | 格按完整面积检查 |
+| odom 实时 LaserScan 端点 | 0.26 m 车体与余量 + 0.03 m 观测误差 = 0.29 m | 相对距离不重复叠加绝对地图定位误差 |
+| 兼容的 map 同帧扫描端点 | 0.29 m + 0.03 m 观测误差 = 0.32 m | 保留旧同帧保守预算 |
+| 规划终点 | 上述相应几何预算 | 再覆盖控制器允许的完整 0.12 m 停车圆盘 |
+
+0.5 m 是替代终点搜索范围，0.12 m 是到达停车位置容差，两者作用不同。静态地图定位预算没有因扫描相对帧修复而缩小，未知区域也没有改为可通行。
+
+默认 `dynamic_policy=static_then_stable`：全局初始路线以静态硬几何为主，动态观测参与软代价，起点、终点和局部控制立即检查全部当前观测。持续受阻后，连续至少 3 次扫描、跨度至少 0.3 s、扫描间隔不超过 1.5 s 的稳定当前端点加入全局硬约束。局部停车不等待稳定判据成立。
+
+共享配置的显示膨胀内切半径为 0.22549849949589046 m，膨胀半径 0.70 m，衰减系数 3.0；FAST-LIVO2 导航入口覆盖后两项为 0.32 m / 16.0。它们用于路径偏好，不等于 0.26 m 车体安全圆，也不替代静态地图的 0.29 m 预算。详细说明见 [规划代价地图](planning_costmap.md)和[局部代价地图](local_costmap.md)。
+
+### 5.3 CollisionMap 原子快照
+
+[CollisionMap.msg](../mini_nav_nodes/msg/CollisionMap.msg) 定义于 `mini_nav_nodes`，不存在额外的 `mini_nav_interfaces` 包：
+
+```text
+nav_msgs/OccupancyGrid grid
+geometry_msgs/Point[] points
+float64 observation_uncertainty
+float64 clearance_radius
+bool valid
+string points_frame_id
+```
+
+`grid.header` 表示格帧及观测时间；`points_frame_id` 明确端点帧，空值兼容格与点同帧。`clearance_radius` 为格使用的预算，点的独立半径由解码后的几何契约指定。格、点、预算和有效性同消息更新，避免订阅者拼接不同时刻的数据。
+
+[DecodeCollisionMap](../mini_nav_nodes/include/mini_nav_nodes/collision_map.hpp) 检查 valid、允许的格/点帧、有限正预算、分辨率、尺寸与容量、数据长度、格姿态及端点有限数。只接受 -1/0/100 的原始占用语义，拒绝把软膨胀图作为碰撞输入。节点还检查静态/局部预算是否与自身配置一致。无效或过期输入撤销运动能力。
+
+消息增加 `points_frame_id` 后需同步构建并完整重启各消费者；构建不会热更新已有进程。
+
+## 6. 自研 AMCL
+
+AMCL 算法实现在 `mini_nav_core/src/localization/amcl/`，公开接口保留于 `include/mini_nav_core/localization/`。ROS 节点只传入普通 C++ 数据，不让核心直接使用 LaserScan 或 TF。
+
+| 核心模块 | 职责 |
 |---|---|
-| `rviz/astar_navigation.rviz` | 服务于不启动仿真和 AMCL 的静态 A* 演示，重点显示地图、目标点和 A* 路径。 |
-| `rviz/localization_astar.rviz` | 服务于完整定位入口，显示地图、机器人模型、激光、AMCL 粒子云、定位姿态和 A* 路径。 |
-| `scripts/env_mini_nav.sh` | 设置项目运行所需的 `ROS_DOMAIN_ID`、`GZ_PARTITION`、TurtleBot3 模型等环境。需要互相发现的终端都必须加载同一环境。 |
-| `scripts/start_astar_navigation.sh` | 不启动 Gazebo 或 AMCL，直接给 `costmap_publisher_node` 传入地图文件，适合单独验证自研 A*。 |
+| `LocalizationMap` | 只读定位地图、距离场、射线距离与自由位置采样 |
+| `DifferentialMotionModel` | 差分里程计增量与噪声采样；alpha1–4 生效，alpha5 保留兼容 |
+| `LikelihoodFieldModel` / `BeamModel` | 基于普通 `LaserScanData` 的粒子观测似然 |
+| `PoseBinIndex` | 位姿分箱、占用箱计数和连通主簇，处理 yaw 周期边界 |
+| `ParticleFilter` | 持有运动/激光模型，初始化、预测、观测、归一化、重采样及主簇估计 |
+| `pose_utils` / `types` | 普通位姿类型、角度及协方差辅助计算 |
 
-工作区根目录的 `maps/` 和 `scripts/run_nav2_case.sh` 不属于 `mini_nav` 内部模块：前者是工作区共享地图，后者负责调度其他 Nav2 案例。项目中的 `*.orig` 文件是临时备份，不应被 CMake 安装或提交。
+`PoseBinIndex` 的文件名仍为 `kd_tree.hpp/cpp`；当前实现是位姿分箱索引，不能仅凭文件名解释成通用 KD-tree。`AmclNode` 通过 ParticleFilter 接口调用，不访问分箱细节。估计采用可信主簇，避免多个远离的粒子峰直接取全体平均。
 
-#### 2.4.2 `reference/nav2_amcl_jazzy/`：官方源码快照
+AmclNode 是 LifecycleNode，由地图/AMCL 生命周期管理器管理。回调组自动加入 executor，`main.cpp` 正常 spin 即可调度地图、初值和激光回调。
 
-该目录是从 ROS 2 Jazzy/Nav2 获取的 AMCL 阅读材料，不是自研 AMCL 的编译依赖：
+粒子更新与 TF 刷新解耦：运动未超过更新阈值时不重新滤波，但按扫描时间加 transform_tolerance 重发最近有效几何。地图替换、初值重置、全局定位及 cleanup/shutdown 使缓存失效。TF 在刷新只表示变换可用，定位有效还要求激活状态、可信主簇、有限协方差及新鲜观测等条件。
 
-| 路径 | 参考内容 |
-|---|---|
-| `include/nav2_amcl/` | 官方节点头文件、角度工具和可移植性辅助代码。 |
-| `src/amcl_node.cpp`、`src/main.cpp` | 官方 ROS 节点生命周期、参数、通信和进程入口。 |
-| `src/map/` | 官方地图、距离空间和射线相关的 C 实现。 |
-| `src/motion_model/` | 官方差速和全向运动模型。 |
-| `src/pf/` | 官方粒子滤波器、KD-tree、概率密度、向量和协方差工具。 |
-| `src/sensors/laser/` | 官方激光传感器模型及其概率计算实现。 |
-| `COLCON_IGNORE` | 阻止该源码快照被 colcon 当作工作区 ROS 包构建。 |
-| `README.md`、`REFERENCE.md` | 记录快照来源、版本和阅读边界。 |
+KLD 仍为简化自适应实现，beam-skip 和位姿持久化等兼容参数不能据此认定已实现。源码承接关系见 [官方 AMCL 代码导读](../logs/26-8-30/amcl_code_walkthrough.md)。
 
-参考源码中的模块名称和 C/C++ 混合实现用于帮助理解算法，不应被 `mini_nav_core` 直接 include，也不应被 `mini_nav_nodes` 直接链接。自研实现需要保持自己的接口、测试和依赖方向。
+## 7. FAST-LIVO2 地图与旧图定位
 
-#### 2.4.3 `docs/`：设计和协作接口
+[mini_nav_fastlivo](../mini_nav_fastlivo/README.md) 独立封装地图资产、会话、高度投影和配准，不复制 A* 或跟踪器。FAST-LIVO2 前端来自独立部署的固定上游版本；small_gicp 固定 1.0.1，依赖安装于工作区私有目录。
 
-| 文件 | 作用 |
-|---|---|
-| `docs/architecture.md` | 记录包边界、文件职责、接口、依赖方向、数据流和启动方式；本次增加的 AMCL 设计主要在第 2 节和第 10 节。 |
-| `docs/amcl_research.md` | 记录 AMCL 算法、官方实现和自研拆分的调研结论。 |
-| `docs/amcl_code_walkthrough.md` | 按文件和调用路径导读官方 AMCL 源码，服务于实现对照。 |
-| `docs/technicial-detail-elaboration.md` | 记录较细的技术推导和实现说明。 |
-| `docs/project_status.md` | 记录里程碑、已验证功能、测试结果和当前限制。 |
-| `docs/contributing.md` | 记录修改、构建、测试、验收和提交规范。 |
+建图入口启动前端、height_mapper 和可选手柄/外部控制，不启动 NavigateToPose。保存服务生成新目录，绑定三维 `geometry.pcd`、二维 `navigation.yaml/pgm`、标定关系、观测缓存和哈希清单。三维定位图与二维导航图须属于同一坐标关系，彩色显示云不能替代绑定资产。
 
-代码、话题、TF、参数或启动入口发生变化时，应先确认变化属于哪个包，再同步更新对应文档；尤其要保持第 2 节目录、第 5 节 ROS 接口契约和第 10 节 AMCL 细节之间的一致性。
+导航入口校验并只读加载 map_bundle，启动 prior_localizer、地图服务及完整自研导航链。人工 `/initialpose` 给出局部 GICP 初值；配准将前端观测约束到旧图，发布动态 map → odom 和定位质量/epoch。导航不启动全局地图累积/保存节点；前端内部局部几何与视觉参考仍更新，未恢复旧图的完整视觉状态，也没有全局地点搜索。
 
-## 3. 模块与依赖方向
+离线模块记录完整去畸变 IMU 点云和同时间戳位姿，严格检查记录及哈希。停止建图后，默认 `finalize_map --backend probability` 重放完整扫描射线，生成新候选包，保留原会话和地图。当前在线布尔累积预览不是离线结果。
 
-```text
-外部 ROS 2 / Gazebo / Nav2
-          │
-          ▼
-mini_nav_bringup  ───────►  mini_nav_nodes  ───────►  mini_nav_core
-        │                         │                         │
-        └── 启动与资源编排         └── ROS 适配              └── 算法实现
-```
+`hba` 和 `pose_graph` 是显式可选实验后端：前者生成优化与原轨迹对照；后者使用平地 SE(2) 扫描约束校正历史轨迹。代码及注册测试存在不等于长程闭环或地图改进已经验收；已有 HBA 首轮对照未改善墙厚。最终重放完整扫描，不能把粗优化云直接当碰撞地图。实现路径为 [offline.py](../mini_nav_fastlivo/mini_nav_fastlivo/offline.py)与[pose_graph.py](../mini_nav_fastlivo/mini_nav_fastlivo/pose_graph.py)。
 
-依赖方向必须保持从上到下：
+`bind_static_map` 可将三维定位资产与已有二维静态图绑定并保留原图文件及元数据；这类组合的坐标与可选三维碰撞云需单独验证。平地自由空间假设不证明整个车高柱都已观测，坡道、悬空障碍、负障碍、动态物体剔除和长期漂移仍有验证缺口。离线证据见 [墙体验证报告](../logs/26-10-4/offline_wall_validation_report.md)。
 
-- `mini_nav_core` 不依赖 ROS 2 消息、节点或 TF；它处理地图、栅格坐标、路径规划和粒子定位。
-- `mini_nav_nodes` 是 `mini_nav_core` 的 ROS 适配器，负责订阅地图、接收 RViz 交互消息、转换坐标并发布结果。
-- `mini_nav_bringup` 负责组合 Gazebo、官方 Nav2 定位模块和自研节点，不把业务算法写进 launch 文件。
-- `nav2_learning`、`nav2_stvl_demo` 和 `navigation2_tutorials` 是参考代码，不是 `mini_nav` 的运行依赖；生产代码不得引用它们的私有文件。
+## 8. SCURM FAST-LIO2 先验定位
 
-这里的设计目标是让核心模块成为有较深实现、较小接口的模块：调用者只需要提供 `Costmap2D`、起点和终点，A* 的搜索、障碍判断和路径回溯都隐藏在实现内部。ROS 话题、生命周期和消息转换集中在节点模块的接缝处；粒子滤波内部的运动模型、激光模型和空间分箱保持在核心模块，以保持修改的局部性。
+本入口使用归档的 `PolarisXQ/SCURM_SentryNavigation@46e6425c692ec98f8e65446fb6fdd360f44ef8e5` 源码，保留上游内核与许可。三维算法源文件存放于 core 的 fastlio2 目录，独立 fast_lio 包显式引用；不会链接进入基础二维核心库。
 
-## 4. 运行时数据流
+正式入口 `scurm_sim/fastlio2_navigation.launch.py` 启动仿真、地图、定位适配和完整自研导航链，不启动 AMCL、LIVO2 或上游 SCURM 的 Nav2 导航插件。旧 `mini_nav_fastlio.launch.py` 保留兼容。
 
-完整链路有两个可互换入口：官方对照使用 `official_localization_astar.launch.py`，自研定位使用 `mini_localization_astar.launch.py`；下面的数据流的区别仅在 AMCL 实现。
+backend 管理自身 ICP / FAST-LIO2 子进程和唯一会话。初值由 map 车体位姿转换到 IMU；邻域 ICP 连续有效后进入固定先验 ikd-tree 定位，不增量写入先验地图。再次设置初值时只停止并重启自身子进程，仿真保留，旧导航任务失效。
+
+轮式里程计保持连续 odom → base_footprint；前端输出私有 `scurm_lio_odom`，自身底盘 TF 发布关闭。适配器在同一测量时刻组合定位车体位姿与插值轮式位姿：
 
 ```text
-                                  ┌────────────────────┐
-/map ─────────────────────────────►│ 官方或自研 AMCL    │──── map -> odom
-                                  └──────┬─────────────┘
-                                         ▲
-                       /scan + odom→base TF
-                                         │
-                         ┌───────────────┴───────────────┐
-                         │ Gazebo Waffle + ROS bridge   │
-                         └─────────────────────────────┘
-
-/map ─────────────────────────────►┌────────────────────┐
-                                   │ CostmapPublisher  │
-/initialpose ──清除旧路径──────────►│ Node               │◄── map -> base_footprint TF
-/goal_pose ───────────────────────►└─────────┬──────────┘
-                                             │ 膨胀规划图
-                                             ▼
-                                      ┌───────────────┐
-                                      │ AStarPlanner  │
-                                      └──────┬────────┘
-                                             │ /mini_nav/global_path
-                                             ▼
-                                      ┌───────────────┐
-                                      │ RViz          │
-                                      │ SetInitialPose│
-                                      │ SetGoal       │
-                                      └───────────────┘
-
-/initialpose ───────────────────────────────► AMCL
+T_map_odom(t) = T_map_base(t) × inverse(T_odom_base(t))
 ```
 
+质量检查包括匹配点数/比例/点面残差、IMU/扫描/轮式数据年龄、位姿和协方差有限性、时钟及跳变；有前端进程不代表有效定位。初始化、后端重启和质量失效撤销旧运动许可。固定先验仍需要合理人工初值，未实现未知位置全局重定位。
 
-`/initialpose` 为 AMCL 提供定位初始猜测；`CostmapPublisherNode` 收到它时清除旧路径，并等待新的 `map -> odom` TF。每次收到 `/goal_pose`，A* 节点查询当时的 `map -> base_footprint` TF 作为起点。TF 缺失、过期或起终点落在规划安全区时不发布非空路径。路径跟踪模块仍需独立实现。
+源文件清单、独立 overlay 和运行步骤见 [定位后端目录说明](localization_backends.md)与[人工初始化验收](../logs/26-10-4/scurm_fastlio2_initialpose.md)。
 
-不启动仿真和定位的 `start_astar_navigation.sh` 显式设置 `planning.use_initial_pose_as_start:=true`，保留 RViz 手选起终点的独立算法演示；两套定位入口使用默认的 TF 起点。
+## 9. ROS 接口、TF 与运行所有权
 
-## 5. ROS 接口契约
+| 接口 | 类型/帧 | 生产者与用途 |
+|---|---|---|
+| `/map` | OccupancyGrid / map | 地图服务，定位与规划原始输入 |
+| `/mini_nav/planning_costmap` | OccupancyGrid / map | 规划器，显示软代价 |
+| `/mini_nav/global_path` | Path / map | 规划器，观察结果；完整入口以 Action 交付控制 |
+| `/mini_nav/static_collision_map` | CollisionMap / map，点可 odom | 规划器，静态及相应动态约束原子快照 |
+| `/mini_nav/local_collision_map` | CollisionMap / odom | 局部图节点，当前观测与覆盖 |
+| `/mini_nav/local_costmap_valid` | Bool | 局部图节点，新鲜度和输入有效性 |
+| `/mini_nav/localization_valid` | Bool | 当前定位后端，供任务与跟踪器门控 |
+| `/mini_nav/localization_epoch` | String | 三维适配器，会话切换使旧任务失效 |
+| `/initialpose` | PoseWithCovarianceStamped / map | RViz 或用户，重新初始化定位 |
+| `/navigate_to_pose` | NavigateToPose Action | 任务节点，单目标反馈/结果/取消/抢占 |
+| `/compute_path_to_pose` | ComputePathToPose Action | 规划器；ID 留空、AStar 或 AStarDynamic |
+| `/follow_path` | FollowPath Action | 跟踪器；ID 留空或 PathTracker |
+| `/mini_nav/task_active` | Bool | 当前控制模式的许可与持续心跳 |
+| `/mini_nav/cmd_vel_raw` | TwistStamped / base_footprint | 当前控制源，已经检查的候选 |
+| `/cmd_vel` | TwistStamped / base_footprint | 唯一 velocity_guard，底盘实际 ROS 输入 |
+| `/mini_nav/set_navigation_enabled` | SetBool service | 任务暂停/启用；启用不恢复旧目标 |
+| `/mini_nav/control_diagnostics` | String / JSON | 跟踪器，候选、冲突、预算和时间信息 |
 
-| 接口 | 发布者 | 订阅者 | 类型 | 语义 |
-|---|---|---|---|---|
-| `/map` | Nav2 map_server | 官方或自研 AMCL、`CostmapPublisherNode` | `nav_msgs/msg/OccupancyGrid` | 静态地图；可靠、Transient Local QoS |
-| `/mini_nav/map` | `CostmapPublisherNode` | RViz | `nav_msgs/msg/OccupancyGrid` | 自研模块使用的地图可视化 |
-| `/initialpose` | RViz | AMCL、`CostmapPublisherNode` | `geometry_msgs/msg/PoseWithCovarianceStamped` | AMCL 初始位姿；规划节点清除旧路径并等待新定位 TF |
-| `/goal_pose` | RViz `SetGoal` | `CostmapPublisherNode` | `geometry_msgs/msg/PoseStamped` | A* 终点与终点朝向；规划起点取目标到来时的机器人 TF |
-| `/mini_nav/global_path` | `CostmapPublisherNode` | RViz | `nav_msgs/msg/Path` | 自研 A* 输出的全局路径 |
-| `/mini_nav/map_axes` | `CostmapPublisherNode` | RViz | `visualization_msgs/msg/MarkerArray` | 地图原点和坐标轴可视化 |
-| `/scan` | Gazebo bridge | AMCL、RViz | `sensor_msgs/msg/LaserScan` | 激光观测 |
-| `/odom` | Gazebo bridge | 当前无直接订阅；后续控制器使用 | `nav_msgs/msg/Odometry` | 局部里程计数据，并由仿真 TF 链路提供给 AMCL |
-| `/tf` | Gazebo/AMCL 等 | TF listeners | `tf2_msgs/msg/TFMessage` | 动态坐标变换 |
-| `/particle_cloud` | 当前入口的 AMCL | RViz | `nav2_msgs/msg/ParticleCloud` | AMCL 粒子群 |
+传感器使用 SensorDataQoS；静态地图/路径与保留状态使用 reliable/transient_local，局部碰撞、有效性、原始速度和任务租约使用 reliable 的实时流。订阅成功不替代时间戳及接收年龄检查，保留状态也不代表当前有效。
 
-### 坐标系约束
+必须保持以下运行所有权：
 
-```text
-map ──(官方或自研 AMCL 提供)──► odom ──(仿真里程计提供)──► base_footprint
-                                                    │
-                                  robot_state_publisher 提供静态 TF
-                                                    ▼
-                      base_link ─────────────────► base_scan
-```
+- 一个有效定位后端动态发布 map → odom；禁止用静态 map → odom 代替定位。
+- 轮式/仿真里程计发布 odom → base_footprint；机器人状态发布器管理车体和传感器外参。
+- 完整控制模式只有一个 velocity_guard 发布 `/cmd_vel`，只有一个获授权原始命令源和许可源。
+- 地图输入及各输出图避免重复发布者；隔离 ROS_DOMAIN_ID 和 GZ_PARTITION。
 
-- `map` 是静态地图全局坐标系。
-- `odom` 是连续但可能漂移的局部坐标系。
-- `base_footprint` 是机器人平面基座坐标系。
-- `base_link` 是机器人本体坐标系。
-- `base_scan` 是激光雷达坐标系。
-- 不允许发布静态 `map -> odom`。该变换必须由定位模块根据地图、激光和里程计估计产生。
-- RViz 的 Fixed Frame 使用 `map`。
+守卫每 20 ms 用墙定时器检查，命令/租约默认 0.35 s 超时；时钟停滞或回跳、非法帧/速度/时间戳及关闭均输出零速。守卫不再平滑命令，保证转发的是跟踪器检查过的候选。守卫自身或桥接故障仍依赖底盘驱动超时，软件节点不等于硬件急停。
 
-## 6. 核心模块接口
+手动控制使用同一 raw → guard 接口，PS5 面板提供开关及限速，手动入口可配置到 2 m/s、2 rad/s。它与自主导航目前是独立启动模式，未实现共享仲裁器或自动热接管；FAST-LIVO2 建图入口拒绝同时启用手柄和外部控制。不能把手动上限写成自主默认值。
 
-### `mini_nav_core::Costmap2D`
+## 10. 启动入口与构建边界
 
-`Costmap2D` 的接口提供地图尺寸、分辨率、原点、栅格代价、栅格/世界坐标转换和基本地图绘制能力。它不负责 ROS 发布，也不读取 YAML 或 PGM 文件。
+| 入口 | 启动内容 | 默认隔离/边界 |
+|---|---|---|
+| [mini_localization_astar.launch.py](../mini_nav_bringup/launch/mini_localization_astar.launch.py) | 自研 AMCL、地图、完整导航链、Waffle/RViz | 域 61 / mini_nav；支持关闭仿真或 RViz |
+| [official_localization_astar.launch.py](../mini_nav_bringup/launch/official_localization_astar.launch.py) | 官方 AMCL + 地图服务、自研规划和局部图、Waffle/RViz | 继承外部域/分区；未启动任务、跟踪器或速度守卫 |
+| [fastlivo_mapping.launch.py](../mini_nav_bringup/launch/fastlivo_mapping.launch.py) | FAST-LIVO2 建图、记录、手动或外部控制 | 域 219 / mini_nav_fastlivo_deploy；没有自主导航 |
+| [fastlivo_navigation.launch.py](../mini_nav_bringup/launch/fastlivo_navigation.launch.py) | FAST-LIVO2 前端、旧图局部定位、完整导航链 | 域 219 / mini_nav_fastlivo_deploy；必需 map_bundle |
+| [fastlio2_navigation.launch.py](../mini_nav_fastlio/scurm_sim/launch/fastlio2_navigation.launch.py) | SCURM FAST-LIO2 先验定位、完整导航链 | 域 227 / scurm_mini_nav；独立安装 overlay |
+| [fastlivo_slam_benchmark.launch.py](../mini_nav_bringup/launch/fastlivo_slam_benchmark.launch.py) | 同次运动比较 FAST-LIVO2 与 SLAM Toolbox 地图 | 域 228 / mini_nav_slam_benchmark；实验对照入口 |
+| [waffle_sim.launch.py](../mini_nav_bringup/launch/waffle_sim.launch.py)、[sim_check.launch.py](../mini_nav_bringup/launch/sim_check.launch.py) | 仿真及接口检查 | 不提供定位替代 TF 或完整导航 |
+| [start_astar_navigation.sh](../scripts/start_astar_navigation.sh) | 独立静态地图/路径演示 | 不自动提供仿真、定位或完整控制链 |
 
-主要不变量：
+官方定位对照入口只比较定位与自研规划，不能按默认自研入口的方式期待机器人自动跟踪路径，也不是整套官方 Nav2。
 
-- 坐标必须在地图范围内，越界输入不能破坏已有地图。
-- 障碍和未知区域必须使用统一的代价值判断。
-- 地图元数据改变时，栅格数据必须按新尺寸原子式重建。
+基础入口使用包 share 查找资源，默认静态地图为 `mini_nav_bringup/maps/tb3_learning.yaml/pgm`（112 × 103、0.05 m/格、原点 -0.961/-2.072），保留 `map:=...` 覆盖。自研 AMCL 和 map_server 是生命周期节点；任务、局部图、跟踪器和守卫是普通节点，统一暂停服务不等于整套 Lifecycle cleanup。
 
-### `mini_nav_core::AStarPlanner`
-
-```text
-Plan(const Costmap2D& costmap,
-     MapLocation start,
-     MapLocation goal) -> vector<MapLocation>
-```
-
-当前实现：
-
-- 使用四邻域搜索。
-- 使用曼哈顿距离作为启发式函数。
-- 起点、终点越界或位于不可通行栅格时返回空路径。
-- 没有路径时返回空路径。
-- 返回的路径按起点到终点顺序排列。
-
-### `CostmapPublisherNode`
-
-该节点是 ROS 适配器，负责：
-
-1. 从 `/map` 或 `map_file` 得到 `OccupancyGrid`。
-2. 将占用栅格转换为 `Costmap2D`。
-3. 将世界坐标转换为 A* 所需的栅格坐标。
-4. 调用 `AStarPlanner`。
-5. 将栅格路径转换为 `nav_msgs/msg/Path`。
-
-重要参数：
-
-- `map_topic`：外部地图话题，默认 `/map`。
-- `map_file`：标准 trinary YAML/PGM 地图路径；为空时订阅 `map_topic`。
-- `frame_id`：地图坐标系，默认 `map`。
-
-## 7. 启动入口
-
-执行前先加载统一环境：
+基础构建与测试从工作区根目录进行：
 
 ```bash
 cd /home/a/ros2_ws
-source src/mini_nav/scripts/env_mini_nav.sh
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup mini_nav_rviz_plugins
+source install/setup.bash
+colcon test --packages-select mini_nav_core mini_nav_nodes mini_nav_bringup mini_nav_rviz_plugins --event-handlers console_cohesion+
+colcon test-result --verbose
+ros2 launch mini_nav_bringup mini_localization_astar.launch.py --show-args
 ```
 
-| 用途 | 命令 | 内容 |
-|---|---|---|
-| 官方 AMCL 对照 | `ros2 launch mini_nav_bringup official_localization_astar.launch.py` | Waffle、map_server、官方 AMCL、自研 A*、RViz |
-| 自研 AMCL 链路 | `ros2 launch mini_nav_bringup mini_localization_astar.launch.py` | Waffle、map_server、自研 AMCL、自研 A*、RViz |
-| 静态 A* 演示 | `./src/mini_nav/scripts/start_astar_navigation.sh` | 直接加载地图文件、自研 A*、RViz；不启动仿真和定位 |
-| 仿真接口 | `ros2 launch mini_nav_bringup waffle_sim.launch.py` | Waffle、Gazebo、传感器和里程计 |
-| RViz 检查 | `ros2 launch mini_nav_bringup sim_check.launch.py` | 只启动 RViz，不伪造定位 TF |
+FAST-LIVO2 使用 [tools/build.sh](../mini_nav_fastlivo/tools/build.sh)及 `install_fastlivo` 前端依赖；离线概率重放/HBA 通过独立工具构建，私有 PCL/GTSAM/OctoMap 依赖不加入二维核心库。FAST-LIO2 使用 [build_localization.sh](../mini_nav_fastlio/scripts/build_localization.sh)和 `install_mini_nav_fastlio`。详细 source 顺序按各包说明执行，不能仅构建三包便认为三维后端已准备好。
 
-完整入口的地图和参数通过 package-share 查找，默认使用 `mini_nav_bringup/maps/tb3_learning.yaml`，其 YAML/PGM 与 `scripts/run_nav2_case.sh` 的第一个 `learning` 案例一致。独立 A* 脚本也使用这份包内地图。原 `turtlebot3_map.yaml/pgm` 保留为备用资源；测试其他地图时可通过 `map:=...` 显式传入。
+## 11. 验证证据与当前边界
 
-## 8. 当前状态与后续接缝
+架构约束需要分层验证：核心检查几何与算法边界；真实节点检查消息、Action、取消/抢占、输入失效和守卫；隔离 Gazebo 检查实际运动、终点、停车及 TF/速度发布所有权。RViz 面板需要可用图形环境。测试数量应按当前注册用例统计，不能把历史 XML 和 CTest 包装总数当作实际用例。
 
-已经完成的接缝：
+最新 [第二轮复发问题报告](../logs/26-10-6/recurrent_failure_02_assessment.md)记录 104 个实际用例（core 76、nodes 27、RViz 1）、原始路径真实节点回放和 6 个连续 Gazebo 目标通过；[前一轮报告](../logs/26-10-6/recurrent_failure_assessment.md)记录扫描帧预算修复、103 个用例和 7 次任务。它们表示各轮有限场景的已有验收，本次文档更新未重跑，也不能外推为全部地图、后端及噪声组合都已通过。
 
-- 地图服务到自研代价地图的接缝：`/map` → `CostmapPublisherNode`。
-- 世界坐标到栅格坐标的接缝：`Costmap2D` 的转换接口。
-- 栅格地图到路径消息的接缝：`AStarPlanner` → `/mini_nav/global_path`。
-- 地图定位到机器人坐标的接缝：AMCL 提供 `map -> odom`。
-- 定位计算与 TF 刷新的接缝：运动阈值控制粒子滤波成本，激光时间戳驱动缓存 `map -> odom` 重发。
+当前仍未实现或完成普遍验收的部分包括：
 
-下一阶段要增加的模块应放在 `/mini_nav/global_path` 和 `/cmd_vel` 之间：
+- Nav2 全套行为树/插件、多目标任务、通用恢复序列与路径速度反馈闭环。
+- 全部组件统一生命周期、实时调度、共享手动/自动仲裁和硬件急停。
+- 自研 AMCL 的完整官方功能等价、三维后端无初值全局重定位。
+- 三维地图长程闭环质量、复杂地形、动态物体离线剔除及实车运行。
+- 各定位后端在同一地图、重复连续目标和失效注入下的统一长期回归。
 
-```text
-/mini_nav/global_path
-          │
-          ▼
-PathFollower 适配器 ──► TF/AMCL 当前位姿 ──► TwistStamped /cmd_vel
-```
-
-这个 `PathFollower` 应拥有小而明确的接口，内部处理路径索引、朝向误差、速度限制、目标到达、超时和零速度保护。它不应被塞进 A* 或 `CostmapPublisherNode`，否则会让规划模块的接口变浅、测试范围变宽。
-
-## 9. 验证原则
-
-修改一个模块后，优先在它自己的接口上验证：
-
-- `mini_nav_core`：用 `ament_cmake_gtest` 覆盖地图边界、障碍、无路径和坐标转换。
-- `mini_nav_nodes`：验证地图消息转换、地图文件加载、起点终点边界、路径发布，以及 AMCL TF 缓存的初始状态、重时间戳和失效行为。
-- `mini_nav_bringup`：运行 `ros2 launch ... --show-args`，检查 package-share 路径、参数和节点组合。
-- 仿真联调：确认 `/clock`、`/scan`、`/odom`、`/tf`、`/map`、`/amcl_pose` 和 `map -> odom`，再验证 A* 路径。
-
-不要用 RViz 是否“看起来有东西”替代话题、TF 和测试验证。
-
-## 10. 自研 AMCL 架构（M1-M6 已实现，M7 待对照）
-
-自研定位采用“独立算法核心 + ROS 适配节点 + 独立启动入口”的结构。官方 Nav2 AMCL 保留为稳定对照组，不直接覆盖当前已经验证过的 `official_localization_astar.launch.py`。
-
-官方 Jazzy `nav2_amcl` 源码参考快照位于 `src/mini_nav/reference/nav2_amcl_jazzy/`。该目录保留了包结构、源码头部的版权/许可声明和上游版本说明，但带有 `COLCON_IGNORE`，只用于学习，不参与本项目构建或运行。
-
-建议先阅读 `amcl_node.hpp/.cpp` 了解 ROS 适配层，再阅读 `pf/`、`sensors/laser/`、`motion_model/` 和 `map/`，将官方实现与下面规划的 ROS 无关核心逐项对应。
-
-### 10.1 当前模块和文件
-
-```text
-mini_nav_core/localization/
-├── types.hpp                         # Pose2D、Covariance3、Particle、PoseEstimate
-├── laser_scan_data.hpp               # ROS 无关的激光扫描数据
-├── localization_map.hpp/.cpp         # 地图快照、距离场和射线投射
-├── motion_model.hpp                  # 运动模型抽象
-├── differential_motion_model.hpp/.cpp
-├── laser_model.hpp                   # 激光模型抽象
-├── likelihood_field_model.hpp/.cpp
-├── beam_model.hpp/.cpp
-├── kd_tree.hpp/.cpp                  # ParticleFilter 内部的空间分箱/KLD 统计
-└── particle_filter.hpp/.cpp          # 初始化、预测、权重、重采样和估计
-
-mini_nav_nodes/
-├── include/mini_nav_nodes/amcl_node.hpp
-├── src/amcl_node.cpp                 # AmclNode 生命周期、ROS 适配和 TF 缓存
-└── test/test_amcl_tf_cache.cpp       # TF 缓存、重时间戳和失效测试
-```
-
-定位算法直接放入已有的 `mini_nav_core` ROS 2 CMake 包中，作为该包内的 `localization/` 子模块。这样不新增包，也不改变现有 `Costmap2D` 和 `AStarPlanner` 的接口。定位算法本身仍然不依赖 `rclcpp`、ROS 消息或 TF，只复用同包的 `Costmap2D`；它不依赖 `AStarPlanner`。
-
-### 10.2 依赖方向
-
-```text
-mini_nav_bringup
-        │
-        └── mini_nav_nodes ─────────► mini_nav_core
-                 │                       │
-                 │                       ├── Costmap2D + A*
-                 │                       └── localization/*
-                 └── ROS 适配 amcl_node
-```
-
-具体职责如下：
-
-- `mini_nav_core` 负责 ROS 无关的地图、A* 和定位算法，同时保持既有 `Costmap2D` 与 `AStarPlanner` 接口兼容。
-- `mini_nav_core/localization/*` 负责概率定位算法，包括运动模型、激光模型和粒子滤波。
-- `mini_nav_nodes` 中的 `amcl_node` 负责 ROS 消息转换、QoS、TF 查询、生命周期和发布。
-- `mini_nav_bringup` 负责把 map_server、Waffle 仿真、自研定位节点、A* 节点和 RViz 组合起来。
-- 官方 `nav2_amcl` 只在官方对照入口中运行；自研入口不能同时启动两个 `map -> odom` 发布者。
-
-这里不提前抽象出虚拟的 `MapInterface`。当前只有 `Costmap2D` 一个地图适配器，定位子模块直接使用它能保持接口更小；等第二种地图实现真正出现时，再引入新的接缝。
-
-### 10.3 算法核心的最小接口
-
-核心模块的公共接口保持小而深，`AmclNode` 不需要知道内部的粒子组织方式：
-
-```text
-ParticleFilter(options)
-    Initialize(const Pose2D& pose, const Covariance3& covariance)
-    InitializeGlobal(const LocalizationMap& map)
-    MotionUpdate(previous_odom_pose, current_odom_pose)
-    SensorUpdate(scan, map, base_to_laser_pose)
-    NormalizeWeights() / Resample()
-    Estimate() -> PoseEstimate
-```
-
-模块边界：
-
-- `LocalizationMap` 负责地图快照、自由栅格/障碍判断、障碍距离查询、自由栅格采样和射线投射。
-- `DifferentialMotionModel` 负责差速里程计增量到粒子位姿的带噪声预测。
-- `LaserModel` 的具体实现负责根据地图和扫描计算粒子权重。
-- `ParticleFilter` 负责调用上述模块，组织初始化、运动更新、传感器更新、归一化、重采样和估计。
-- `PoseBinIndex` 的公共接口只服务 `ParticleFilter`，外部调用者不能依赖粒子分箱细节。
-
-当前核心输入使用弧度和米，支持 yaw 为 0 的二维静态地图；核心不依赖 ROS 消息、节点或 TF。
-
-### 10.4 ROS 适配节点的职责
-
-`amcl_node` 已实现为生命周期节点，以便在地图、TF、参数和发布器准备好之后再处理传感器数据。
-
-`on_configure()` 创建一个互斥回调组，并将其设置为自动加入节点 executor。地图、初始位姿和激光订阅都绑定到这个回调组；`main.cpp` 使用普通 `rclcpp::spin()` 驱动节点，因此不需要额外手动添加回调组。这个配置是运行时约束：如果回调组关闭自动加入 executor，ROS 图仍会显示订阅连接，但地图、初始位姿和激光回调不会被调度，最终不会产生定位输出。
-
-输入：
-
-| 输入 | 类型 | 节点职责 |
-|---|---|---|
-| `map_topic`，默认 `/map` | `nav_msgs/msg/OccupancyGrid` | 转换为独立的 `Costmap2D` 快照 |
-| `scan_topic`，默认 `/scan` | `sensor_msgs/msg/LaserScan` | 在扫描时间戳查询传感器 TF，转换为 core 观测 |
-| `/initialpose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | 校验 frame、协方差和地图范围后初始化粒子 |
-| TF | `odom -> base_footprint`、`base_footprint -> base_scan` | 计算里程计增量和激光安装位姿 |
-
-输出：
-
-| 输出 | 类型 | 初始规划 |
-|---|---|---|
-| `pose_topic` | `geometry_msgs/msg/PoseWithCovarianceStamped` | 当前实现发布 `/amcl_pose`，与官方入口保持可对照 |
-| `particle_cloud_topic` | `nav2_msgs/msg/ParticleCloud` | 供 RViz 观察收敛，后续可改为项目自有可视化消息 |
-| `tf_broadcast` 控制的 `map -> odom` | TF | 自研独立入口中开启；滤波更新时重算并缓存，未达运动阈值时按激光时间戳重发；对照实验中严格单发布者 |
-
-节点层只做适配，不实现粒子权重或射线投射。TF 缓存是 ROS 输出语义的一部分，因此保留在 `AmclNode`，不下沉到 ROS 无关的 `ParticleFilter`。节点还需要显式处理 QoS：地图使用可靠、Transient Local；激光按传感器数据 QoS；所有仿真节点统一使用 `use_sim_time`。
-
-### 10.5 启动入口隔离
-
-现有入口保持不变：
-
-```text
-official_localization_astar.launch.py
-    Waffle + map_server + 官方 AMCL + A* + RViz
-```
-
-新增入口单独验证自研定位：
-
-```text
-mini_localization_astar.launch.py
-    Waffle + map_server + mini_nav_amcl_node + A* + RViz
-```
-
-自研入口不启动 `nav2_amcl`，但仍可以复用 map_server 和仿真传感器。这样官方 AMCL 是对照实现，自研 AMCL 是被测实现，二者可以使用相同地图、起点和仿真轨迹分别运行。
-
-### 10.6 实现顺序和验收点
-
-1. **M1：粒子滤波核心**（已完成）。验证初始化、权重归一化、重采样、均值、角度均值和协方差。
-2. **M2：运动模型**（已完成）。给定固定 odometry 增量，验证粒子平移/旋转方向和噪声随参数变化。
-3. **M3：射线投射与激光模型**（已完成）。在小地图上验证命中墙、越界和未知区域处理。
-4. **M4：核心跟踪**（已接入）。给定初始位姿、运动和扫描序列，验证估计不会发散。
-5. **M5：ROS 适配**（已完成基础接入）。验证 pose、particle cloud、时间戳、QoS 和 TF 输入。
-6. **M6：TF 与独立启动**（已完成）。确认 `map -> odom -> base_footprint -> base_scan` 完整，并由自研 AMCL 发布 `map -> odom`；已在 Gazebo teleop 与 RViz 中验证缓存 TF 按激光时间重发后的连续显示。
-7. **M7：官方对照**（待完成）。比较收敛时间、定位误差、粒子分布和丢失后的恢复能力。
-
-核心算法已接入 `mini_nav_core` 单元测试；自研节点和独立入口继续单独验证，避免把算法问题与 DDS、生命周期和 TF 问题混在一起。
-
-几个容易忽略的实现细节：
-
-1. AMCL 的地图订阅是 reliable + transient local；地图发布者也应保留地图，启动顺序变化时才不会因为错过唯一一条地图消息而空等。[Jazzy 地图订阅 QoS](https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_amcl/src/amcl_node.cpp#L1297-L1306)
-2. AMCL 的激光输入使用 sensor-data QoS，并用 TF MessageFilter 等待目标时间的 TF；所以“`/scan` 有数据”不等于“AMCL 已经能够使用这些数据”。[Jazzy 激光 MessageFilter](https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_amcl/src/amcl_node.cpp#L1424-L1442)
-3. `map` 的 `header.frame_id` 应与 AMCL 的 `global_frame_id` 一致。Jazzy 源码会对此发出警告；当前项目两者都应为 `map`。[Jazzy 地图处理](https://github.com/ros-navigation/navigation2/blob/jazzy/nav2_amcl/src/amcl_node.cpp#L1311-L1346)
-4. `base_frame_id` 必须与实际 TF 树一致。项目当前使用 `base_footprint`，而不是默认值也常见的 `base_link`；这个选择来自 Waffle 的实际 TF 配置。[项目 AMCL 配置](../mini_nav_bringup/config/amcl_waffle.yaml)
+维护时，普通二维地图与几何算法放 core，ROS 输入校验和 Action 适配放 nodes，运行选择与参数放 bringup；三维前端依赖继续隔离。修改碰撞接口要同时核对规划、后处理、跟踪和消息消费者，保留原始地图及用户注释，不能通过放宽半径掩盖建图或坐标问题。

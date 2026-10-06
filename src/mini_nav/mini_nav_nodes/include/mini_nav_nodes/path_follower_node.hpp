@@ -23,6 +23,7 @@
 #include "tf2_ros/transform_listener.h"
 
 #include "mini_nav_core/navigator/path_tracker.hpp"
+#include "mini_nav_nodes/msg/collision_map.hpp"
 
 namespace mini_nav_nodes
 {
@@ -60,13 +61,13 @@ namespace mini_nav_nodes
          *
          * @param message 全局规划图 OccupancyGrid；转换失败清空缓存并停车。
          */
-        void staticMapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message);
+        void staticMapCallback(const msg::CollisionMap::ConstSharedPtr message);
         /**
          * @brief 转换并保存 odom 系局部安全图及双时钟新鲜度记录。
          *
          * @param message 滚动局部图 OccupancyGrid；转换失败清空缓存并停车。
          */
-        void localMapCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message);
+        void localMapCallback(const msg::CollisionMap::ConstSharedPtr message);
         /**
          * @brief 记录局部感知有效性心跳；失效时暂停进展计时并停车。
          *
@@ -115,14 +116,19 @@ namespace mini_nav_nodes
         std::unique_ptr<mini_nav_core::PathTracker> tracker_;
         std::unique_ptr<mini_nav_core::Costmap2D> static_map_;
         std::unique_ptr<mini_nav_core::Costmap2D> local_map_;
+        std::vector<mini_nav_core::PathPoint> static_points_, local_points_;
+        std::string static_points_frame_;
+        double static_uncertainty_{0.0}, local_uncertainty_{0.03}, clearance_radius_{0.26};
+        double localization_uncertainty_{0.03};
+        rclcpp::Subscription<msg::CollisionMap>::SharedPtr static_collision_subscription_;
+        rclcpp::Subscription<msg::CollisionMap>::SharedPtr local_collision_subscription_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
         rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_subscription_;
-        rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr static_map_subscription_;
-        rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr local_map_subscription_;
         rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr local_valid_subscription_;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr command_publisher_;
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
+        rclcpp::Publisher<std_msgs::msg::String>::SharedPtr diagnostics_publisher_;
         rclcpp::TimerBase::SharedPtr timer_;
         std::unique_ptr<rclcpp::PreShutdownCallbackHandle> shutdown_callback_handle_;
 

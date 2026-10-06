@@ -1,3 +1,9 @@
+/**
+ * @file ikd_Tree.cpp
+ * @brief 增量 kd-tree 的建树、懒删除、体素代表点更新、空间检索及后台局部重建。后台重建通过快照和操作日志合并期间的更新。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #include "ikd_Tree.h"
 
 /*
@@ -6,6 +12,13 @@ Author: Yixi Cai
 email: yixicai@connect.hku.hk
 */
 
+/**
+ * @brief 设置参数并启动后台重建线程。
+ * @param delete_param 删除点比例重建阈值。
+ * @param balance_param 子树规模比例重建阈值。
+ * @param box_length 体素边长，与点坐标同单位且须>0。
+ * @note 构造不建树；插入前须先 Build 非空点云。参数未校验，box_length 必须为正。
+ */
 template <typename PointType>
 KD_TREE<PointType>::KD_TREE(float delete_param, float balance_param, float box_length)
 {
@@ -17,6 +30,10 @@ KD_TREE<PointType>::KD_TREE(float delete_param, float balance_param, float box_l
     start_thread();
 }
 
+/**
+ * @brief 停止并等待重建线程，然后释放树节点与缓存。
+ * @note 销毁期间不得继续访问或查询该树。
+ */
 template <typename PointType>
 KD_TREE<PointType>::~KD_TREE()
 {
@@ -29,6 +46,13 @@ KD_TREE<PointType>::~KD_TREE()
 
 
 
+/**
+ * @brief 更新删除比例、失衡比例和体素边长参数。
+ * @param delete_param 删除点比例重建阈值。
+ * @param balance_param 子树规模比例重建阈值。
+ * @param box_length 体素边长，与点坐标同单位且须>0。
+ * @note 仅调用三个参数 setter，不清空树也不重新启动线程。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::InitializeKDTree(float delete_param, float balance_param, float box_length)
 {
@@ -37,6 +61,11 @@ void KD_TREE<PointType>::InitializeKDTree(float delete_param, float balance_para
     set_downsample_param(box_length);
 }
 
+/**
+ * @brief 初始化新节点的坐标、计数、指针和懒标记互斥锁。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @note 只能用于新节点，不能对持锁或仍在使用的节点重复初始化。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::InitTreeNode(KD_TREE_NODE *root)
 {
@@ -66,6 +95,10 @@ void KD_TREE<PointType>::InitTreeNode(KD_TREE_NODE *root)
     pthread_mutex_init(&(root->push_down_mutex_lock), NULL);
 }
 
+/**
+ * @brief 读取包括逻辑删除节点在内的树大小。
+ * @return 当前 TreeSize；空树为 0，根后台重建锁繁忙时返回 Treesize_tmp 缓存。
+ */
 template <typename PointType>
 int KD_TREE<PointType>::size()
 {
@@ -96,6 +129,11 @@ int KD_TREE<PointType>::size()
     }
 }
 
+/**
+ * @brief 读取根节点维护的轴对齐包围盒。
+ * @return 根包围盒；空树或根重建期间取锁失败返回全零盒。
+ * @note 全零盒不能用于区分空树、锁繁忙和原点退化点集。
+ */
 template <typename PointType>
 BoxPointType KD_TREE<PointType>::tree_range()
 {
@@ -136,6 +174,10 @@ BoxPointType KD_TREE<PointType>::tree_range()
     return range;
 }
 
+/**
+ * @brief 读取未被逻辑删除的节点数。
+ * @return 正常为 TreeSize-invalid_point_num；空树为 0，根重建繁忙且取锁失败为 -1。
+ */
 template <typename PointType>
 int KD_TREE<PointType>::validnum()
 {
@@ -162,6 +204,12 @@ int KD_TREE<PointType>::validnum()
     }
 }
 
+/**
+ * @brief 读取根的失衡比例和删除比例。
+ * @param alpha_bal 写入根失衡比例。
+ * @param alpha_del 写入根删除比例。
+ * @note 要求 Root_Node 非空；取不到重建锁时返回缓存比例，小树比例可能仍为初始化值。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::root_alpha(float &alpha_bal, float &alpha_del)
 {
@@ -189,6 +237,10 @@ void KD_TREE<PointType>::root_alpha(float &alpha_bal, float &alpha_del)
     }
 }
 
+/**
+ * @brief 初始化同步锁并启动后台重建线程。
+ * @note 当前未检查 pthread 初始化/创建返回码。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::start_thread()
 {
@@ -202,6 +254,10 @@ void KD_TREE<PointType>::start_thread()
     printf("Multi thread started \n");
 }
 
+/**
+ * @brief 设置终止标记，等待线程退出并销毁同步锁。
+ * @note 调用时不能仍有外部树操作使用这些锁。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::stop_thread()
 {
@@ -218,6 +274,11 @@ void KD_TREE<PointType>::stop_thread()
     pthread_mutex_destroy(&search_flag_mutex);
 }
 
+/**
+ * @brief 适配 pthread 的静态线程入口。
+ * @param arg 传入当前 KD_TREE 对象地址。
+ * @return 重建循环退出后返回 nullptr。
+ */
 template <typename PointType>
 void *KD_TREE<PointType>::multi_thread_ptr(void *arg)
 {
@@ -226,6 +287,11 @@ void *KD_TREE<PointType>::multi_thread_ptr(void *arg)
     return nullptr;
 }
 
+/**
+ * @brief 后台执行子树快照、平衡重建、日志回放和替换。
+ * @note 替换前等待近邻查询计数归零，计数 -1 表示禁止新查询；更新需通过日志同步到新树。
+ * @note 旧树无有效点时 new_root_node 为 nullptr，当前后续统计仍解引用新根，存在空指针路径。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::multi_thread_rebuild()
 {
@@ -240,6 +306,7 @@ void KD_TREE<PointType>::multi_thread_rebuild()
         pthread_mutex_lock(&working_flag_mutex);
         if (Rebuild_Ptr != nullptr)
         {
+            /* Step 1：暂停目标子树查询，拍有效点快照。search_mutex_counter=-1 阻止新近邻查询，需在释放快照锁后恢复为 0。 */
             /* Traverse and copy */
             if (!Rebuild_Logger.empty())
             {
@@ -276,6 +343,7 @@ void KD_TREE<PointType>::multi_thread_rebuild()
             search_mutex_counter = 0;
             pthread_mutex_unlock(&search_flag_mutex);
             pthread_mutex_unlock(&working_flag_mutex);
+            /* Step 2：在新树回放快照期间的增删操作。省略日志会使重建替换丢失刚插入的点，或让已删除点再次出现。 */
             /* Rebuild and update missed operations*/
             Operation_Logger_Type Operation;
             KD_TREE_NODE *new_root_node = nullptr;
@@ -302,6 +370,7 @@ void KD_TREE<PointType>::multi_thread_rebuild()
                 }
                 pthread_mutex_unlock(&rebuild_logger_mutex_lock);
             }
+            /* Step 3：等待查询退出后替换父节点槽位，并更新父链统计；旧节点须在替换和查询屏障完成后才释放。 */
             /* Replace to original tree*/
             // pthread_mutex_lock(&working_flag_mutex);
             pthread_mutex_lock(&search_flag_mutex);
@@ -329,6 +398,7 @@ void KD_TREE<PointType>::multi_thread_rebuild()
                 new_root_node->father_ptr = father_ptr;
             (*Rebuild_Ptr) = new_root_node;
             int valid_old = old_root_node->TreeSize - old_root_node->invalid_point_num;
+            /* new_root_node 在快照没有有效点时仍可能为空；当前下一句未检查便解引用，这是现有边界问题。 */
             int valid_new = new_root_node->TreeSize - new_root_node->invalid_point_num;
             if (father_ptr == STATIC_ROOT_NODE)
                 Root_Node = STATIC_ROOT_NODE->left_son_ptr;
@@ -366,6 +436,12 @@ void KD_TREE<PointType>::multi_thread_rebuild()
     printf("Rebuild thread terminated normally\n");
 }
 
+/**
+ * @brief 将一条并发操作日志应用到重建的新子树。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param operation 待回放的操作日志，op 决定有效负载。
+ * @note 回放时禁用再次重建；点操作和 PUSH_DOWN 分支要求可访问的根节点。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::run_operation(KD_TREE_NODE **root, Operation_Logger_Type operation)
 {
@@ -405,6 +481,11 @@ void KD_TREE<PointType>::run_operation(KD_TREE_NODE **root, Operation_Logger_Typ
     }
 }
 
+/**
+ * @brief 用点云替换当前树并按最长轴中位数建立平衡树。
+ * @param point_cloud 初始点云副本，建树时会重排。
+ * @note 点云按值传入，可在副本中重排；调用前需确保没有并发重建/访问，空输入仅清除已有实际根。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Build(PointVector point_cloud)
 {
@@ -422,9 +503,19 @@ void KD_TREE<PointType>::Build(PointVector point_cloud)
     Root_Node = STATIC_ROOT_NODE->left_son_ptr;
 }
 
+/**
+ * @brief 查询指定距离内的至多 k 个有效最近邻。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param k_nearest 最大近邻数量，须>0。
+ * @param Nearest_Points 输出有效近邻，先清空再按距离升序写入。
+ * @param Point_Distance 与近邻一一对应的距离平方，先清空。
+ * @param max_dist 最大允许距离，使用长度单位，内部比较其平方。
+ * @note k_nearest 必须>0、max_dist 非负；输出按距离平方升序，不保证返回 k 个点。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Nearest_Search(PointType point, int k_nearest, PointVector &Nearest_Points, vector<float> &Point_Distance, float max_dist)
 {
+    /* 最大堆维护至多 k 个候选；随后从最大值逆序插到输出头部，得到距离平方升序，不能将输出误读成距离。 */
     MANUAL_HEAP q(2 * k_nearest);
     q.clear();
     vector<float>().swap(Point_Distance);
@@ -460,6 +551,12 @@ void KD_TREE<PointType>::Nearest_Search(PointType point, int k_nearest, PointVec
     return;
 }
 
+/**
+ * @brief 查询左闭右开轴对齐盒中的有效点。
+ * @param Box_of_Point 各轴左闭右开的查询盒。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @note 先清空 Storage；范围查询与最近邻采用不同的重建锁路径，不应假设支持任意并发调用。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Box_Search(const BoxPointType &Box_of_Point, PointVector &Storage)
 {
@@ -467,6 +564,13 @@ void KD_TREE<PointType>::Box_Search(const BoxPointType &Box_of_Point, PointVecto
     Search_by_range(Root_Node, Box_of_Point, Storage);
 }
 
+/**
+ * @brief 查询闭球内的有效点。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param radius 闭球搜索半径，须非负。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @note 先清空 Storage，radius 应非负，边界点满足距离平方<=radius²。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Radius_Search(PointType point, const float radius, PointVector &Storage)
 {
@@ -474,6 +578,13 @@ void KD_TREE<PointType>::Radius_Search(PointType point, const float radius, Poin
     Search_by_radius(Root_Node, point, radius, Storage);
 }
 
+/**
+ * @brief 增量添加点，可按体素中心距离选择代表点。
+ * @param PointToAdd 输入待插入点数组，函数不修改元素。
+ * @param downsample_on 是否结合 DOWNSAMPLE_SWITCH 启用体素代表点筛选。
+ * @return 下采样分支实际执行代表点替换/插入的次数；关闭下采样时当前返回 0，不能当作总新增点数。
+ * @note 要求非空已建树；同体素保留最靠近中心的一个原始点，不计算质心。
+ */
 template <typename PointType>
 int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
 {
@@ -481,6 +592,7 @@ int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
     int tree_size = size();
     BoxPointType Box_of_Point;
     PointType downsample_result, mid_point;
+    /* 每个体素从已有点和新点中选择最靠近中心的原始点；普通删除可恢复，下采样删除标记永久保留直至节点被释放。 */
     bool downsample_switch = downsample_on && DOWNSAMPLE_SWITCH;
     float min_dist, tmp_dist;
     int tmp_counter = 0;
@@ -572,6 +684,11 @@ int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
     return tmp_counter;
 }
 
+/**
+ * @brief 恢复盒内仍保留在树中的普通逻辑删除点。
+ * @param BoxPoints 批量盒范围，恢复或删除含义由当前接口决定。
+ * @note 不能恢复已重建释放的点，也不能恢复下采样永久删除标记；名称不表示创建新点。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Add_Point_Boxes(vector<BoxPointType> &BoxPoints)
 {
@@ -600,6 +717,11 @@ void KD_TREE<PointType>::Add_Point_Boxes(vector<BoxPointType> &BoxPoints)
     return;
 }
 
+/**
+ * @brief 按逐轴 EPSS 容差匹配并逻辑删除输入点。
+ * @param PointToDel 待删除点数组，函数不修改元素。
+ * @note 不立即释放节点；只比较 x/y/z，不匹配其他点云字段。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Delete_Points(PointVector &PointToDel)
 {
@@ -628,6 +750,11 @@ void KD_TREE<PointType>::Delete_Points(PointVector &PointToDel)
     return;
 }
 
+/**
+ * @brief 逻辑删除多个左闭右开盒中的有效点。
+ * @param BoxPoints 批量盒范围，恢复或删除含义由当前接口决定。
+ * @return 本次新删除点总数，重叠盒不会重复计数已经删除的点。
+ */
 template <typename PointType>
 int KD_TREE<PointType>::Delete_Point_Boxes(vector<BoxPointType> &BoxPoints)
 {
@@ -657,6 +784,11 @@ int KD_TREE<PointType>::Delete_Point_Boxes(vector<BoxPointType> &BoxPoints)
     return tmp_counter;
 }
 
+/**
+ * @brief 提取已由 flatten/重建记录的普通删除点。
+ * @param removed_points 追加已记录的普通删除点，不清空原输出。
+ * @note 向输出追加并清空两个内部缓存；未被遍历记录的删除点和下采样删除点不会返回。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::acquire_removed_points(PointVector &removed_points)
 {
@@ -675,6 +807,14 @@ void KD_TREE<PointType>::acquire_removed_points(PointVector &removed_points)
     return;
 }
 
+/**
+ * @brief 按最长空间轴的中位点递归建立平衡子树。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param l 构建数组区间起点，含该索引。
+ * @param r 构建数组区间终点，含该索引。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @note 输入区间闭合 [l,r]；nth_element 会重排 Storage，l>r 时直接返回。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::BuildTree(KD_TREE_NODE **root, int l, int r, PointVector &Storage)
 {
@@ -732,6 +872,11 @@ void KD_TREE<PointType>::BuildTree(KD_TREE_NODE **root, int l, int r, PointVecto
     return;
 }
 
+/**
+ * @brief 根据子树大小同步重建或提交后台重建候选。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @note >=1500 节点尝试登记后台任务，取不到锁时本次不登记；较小子树同步保留有效点并重建。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Rebuild(KD_TREE_NODE **root)
 {
@@ -763,6 +908,15 @@ void KD_TREE<PointType>::Rebuild(KD_TREE_NODE **root)
     return;
 }
 
+/**
+ * @brief 递归逻辑删除盒内有效点并维护重建条件。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param boxpoint 操作/查询盒，各轴为 [min,max)。
+ * @param allow_rebuild 是否允许本次递归触发重建；日志回放使用 false。
+ * @param is_downsample 是否将失效标记为下采样删除，禁止普通恢复。
+ * @return 新删除的有效点数。
+ * @note 盒完全覆盖子树时使用懒标记；下采样标记不可被普通盒恢复。部分提前返回路径保留 working_flag=true。
+ */
 template <typename PointType>
 int KD_TREE<PointType>::Delete_by_range(KD_TREE_NODE **root, BoxPointType boxpoint, bool allow_rebuild, bool is_downsample)
 {
@@ -850,6 +1004,13 @@ int KD_TREE<PointType>::Delete_by_range(KD_TREE_NODE **root, BoxPointType boxpoi
     return tmp_counter;
 }
 
+/**
+ * @brief 沿分割轴查找并逻辑删除匹配点。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param allow_rebuild 是否允许本次递归触发重建；日志回放使用 false。
+ * @note 命中后提前返回，不立即释放节点；部分提前返回路径未复位 working_flag。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Delete_by_point(KD_TREE_NODE **root, PointType point, bool allow_rebuild)
 {
@@ -918,6 +1079,13 @@ void KD_TREE<PointType>::Delete_by_point(KD_TREE_NODE **root, PointType point, b
     return;
 }
 
+/**
+ * @brief 递归撤销盒内普通删除标记。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param boxpoint 操作/查询盒，各轴为 [min,max)。
+ * @param allow_rebuild 是否允许本次递归触发重建；日志回放使用 false。
+ * @note 下采样删除状态保留；部分提前返回路径未复位 working_flag。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Add_by_range(KD_TREE_NODE **root, BoxPointType boxpoint, bool allow_rebuild)
 {
@@ -991,6 +1159,14 @@ void KD_TREE<PointType>::Add_by_range(KD_TREE_NODE **root, BoxPointType boxpoint
     return;
 }
 
+/**
+ * @brief 沿分割轴插入新节点并回溯维护统计。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param allow_rebuild 是否允许本次递归触发重建；日志回放使用 false。
+ * @param father_axis 父节点分割轴，新节点按下一轴循环分割。
+ * @note 新节点的分割轴为 (father_axis+1)%3，重建后才重新按最长轴选择。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Add_by_point(KD_TREE_NODE **root, PointType point, bool allow_rebuild, int father_axis)
 {
@@ -1058,11 +1234,21 @@ void KD_TREE<PointType>::Add_by_point(KD_TREE_NODE **root, PointType point, bool
     return;
 }
 
+/**
+ * @brief 通过包围盒距离下界剪枝执行 k 最近邻搜索。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param k_nearest 最大近邻数量，须>0。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param q 共享本次查询候选的最大堆。
+ * @param max_dist 最大允许距离，使用长度单位，内部比较其平方。
+ * @note q 是最大堆，堆顶为最差候选；必须先传播懒标记，以免返回已删除点。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Search(KD_TREE_NODE *root, int k_nearest, PointType point, MANUAL_HEAP &q, float max_dist)
 {
     if (root == nullptr || root->tree_deleted)
         return;
+    /* 点到包围盒的距离平方是子树所有点距离的下界；超过半径即可剪枝，候选满 k 后还可用堆顶最差距离剪枝。 */
     float cur_dist = calc_box_dist(root, point);
     float max_dist_sqr = max_dist * max_dist;
     if (cur_dist > max_dist_sqr)
@@ -1243,6 +1429,13 @@ void KD_TREE<PointType>::Search(KD_TREE_NODE *root, int k_nearest, PointType poi
     return;
 }
 
+/**
+ * @brief 递归收集左闭右开盒内有效点。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param boxpoint 操作/查询盒，各轴为 [min,max)。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @note 向 Storage 追加；完整覆盖子树时通过 flatten 收集。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Search_by_range(KD_TREE_NODE *root, BoxPointType boxpoint, PointVector &Storage)
 {
@@ -1288,6 +1481,14 @@ void KD_TREE<PointType>::Search_by_range(KD_TREE_NODE *root, BoxPointType boxpoi
     return;
 }
 
+/**
+ * @brief 按子树包围球剪枝收集闭球内有效点。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @param radius 闭球搜索半径，须非负。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @note 向 Storage 追加；radius 与点坐标同单位。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Search_by_radius(KD_TREE_NODE *root, PointType point, float radius, PointVector &Storage)
 {
@@ -1331,6 +1532,12 @@ void KD_TREE<PointType>::Search_by_radius(KD_TREE_NODE *root, PointType point, f
     return;
 }
 
+/**
+ * @brief 按删除比例或子树失衡比例判断是否需要重建。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @return 节点数>10 且删除比例超阈值或左右规模比例超界时为 true。
+ * @note 要求有效非空节点，阈值比较使用严格大于/小于。
+ */
 template <typename PointType>
 bool KD_TREE<PointType>::Criterion_Check(KD_TREE_NODE *root)
 {
@@ -1356,11 +1563,17 @@ bool KD_TREE<PointType>::Criterion_Check(KD_TREE_NODE *root)
     return false;
 }
 
+/**
+ * @brief 将整棵子树的懒删除/恢复标记传播到子节点。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @note 下采样删除通过 OR 保留；重建目标子树的传播还需记入日志，不能仅修改旧树。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Push_Down(KD_TREE_NODE *root)
 {
     if (root == nullptr)
         return;
+    /* 先传播整树懒标记再访问子节点；下采样标记不可被普通 ADD_BOX 撤销，重建中的传播必须同时写入操作日志。 */
     Operation_Logger_Type operation;
     operation.op = PUSH_DOWN;
     operation.tree_deleted = root->tree_deleted;
@@ -1454,6 +1667,11 @@ void KD_TREE<PointType>::Push_Down(KD_TREE_NODE *root)
     return;
 }
 
+/**
+ * @brief 从子节点回算规模、失效计数、边界和父指针。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @note 要求非空节点；包围盒按有效点合并，全删时保留几何范围供后续恢复；radius_sq 为盒半对角线长度平方。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::Update(KD_TREE_NODE *root)
 {
@@ -1606,6 +1824,7 @@ void KD_TREE<PointType>::Update(KD_TREE_NODE *root)
     float x_L = (root->node_range_x[1] - root->node_range_x[0]) * 0.5;
     float y_L = (root->node_range_y[1] - root->node_range_y[0]) * 0.5;
     float z_L = (root->node_range_z[1] - root->node_range_z[0]) * 0.5;
+    /* 包围盒半对角线平方用作外接球半径平方；半径查询的包围球剪枝和最近邻的盒距离剪枝使用不同边界。 */
     root->radius_sq = x_L*x_L + y_L * y_L + z_L * z_L;
     if (left_son_ptr != nullptr)
         left_son_ptr->father_ptr = root;
@@ -1623,6 +1842,13 @@ void KD_TREE<PointType>::Update(KD_TREE_NODE *root)
     return;
 }
 
+/**
+ * @brief 前序收集有效点，并按模式记录普通删除点。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @param Storage 点数组；公开查询清空，内部遍历/flatten 追加，BuildTree 可重排。
+ * @param storage_type 删除点缓存记录模式。
+ * @note 先下推懒标记，向 Storage 追加而不清空；下采样删除点不进入 removed_points 缓存。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::flatten(KD_TREE_NODE *root, PointVector &Storage, delete_point_storage_set storage_type)
 {
@@ -1657,6 +1883,11 @@ void KD_TREE<PointType>::flatten(KD_TREE_NODE *root, PointVector &Storage, delet
     return;
 }
 
+/**
+ * @brief 递归释放子树节点并将根槽置空。
+ * @param root 子树节点或根指针槽；双指针用于允许替换/置空子树。
+ * @note 释放前下推标记并销毁各节点互斥锁；调用方保证无并发读取。
+ */
 template <typename PointType>
 void KD_TREE<PointType>::delete_tree_nodes(KD_TREE_NODE **root)
 {
@@ -1673,12 +1904,25 @@ void KD_TREE<PointType>::delete_tree_nodes(KD_TREE_NODE **root)
     return;
 }
 
+/**
+ * @brief 按逐轴绝对差判断两点是否相同。
+ * @param a 比较/距离计算的第一个点。
+ * @param b 比较/距离计算的第二个点。
+ * @return x/y/z 各差值均严格小于 EPSS=1e-6 时为 true。
+ * @note 不比较强度、法向量等其他字段。
+ */
 template <typename PointType>
 bool KD_TREE<PointType>::same_point(PointType a, PointType b)
 {
     return (fabs(a.x - b.x) < EPSS && fabs(a.y - b.y) < EPSS && fabs(a.z - b.z) < EPSS);
 }
 
+/**
+ * @brief 计算两点三维欧氏距离平方。
+ * @param a 比较/距离计算的第一个点。
+ * @param b 比较/距离计算的第二个点。
+ * @return dx²+dy²+dz²，单位为点坐标单位的平方。
+ */
 template <typename PointType>
 float KD_TREE<PointType>::calc_dist(PointType a, PointType b)
 {
@@ -1687,6 +1931,12 @@ float KD_TREE<PointType>::calc_dist(PointType a, PointType b)
     return dist;
 }
 
+/**
+ * @brief 计算查询点到子树包围盒的距离平方下界。
+ * @param node 待计算距离下界的子树节点，可为空。
+ * @param point 查询、插入或删除的点；空间比较使用 x/y/z，插入时保存完整点值。
+ * @return 盒内为 0，盒外按各轴越界量平方求和；node=nullptr 时为正无穷。
+ */
 template <typename PointType>
 float KD_TREE<PointType>::calc_box_dist(KD_TREE_NODE *node, PointType point)
 {
@@ -1707,10 +1957,28 @@ float KD_TREE<PointType>::calc_box_dist(KD_TREE_NODE *node, PointType point)
         min_dist += (point.z - node->node_range_z[1]) * (point.z - node->node_range_z[1]);
     return min_dist;
 }
+/**
+ * @brief 按 x 坐标严格排序两点。
+ * @param a 比较/距离计算的第一个点。
+ * @param b 比较/距离计算的第二个点。
+ * @return a.x<b.x。
+ */
 template <typename PointType>
 bool KD_TREE<PointType>::point_cmp_x(PointType a, PointType b) { return a.x < b.x; }
+/**
+ * @brief 按 y 坐标严格排序两点。
+ * @param a 比较/距离计算的第一个点。
+ * @param b 比较/距离计算的第二个点。
+ * @return a.y<b.y。
+ */
 template <typename PointType>
 bool KD_TREE<PointType>::point_cmp_y(PointType a, PointType b) { return a.y < b.y; }
+/**
+ * @brief 按 z 坐标严格排序两点。
+ * @param a 比较/距离计算的第一个点。
+ * @param b 比较/距离计算的第二个点。
+ * @return a.z<b.z。
+ */
 template <typename PointType>
 bool KD_TREE<PointType>::point_cmp_z(PointType a, PointType b) { return a.z < b.z; }
 

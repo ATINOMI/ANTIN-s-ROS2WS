@@ -1,12 +1,50 @@
 /**
  * @file inflation_layer.cpp
- * @brief 按障碍格面积生成软代价，可选未知格硬膨胀并保留地图边界距离。
+ * @brief 按 Nav2 1.3.12 的格中心距离、距离分组传播和未知格规则生成膨胀图。
  *
- * 偏移代价只预计算一次，再叠加到各个禁行源周围；地图几何与
- * 原始占据信息由 Costmap2D 的副本保留，不依赖 ROS 消息或 Nav2 实现。
+ * 适配官方 InflationLayer 的全图更新算法，保留上游 BSD 许可；
+ * 核心仍只操作 Costmap2D，不依赖 ROS 消息或官方运行库。
  * @author Antinomy
  * @date 2026-09-28
  */
+
+/*********************************************************************
+ *
+ * Software License Agreement (BSD License)
+ *
+ *  Copyright (c) 2008, 2013, Willow Garage, Inc.
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *
+ *   * Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above
+ *     copyright notice, this list of conditions and the following
+ *     disclaimer in the documentation and/or other materials provided
+ *     with the distribution.
+ *   * Neither the name of Willow Garage, Inc. nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Author: Eitan Marder-Eppstein
+ *         David V. Lu!!
+ *********************************************************************/
 
 /* Includes -----------------------------------------------------------------------*/
 
@@ -14,7 +52,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -34,209 +72,130 @@ namespace mini_nav_core
 /* Structures ---------------------------------------------------------------------*/
 
         /**
-         * @brief 一个障碍源到目标栅格的相对偏移及对应膨胀代价。
-         *
-         * dx、dy 使用有符号栅格数，以表示障碍四周的偏移；
-         * 同一组偏移可供地图中每个障碍复用。
+         * @brief 待膨胀格及它首次传播来源的栅格坐标。
          */
-        struct InflationOffset
+        struct InflationCell
         {
-            /// 相对障碍格的水平偏移，单位：格。
-            std::int64_t dx;
-            /// 相对障碍格的竖直偏移，单位：格。
-            std::int64_t dy;
-            /// 该距离对应的硬安全区或软膨胀代价。
-            unsigned char cost;
+            unsigned int x;
+            unsigned int y;
+            unsigned int source_x;
+            unsigned int source_y;
         };
     }
 
 /* Functions ----------------------------------------------------------------------*/
 
     /**
-     * @brief 复制原图并分别处理障碍软膨胀与未知边界硬安全区。
-     * @param source 输入静态地图；254 是软膨胀源，255 可选传播硬安全区。
+     * @brief 复制原图，按官方格中心距离顺序传播确定障碍和可选未知源。
+     * @param source 输入地图；254 是障碍，255 可选成为完整膨胀源。
      * @param parameters 距离参数以米计，衰减系数以 1/米计。
-     * @return 与 source 几何一致、原图未被修改的规划代价地图。
-     * @throws std::invalid_argument 参数不是有限数，或半径、衰减范围无效时抛出。
+     * @return 与 source 几何一致的独立规划图；不修改输入。
+     * @throws std::invalid_argument 半径或衰减参数非法时抛出。
      */
     Costmap2D InflateCostmap(
         const Costmap2D & source,
         const InflationParameters & parameters)
     {
-        /*
-         * 硬安全区需要同时覆盖机器人外接圆和附加余量。
-         * 先验证全部参数，避免非法浮点数进入 floor、指数计算或栅格循环；
-         * 膨胀半径小于硬安全半径时，也无法完整表达要求的禁行范围。
-         */
-
-        // 硬安全半径 = 机器人外接圆半径 + 安全余量。
-        const double hard_radius = parameters.robot_radius + parameters.safety_margin;
-
-        if (!std::isfinite(parameters.robot_radius) || 
+        // 膨胀内切半径与真实车体外接圆分开；零值保留原有安全图行为。
+        const double body_radius = parameters.robot_radius + parameters.safety_margin;
+        const double hard_radius = parameters.inscribed_radius > 0.0 ?
+            parameters.inscribed_radius : body_radius;
+        if (!std::isfinite(parameters.robot_radius) ||
             parameters.robot_radius <= 0.0 ||
-            !std::isfinite(parameters.safety_margin) || 
+            !std::isfinite(parameters.safety_margin) ||
             parameters.safety_margin < 0.0 ||
-            !std::isfinite(hard_radius) ||
+            !std::isfinite(body_radius) ||
+            !std::isfinite(parameters.inscribed_radius) ||
+            parameters.inscribed_radius < 0.0 ||
             !std::isfinite(parameters.inflation_radius) ||
+            parameters.inflation_radius < body_radius ||
             parameters.inflation_radius < hard_radius ||
             !std::isfinite(parameters.cost_scaling_factor) ||
-            parameters.cost_scaling_factor <= 0.0) 
-        {
+            parameters.cost_scaling_factor <= 0.0) {
             throw std::invalid_argument("Invalid inflation radius, safety margin, or scaling factor");
         }
 
-        /*
-         * 从源地图复制，保留所有原始代价及几何信息。
-         * 单轴偏移最多只需覆盖地图宽/高减一格：再远的目标必定越界。
-         */
         Costmap2D result = source;
-
-        // 获取源地图的尺寸和分辨率。
-        const auto width =  static_cast<std::int64_t>(source.GetSizeInCellsX());
-        const auto height = static_cast<std::int64_t>(source.GetSizeInCellsY());
+        const auto width = source.GetSizeInCellsX();
+        const auto height = source.GetSizeInCellsY();
         const double resolution = source.GetResolution();
+        // 与官方 Costmap2D::cellDistance 一致：外半径向上取整到整格。
+        const double cell_radius = std::ceil(parameters.inflation_radius / resolution);
+        std::vector<bool> seen(source.GetCellCount(), false);
+        // 同距离格保留入队顺序；首次访问锁定来源，不能用所有源逐格取最大值替代。
+        std::map<double, std::vector<InflationCell>> pending;
 
-        // 计算膨胀半径对应的最大栅格偏移，避免在循环中重复计算。
-        const auto max_dx = static_cast<std::int64_t>(std::min(static_cast<double>(width - 1),
-                                                               std::ceil(parameters.inflation_radius / resolution + 0.5)));
-        const auto max_dy = static_cast<std::int64_t>(std::min(static_cast<double>(height - 1),
-                                                               std::ceil(parameters.inflation_radius / resolution + 0.5)));
-
-        const auto inflationCost = [&](double distance) 
-        {
-
-            // 如果距离小于等于硬安全半径，则返回硬安全区代价 253。
-            if (distance <= hard_radius) 
-            {
-                return kInscribedCost;
+        for (unsigned int y = 0; y < height; ++y) {
+            for (unsigned int x = 0; x < width; ++x) {
+                const auto cost = source.GetCost(x, y);
+                if (cost == kLethalCost ||
+                    (parameters.inflate_around_unknown && cost == kUnknownCost)) {
+                    pending[0.0].push_back({x, y, x, y});
+                }
             }
+        }
 
-            // 计算软膨胀代价，使用指数衰减公式。
-            const double scaled = 252.0 * std::exp(-parameters.cost_scaling_factor * (distance - hard_radius));
-
-            // 确保代价至少为 1，避免在膨胀半径内出现零代价。
-            return static_cast<unsigned char>(std::max(1.0, std::floor(scaled)));
+        const auto enqueue = [&](unsigned int x, unsigned int y,
+                                 unsigned int source_x, unsigned int source_y) {
+            const auto index = static_cast<std::size_t>(y) * width + x;
+            if (seen[index]) {
+                return;
+            }
+            const double dx = std::abs(static_cast<double>(x) - source_x);
+            const double dy = std::abs(static_cast<double>(y) - source_y);
+            const double distance = std::hypot(dx, dy);
+            if (distance <= cell_radius) {
+                pending[distance].push_back({x, y, source_x, source_y});
+            }
         };
 
-        /*
-         * 栅格偏移只计算一次，每个禁行源复用同一张代价模板。
-         * 距离取目标格中心到源格方形面积的最短距离，而不是格中心距；
-         * 这样硬半径才覆盖车体圆盘与源格的相交情形。
-         * 源格已在地图副本中保持 254 或 255，无需写入模板。
-         * 硬安全区为 253；仅障碍源外圈按 252 * exp(-系数 * (距离 - 硬半径))
-         * 衰减，并限制最小值为 1，避免影响半径内因取整而出现零代价。
-         */
-        // 计算每个偏移的代价，并存储在 offsets 向量中。
-        std::vector<InflationOffset> offsets;
-
-        for (std::int64_t dy = -max_dy; dy <= max_dy; ++dy) 
-        {
-
-            for (std::int64_t dx = -max_dx; dx <= max_dx; ++dx) 
-            {
-
-                // 计算格子中心到源格方形面积的最短距离，也就是格子中心到源格边界的距离。
-                const double distance = std::hypot(
-                    std::max(0.0, std::abs(static_cast<double>(dx)) - 0.5),
-                    std::max(0.0, std::abs(static_cast<double>(dy)) - 0.5)) * resolution;
-
-                if (distance == 0.0 || distance > parameters.inflation_radius) 
-                {
+        // 距离组顺序与官方整数距离分组相同；无需为整个半径建立二维缓存。
+        for (auto & bin : pending) {
+            const double distance = bin.first;
+            unsigned char cost;
+            if (distance == 0.0) {
+                cost = kLethalCost;
+            } else if (distance * resolution <= hard_radius) {
+                cost = kInscribedCost;
+            } else {
+                // 与官方 computeCost 一致，直接截断；极低软代价允许为零。
+                const double factor = std::exp(-1.0 * parameters.cost_scaling_factor *
+                                              (distance * resolution - hard_radius));
+                cost = static_cast<unsigned char>((kInscribedCost - 1) * factor);
+            }
+            for (std::size_t i = 0; i < bin.second.size(); ++i) {
+                // 后续入队可能扩容当前组，先复制坐标，避免引用失效。
+                const auto cell = bin.second[i];
+                const auto index = static_cast<std::size_t>(cell.y) * width + cell.x;
+                if (seen[index]) {
                     continue;
                 }
-
-                offsets.push_back({dx, dy, inflationCost(distance)});
-            }
-        }
-
-        /*
-         * 只从源地图读取障碍和未知格，避免刚写出的代价再次传播。
-         * 开启未知膨胀时只传播硬安全区，不制造软代价色带；多个源取最大代价。
-         */
-        // 遍历源地图的每个栅格，检查是否为障碍或未知格，并应用偏移代价。
-        for (std::int64_t y = 0; y < height; ++y) 
-        {
-
-            for (std::int64_t x = 0; x < width; ++x) 
-            {
-
-                // 获取源地图中当前栅格的代价值。
-                const auto source_cost = source.GetCost(
-                    static_cast<unsigned int>(x), static_cast<unsigned int>(y));
-
-                // 只处理障碍源（254）和未知格（255，若允许膨胀）。
-                if (source_cost != kLethalCost &&
-                    !(parameters.inflate_around_unknown && source_cost == kUnknownCost)) 
-                {
-                    continue;
+                seen[index] = true;
+                const auto old_cost = result.GetCost(cell.x, cell.y);
+                // 对齐官方 inflate_unknown=false：未知格可接收硬代价，拒绝软代价。
+                if (old_cost == kUnknownCost && cost >= kInscribedCost) {
+                    result.SetCost(cell.x, cell.y, cost);
+                } else {
+                    result.SetCost(cell.x, cell.y, std::max(old_cost, cost));
                 }
 
-                // 遍历所有偏移，应用到当前栅格。
-                for (const auto & offset : offsets) 
-                {
-
-                    // 如果当前栅格是未知格，且偏移的代价不是内切代价，则跳过。
-                    if (source_cost == kUnknownCost && offset.cost != kInscribedCost) 
-                    {
-                        continue;
-                    }
-
-                    // 计算目标栅格的坐标，并检查是否在地图范围内。
-                    const auto nx = x + offset.dx;
-                    const auto ny = y + offset.dy;
-
-                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) 
-                    {
-                        continue;
-                    }
-
-                    // 获取目标栅格的代价值，并更新为偏移代价的最大值。
-                    const auto mx = static_cast<unsigned int>(nx);
-                    const auto my = static_cast<unsigned int>(ny);
-                    const auto old_cost = result.GetCost(mx, my);
-
-                    // 只在目标栅格的代价小于偏移代价时更新，确保最大代价传播。
-                    if (old_cost != kUnknownCost && offset.cost > old_cost) 
-                    {
-                        result.SetCost(mx, my, offset.cost);
-                    }
+                // 官方传播顺序为左、下、右、上，同距离竞争时顺序影响首次来源。
+                if (cell.x > 0) {
+                    enqueue(cell.x - 1, cell.y, cell.source_x, cell.source_y);
+                }
+                if (cell.y > 0) {
+                    enqueue(cell.x, cell.y - 1, cell.source_x, cell.source_y);
+                }
+                if (cell.x < width - 1) {
+                    enqueue(cell.x + 1, cell.y, cell.source_x, cell.source_y);
+                }
+                if (cell.y < height - 1) {
+                    enqueue(cell.x, cell.y + 1, cell.source_x, cell.source_y);
                 }
             }
+            std::vector<InflationCell>().swap(bin.second);
         }
-
-
-        /*
-         * 处理地图边界的硬安全区，确保机器人在靠近边界时不会碰撞。
-         * 只在边缘距离小于或等于硬半径的栅格上设置内切代价。
-         */
-        for (std::int64_t y = 0; y < height; ++y) 
-        {
-
-            for (std::int64_t x = 0; x < width; ++x) 
-            {
-
-                const auto mx = static_cast<unsigned int>(x);
-                const auto my = static_cast<unsigned int>(y);
-
-                if (result.GetCost(mx, my) == kUnknownCost) 
-                {
-                    continue;
-                }
-
-                // 计算当前栅格到地图边界的最短距离，考虑栅格中心到边界的距离。
-                const double edge_distance = std::min({
-                    (static_cast<double>(x) + 0.5) * resolution,
-                    (static_cast<double>(width - x) - 0.5) * resolution,
-                    (static_cast<double>(y) + 0.5) * resolution,
-                    (static_cast<double>(height - y) - 0.5) * resolution});
-
-                // 如果边缘距离小于或等于硬半径，则将目标栅格的代价设置为内切代价和当前代价的最大值。
-                if (edge_distance <= hard_radius) 
-                {
-                    result.SetCost(mx, my, std::max(result.GetCost(mx, my), kInscribedCost));
-                }
-            }
-        }
+        // 官方膨胀不把图外虚构成障碍；车体边界余量由原图连续扫掠另行检查。
         return result;
     }
 }

@@ -72,6 +72,14 @@ def preflight(context, mapping, bringup_share):
         ]
     else:
         root, _, _, _ = load_bundle(LaunchConfiguration('map_bundle').perform(context))
+        soft_radius = float(LaunchConfiguration('inflation_radius').perform(context))
+        scaling = float(LaunchConfiguration('cost_scaling_factor').perform(context))
+        collision_topic = '/fastlivo/collision_cloud' if LaunchConfiguration(
+            'use_3d_collision_cloud').perform(context).lower() == 'true' else ''
+        if not 0.26 <= soft_radius <= 1.0:
+            raise ValueError('inflation_radius must cover the 0.26 m vehicle safety circle')
+        if not 0 < scaling <= 100.0:
+            raise ValueError('cost_scaling_factor must be positive and bounded by 100')
         common += [
             Node(package='mini_nav_fastlivo', executable='prior_localizer', output='screen',
                  parameters=[use_sim, {'map_bundle': str(root)}]),
@@ -82,10 +90,12 @@ def preflight(context, mapping, bringup_share):
             Node(package='mini_nav_nodes', executable='costmap_publisher_node', name='costmap_publisher', output='screen',
                  parameters=[os.path.join(bringup_share, 'config', 'planning_costmap.yaml'), use_sim,
                              {'map_topic': '/map', 'map_file': '', 'enable_topic_goals': False,
-                              'fuse_local_obstacles': True, 'collision_cloud_topic': '/fastlivo/collision_cloud'}]),
+                              'fuse_local_obstacles': True, 'collision_cloud_topic': collision_topic,
+                              'planning.inflation_radius': soft_radius, 'planning.cost_scaling_factor': scaling}]),
             Node(package='mini_nav_nodes', executable='local_costmap_node', name='local_costmap', output='screen',
                  parameters=[os.path.join(bringup_share, 'config', 'local_costmap.yaml'), use_sim,
-                             {'collision_cloud_topic': '/fastlivo/collision_cloud'}]),
+                             {'collision_cloud_topic': collision_topic,
+                              'local_costmap.inflation_radius': soft_radius, 'local_costmap.cost_scaling_factor': scaling}]),
             Node(package='mini_nav_nodes', executable='path_follower_node', name='path_follower', output='screen',
                  parameters=[os.path.join(bringup_share, 'config', 'path_follower.yaml'), use_sim,
                              {'action_mode': True, 'require_localization_quality': True, 'cmd_vel_topic': '/mini_nav/cmd_vel_raw'}]),
@@ -120,6 +130,12 @@ def description(mapping, bringup_share):
         args.append(DeclareLaunchArgument('output_dir', default_value=os.environ.get('FASTLIVO_MAP_DIR', './maps/fastlivo2')))
     else:
         args.append(DeclareLaunchArgument('map_bundle', description='Saved and hash-verified map bundle directory'))
+        args.append(DeclareLaunchArgument('use_3d_collision_cloud', default_value='true',
+            description='Add projected 3D collision points to costmaps; false keeps the original 2D scan inputs'))
+        args.append(DeclareLaunchArgument('inflation_radius', default_value='0.32',
+            description='Soft cost outer radius in metres; hard vehicle clearance remains 0.26'))
+        args.append(DeclareLaunchArgument('cost_scaling_factor', default_value='16.0',
+            description='Soft cost decay in 1/metre; original profile used 10.0'))
     return LaunchDescription(args + [
         SetEnvironmentVariable('ROS_DOMAIN_ID', LaunchConfiguration('ros_domain_id')),
         SetEnvironmentVariable('GZ_PARTITION', LaunchConfiguration('gz_partition')),

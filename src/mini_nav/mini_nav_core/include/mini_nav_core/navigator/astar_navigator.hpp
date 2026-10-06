@@ -10,6 +10,7 @@
 
 #include <vector>
 #include "mini_nav_core/map/costmap_2d.hpp"
+#include "mini_nav_core/navigator/path_postprocessor.hpp"
 
 /* Namespace ---------------------------------------------------------------*/
 namespace mini_nav_core
@@ -103,6 +104,16 @@ namespace mini_nav_core
             bool include_unknown_clearance = true,
             double goal_tolerance = 0.0) const;
 
+        /** 连续几何为安全判据；先验证实际起点到起点格中心的连接。 */
+        // terminal_geometry 只约束原目标和容差替代终点，可包含当前观测及停车容差。
+        // 所属格中心不安全时，从通过实际位置连续扫掠的邻接中心接入；start_geometry 检查全部当前观测。
+        std::vector<MapLocation> Plan(
+            const Costmap2D & planning, const CollisionGeometry & geometry,
+            const PathPoint & actual_start, const MapLocation & start,
+            const MapLocation & goal, double goal_tolerance = 0.0,
+            const CollisionGeometry * terminal_geometry = nullptr,
+            const CollisionGeometry * start_geometry = nullptr) const;
+
     private:
         double cost_travel_multiplier_;
         /**
@@ -128,7 +139,10 @@ namespace mini_nav_core
             const MapLocation & start,
             const MapLocation & goal,
             bool include_unknown_clearance,
-            double goal_tolerance) const;
+            double goal_tolerance, const CollisionGeometry * geometry = nullptr,
+            const CollisionGeometry * terminal_geometry = nullptr,
+            const PathPoint * actual_start = nullptr,
+            const CollisionGeometry * start_geometry = nullptr) const;
         /**
          * @brief 把栅格下标映射到按行存储的一维索引。
          *

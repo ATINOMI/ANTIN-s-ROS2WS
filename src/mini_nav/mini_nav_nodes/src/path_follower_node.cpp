@@ -5,10 +5,13 @@
  * @date 2026-10-01
  */
 #include "mini_nav_nodes/path_follower_node.hpp"
+#include "mini_nav_nodes/collision_map.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <sstream>
+#include <iomanip>
 #include <vector>
 
 #include "tf2/utils.h"
@@ -34,52 +37,6 @@ namespace mini_nav_nodes
                 throw std::invalid_argument(std::string(name) + " must be positive and finite");
             }
             return value;
-        }
-
-        /**
-         * @brief 验证轴对齐占据图并转为核心安全图。
-         *
-         * 本转换用于二值安全检查而非保留软代价规划。
-         *
-         * @param message -1..100 的占据数据，最多 100 万格。
-         * @param frame 要求的参考帧。
-         * @return 独立安全图；未知→255、100→254、99→253，其余可通行值→0。
-         * @throws std::invalid_argument 几何、帧、四元数或数据范围非法。
-         */
-        std::unique_ptr<mini_nav_core::Costmap2D> ConvertSafetyMap(
-            const nav_msgs::msg::OccupancyGrid & message, const std::string & frame)
-        {
-            const auto & info = message.info;
-            const auto & orientation = info.origin.orientation;
-            const std::size_t cells = static_cast<std::size_t>(info.width) * info.height;
-            if (message.header.frame_id != frame || info.width == 0 || info.height == 0 ||
-                cells > 1000000 || cells != message.data.size() ||
-                !std::isfinite(info.resolution) || info.resolution <= 0.0 ||
-                !std::isfinite(info.origin.position.x) ||
-                !std::isfinite(info.origin.position.y) ||
-                !std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
-                !std::isfinite(orientation.z) || !std::isfinite(orientation.w) ||
-                std::abs(orientation.x) > 1.0e-6 ||
-                std::abs(orientation.y) > 1.0e-6 ||
-                std::abs(orientation.z) > 1.0e-6 ||
-                std::abs(std::abs(orientation.w) - 1.0) > 1.0e-6) {
-                throw std::invalid_argument("Safety map metadata is invalid");
-            }
-            auto grid = std::make_unique<mini_nav_core::Costmap2D>(
-                info.width, info.height, info.resolution,
-                info.origin.position.x, info.origin.position.y, 255);
-            for (unsigned int y = 0; y < info.height; ++y) {
-                for (unsigned int x = 0; x < info.width; ++x) {
-                    const int value = message.data[static_cast<std::size_t>(y) * info.width + x];
-                    if (value < -1 || value > 100) {
-                        throw std::invalid_argument("Safety map cell is outside OccupancyGrid range");
-                    }
-                    const unsigned char cost = value < 0 ? 255 :
-                        value == 100 ? 254 : value >= 99 ? 253 : 0;
-                    grid->SetCost(x, y, cost);
-                }
-            }
-            return grid;
         }
 
         /**
@@ -121,6 +78,7 @@ namespace mini_nav_nodes
                 case TrackingStatus::kGoalReached: return "goal_reached";
                 case TrackingStatus::kOffPath: return "off_path";
                 case TrackingStatus::kCollisionRisk: return "collision_risk";
+                case TrackingStatus::kAvoidingObstacle: return "avoiding_obstacle";
                 case TrackingStatus::kProgressTimeout: return "progress_timeout";
                 case TrackingStatus::kInvalidPose: return "invalid_pose";
             }
@@ -143,9 +101,9 @@ namespace mini_nav_nodes
         const std::string path_topic = declare_parameter<std::string>(
             "path_topic", "/mini_nav/global_path");
         const std::string static_map_topic = declare_parameter<std::string>(
-            "static_map_topic", "/mini_nav/planning_costmap");
+            "static_map_topic", "/mini_nav/static_collision_map");
         const std::string local_map_topic = declare_parameter<std::string>(
-            "local_map_topic", "/mini_nav/local_costmap");
+            "local_map_topic", "/mini_nav/local_collision_map");
         const std::string local_valid_topic = declare_parameter<std::string>(
             "local_valid_topic", "/mini_nav/local_costmap_valid");
         const double control_frequency = PositiveParameter(*this, "controller.frequency", 10.0);
@@ -155,7 +113,12 @@ namespace mini_nav_nodes
         max_tf_age_ = PositiveParameter(*this, "controller.max_tf_age", 1.0);
         max_tf_future_ = PositiveParameter(*this, "controller.max_tf_future", 0.7);
         clock_stall_timeout_ = PositiveParameter(*this, "controller.clock_stall_timeout", 1.0);
+        clearance_radius_ = PositiveParameter(*this, "controller.robot_radius", .24) +
+            PositiveParameter(*this, "controller.safety_margin", .02);
         mini_nav_core::PathTrackerParameters parameters;
+        localization_uncertainty_ = declare_parameter<double>("controller.localization_uncertainty", .03);
+        if (!std::isfinite(localization_uncertainty_) || localization_uncertainty_ < 0.0)
+            throw std::invalid_argument("controller.localization_uncertainty must be finite and nonnegative");
         parameters.max_linear_speed = PositiveParameter(*this, "controller.max_linear_speed", 0.10);
         parameters.max_angular_speed = PositiveParameter(*this, "controller.max_angular_speed", 0.40);
         parameters.lookahead_distance = PositiveParameter(*this, "controller.lookahead_distance", 0.35);
@@ -234,14 +197,14 @@ namespace mini_nav_nodes
                 follow_endpoint_ = handle->get_goal()->path.poses.back();
                 if (!tracker_->HasPath()) finishFollow(FollowPath::Result::INVALID_PATH, "invalid_path");
             });
-        static_map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        static_collision_subscription_ = create_subscription<msg::CollisionMap>(
             static_map_topic, latched,
-            [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr message) {
+            [this](msg::CollisionMap::ConstSharedPtr message) {
                 staticMapCallback(message);
             });
-        local_map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+        local_collision_subscription_ = create_subscription<msg::CollisionMap>(
             local_map_topic, live,
-            [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr message) {
+            [this](msg::CollisionMap::ConstSharedPtr message) {
                 localMapCallback(message);
             });
         local_valid_subscription_ = create_subscription<std_msgs::msg::Bool>(
@@ -253,6 +216,8 @@ namespace mini_nav_nodes
             declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel"), live);
         status_publisher_ = create_publisher<std_msgs::msg::String>(
             "/mini_nav/controller_status", latched);
+        diagnostics_publisher_ = create_publisher<std_msgs::msg::String>(
+            "/mini_nav/control_diagnostics", rclcpp::QoS(10).reliable());
         timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / control_frequency),
             [this]() { controlTick(); });
         // SIGINT 时先发送零速度，再让 ROS context 和通信对象退出。
@@ -322,14 +287,18 @@ namespace mini_nav_nodes
     /**
      * @brief 转换并保存 map 系膨胀安全图及双时钟新鲜度记录。
      *
-     * @param message 全局规划图 OccupancyGrid；转换失败清空缓存并停车。
+     * @param message 全局原始碰撞快照；转换失败清空缓存并停车。
      */
     void PathFollowerNode::staticMapCallback(
-        const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message)
+        const msg::CollisionMap::ConstSharedPtr message)
     {
         try {
-            static_map_ = ConvertSafetyMap(*message, map_frame_id_);
-            static_map_stamp_ = rclcpp::Time(message->header.stamp, get_clock()->get_clock_type());
+            if (std::abs(message->clearance_radius - clearance_radius_ - localization_uncertainty_) > 1e-9)
+                throw std::invalid_argument("Static collision radius differs from controller body");
+            static_map_ = DecodeCollisionMap(*message, map_frame_id_, static_points_, odom_frame_id_);
+            static_points_frame_ = message->points_frame_id;
+            static_uncertainty_ = message->observation_uncertainty;
+            static_map_stamp_ = rclcpp::Time(message->grid.header.stamp, get_clock()->get_clock_type());
             static_map_received_ = std::chrono::steady_clock::now();
         } catch (const std::exception & error) {
             RCLCPP_WARN(get_logger(), "Rejecting static safety map: %s", error.what());
@@ -340,16 +309,19 @@ namespace mini_nav_nodes
     }
 
     /**
-     * @brief 转换并保存 odom 系局部安全图及双时钟新鲜度记录。
+     * @brief 转换并保存 odom 系原始碰撞快照及双时钟新鲜度记录。
      *
-     * @param message 滚动局部图 OccupancyGrid；转换失败清空缓存并停车。
+     * @param message 原始覆盖格、连续端点及同帧观测时间；转换失败清空缓存并停车。
      */
     void PathFollowerNode::localMapCallback(
-        const nav_msgs::msg::OccupancyGrid::ConstSharedPtr message)
+        const msg::CollisionMap::ConstSharedPtr message)
     {
         try {
-            local_map_ = ConvertSafetyMap(*message, odom_frame_id_);
-            local_map_stamp_ = rclcpp::Time(message->header.stamp, get_clock()->get_clock_type());
+            if (std::abs(message->clearance_radius - clearance_radius_) > 1e-9)
+                throw std::invalid_argument("Local collision radius differs from controller body");
+            local_map_ = DecodeCollisionMap(*message, odom_frame_id_, local_points_);
+            local_uncertainty_ = message->observation_uncertainty;
+            local_map_stamp_ = rclcpp::Time(message->grid.header.stamp, get_clock()->get_clock_type());
             local_map_received_ = std::chrono::steady_clock::now();
         } catch (const std::exception & error) {
             RCLCPP_WARN(get_logger(), "Rejecting local safety map: %s", error.what());
@@ -494,9 +466,46 @@ namespace mini_nav_nodes
             }
             const double steady_seconds = std::chrono::duration<double>(
                 steady_now.time_since_epoch()).count();
+            mini_nav_core::TrackingDiagnostics diagnostics;
+            mini_nav_core::CollisionGeometry static_geometry{
+                *static_map_, static_points_, clearance_radius_ + localization_uncertainty_, static_uncertainty_};
+            if (static_points_frame_ == odom_frame_id_) {
+                static_geometry.point_radius = clearance_radius_;
+                static_geometry.points_from_grid_translation = {odom_from_map.x, odom_from_map.y};
+                static_geometry.points_from_grid_yaw = odom_from_map.yaw;
+            }
             const auto command = tracker_->Step(
-                map_pose, odom_pose, odom_from_map,
-                *static_map_, *local_map_, steady_seconds);
+                map_pose, odom_pose, odom_from_map, static_geometry,
+                mini_nav_core::CollisionGeometry{*local_map_, local_points_, clearance_radius_, local_uncertainty_},
+                steady_seconds, &diagnostics);
+            std::ostringstream stream;
+            stream << std::setprecision(12) << "{\"stamp\":" << now().seconds()
+                << ",\"observation_stamp\":" << local_map_stamp_->seconds()
+                << ",\"static_points_frame\":\"" << static_points_frame_ << "\""
+                << ",\"map_tf_stamp\":" << rclcpp::Time(map_tf.header.stamp).seconds()
+                << ",\"odom_tf_stamp\":" << rclcpp::Time(odom_tf.header.stamp).seconds()
+                << ",\"map_pose\":[" << map_pose.x << ',' << map_pose.y << ',' << map_pose.yaw
+                << "],\"odom_pose\":[" << odom_pose.x << ',' << odom_pose.y << ',' << odom_pose.yaw
+                << "],\"reason\":\"" << TrackingStatusName(command.status)
+                << "\",\"selected\":[" << command.linear_x << ',' << command.angular_z << "],\"candidates\":[";
+            bool first = true;
+            for (const auto & evaluation : diagnostics.candidates) {
+                if (!first) stream << ',';
+                first = false;
+                const auto & conflict = evaluation.conflict;
+                stream << "{\"velocity\":[" << evaluation.command.linear_x << ',' << evaluation.command.angular_z
+                    << "],\"safe\":" << (evaluation.safe ? "true" : "false")
+                    << ",\"extra_clearance_lower_bound\":" << evaluation.clearance
+                    << ",\"score\":" << evaluation.score
+                    << ",\"conflict\":{\"kind\":\"" << conflict.kind
+                    << "\",\"frame\":\"" << (conflict.local ? odom_frame_id_ : map_frame_id_)
+                    << "\",\"object\":[" << conflict.object.x << ',' << conflict.object.y
+                    << "],\"distance\":" << conflict.distance << ",\"required\":" << conflict.required << "}}";
+            }
+            stream << "]}";
+            std_msgs::msg::String diagnostic_message;
+            diagnostic_message.data = stream.str();
+            diagnostics_publisher_->publish(diagnostic_message);
             publishCommand(command.linear_x, command.angular_z,
                            TrackingStatusName(command.status));
             if (follow_goal_) {
@@ -542,7 +551,8 @@ namespace mini_nav_nodes
         status_message.data = status;
         status_publisher_->publish(status_message);
         if (status != last_status_) {
-            if (status == "tracking" || status == "goal_reached" || status == "no_path") {
+            if (status == "tracking" || status == "avoiding_obstacle" ||
+                status == "goal_reached" || status == "no_path") {
                 RCLCPP_INFO(get_logger(), "Path follower: %s", status.c_str());
             } else {
                 RCLCPP_WARN(get_logger(), "Path follower stopped: %s", status.c_str());
@@ -575,9 +585,16 @@ void mini_nav_nodes::PathFollowerNode::finishFollow(uint16_t code, const std::st
     auto result = std::make_shared<FollowPath::Result>();
     result->error_code = code;
     result->error_msg = reason;
-    if (follow_goal_->is_canceling()) follow_goal_->canceled(result);
-    else if (code == FollowPath::Result::NONE) follow_goal_->succeed(result);
-    else follow_goal_->abort(result);
+    try {
+        if (rclcpp::ok(get_node_base_interface()->get_context())) {
+            if (follow_goal_->is_canceling()) follow_goal_->canceled(result);
+            else if (code == FollowPath::Result::NONE) follow_goal_->succeed(result);
+            else follow_goal_->abort(result);
+        }
+    } catch (const std::runtime_error &) {
+        // 关闭 context 时 Action 服务可能已移除目标；运行中的协议错误仍须暴露。
+        if (rclcpp::ok(get_node_base_interface()->get_context())) throw;
+    }
     follow_goal_.reset();
     tracker_->ClearPath();
 }

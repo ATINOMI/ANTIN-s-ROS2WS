@@ -90,12 +90,23 @@ def finalize(session, output, binaries, keyframe_step=5, voxel_size=1.0, downsam
     output.mkdir(parents=True, exist_ok=True)
     work = output / ('experiment_' + uuid.uuid4().hex[:16])
     work.mkdir()
-    if backend not in ('probability', 'hba'):
+    if backend not in ('probability', 'hba', 'pose_graph'):
         raise ValueError('Invalid offline backend')
     selected = np.unique(np.r_[np.arange(0, len(stamps), keyframe_step), len(stamps)-1]).astype(int)
     maximum_translation, maximum_rotation = 0.0, 0.0
     variants = [('original_probability', original)]
     optimized = None
+    if backend == 'pose_graph':
+        from .pose_graph import correct_trajectory
+        selected, optimized_selected, graph_report = correct_trajectory(stamps, original, clouds)
+        (work / 'pose_graph.json').write_text(json.dumps(graph_report, indent=2))
+        optimized = interpolate_corrections(stamps, original, selected, optimized_selected)
+        correction = optimized @ np.linalg.inv(original)
+        maximum_translation = float(np.linalg.norm(correction[:, :3, 3], axis=1).max())
+        maximum_rotation = float(Rotation.from_matrix(correction[:, :3, :3]).magnitude().max())
+        if maximum_translation > .30 or maximum_rotation > np.deg2rad(10):
+            raise ValueError('Pose graph correction exceeds short-scene gate')
+        variants.append(('pose_graph_probability', optimized))
     if backend == 'hba':
         if not 35 <= len(selected) <= 500:
             raise ValueError('Select 35..500 HBA frames; adjust keyframe_step')
@@ -155,7 +166,9 @@ def finalize(session, output, binaries, keyframe_step=5, voxel_size=1.0, downsam
                          hba_revision='a0cdd474996fd9bb76888c8d1839b49b70aa0818' if backend == 'hba' else None,
                          raw_session=str(Path(session).resolve()),
                          raw_index_sha256=hashlib.sha256((Path(session) / 'frames.json').read_bytes()).hexdigest(),
-                         optimization_keyframe_step=keyframe_step,
+                         optimization_keyframe_step=keyframe_step if backend != 'pose_graph' else None,
+                         trajectory_backend=backend,
+                         pose_graph_mode='flat_ground_se2' if backend == 'pose_graph' else None,
                          ray_resolution=ray_resolution, ground_tolerance=0.008,
                          free_space_assumption='flat_ground_3d_observed_ray_projection; not full-height coverage proof')
         results[name] = str(save_bundle(output, grid, geometry, alignment,
@@ -172,7 +185,7 @@ def main():
     parser.add_argument('session')
     parser.add_argument('--output', required=True)
     parser.add_argument('--binaries', required=True)
-    parser.add_argument('--backend', choices=['probability', 'hba'], default='probability',
+    parser.add_argument('--backend', choices=['probability', 'hba', 'pose_graph'], default='probability',
                         help='probability is the tested candidate; hba retains an experimental A/B')
     parser.add_argument('--keyframe-step', type=int, default=5)
     parser.add_argument('--voxel-size', type=float, default=1.0)

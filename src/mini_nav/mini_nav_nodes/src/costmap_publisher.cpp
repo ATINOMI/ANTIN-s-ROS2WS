@@ -58,6 +58,8 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
                                     declare_parameter<double>("planning.cost_travel_multiplier", 2.0)),
                                   goal_tolerance_(
                                     declare_parameter<double>("planning.goal_tolerance", 0.5)),
+                                  goal_position_tolerance_(
+                                    declarePositiveDoubleParameter("planning.goal_position_tolerance", 0.12)),
                                   map_topic_(declare_parameter<std::string>("map_topic", "/map")),
                                   map_file_(declare_parameter<std::string>("map_file", "")),
                                   frame_id_(declare_parameter<std::string>("frame_id", "map")),
@@ -84,14 +86,19 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
       declarePositiveDoubleParameter("planning.robot_radius", 0.24);
     inflation_parameters_.safety_margin =
       declare_parameter<double>("planning.safety_margin", 0.02);
+    inflation_parameters_.inscribed_radius =
+      declare_parameter<double>("planning.inscribed_radius", 0.22549849949589046);
     inflation_parameters_.inflation_radius =
-      declarePositiveDoubleParameter("planning.inflation_radius", 0.45);
+      declarePositiveDoubleParameter("planning.inflation_radius", 0.70);
     inflation_parameters_.cost_scaling_factor =
-      declarePositiveDoubleParameter("planning.cost_scaling_factor", 10.0);
+      declarePositiveDoubleParameter("planning.cost_scaling_factor", 3.0);
     inflation_parameters_.inflate_around_unknown =
       declare_parameter<bool>("planning.inflate_around_unknown", false);
     if (!std::isfinite(inflation_parameters_.safety_margin) ||
         inflation_parameters_.safety_margin < 0.0 ||
+        !std::isfinite(inflation_parameters_.inscribed_radius) ||
+        inflation_parameters_.inscribed_radius < 0.0 ||
+        inflation_parameters_.inflation_radius < inflation_parameters_.inscribed_radius ||
         inflation_parameters_.inflation_radius <
           inflation_parameters_.robot_radius + inflation_parameters_.safety_margin ||
         !std::isfinite(cost_travel_multiplier_) || cost_travel_multiplier_ < 0.0) {
@@ -128,6 +135,16 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
     map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/mini_nav/map", map_qos);
     planning_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/mini_nav/planning_costmap", map_qos);
+    safety_costmap_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+      "/mini_nav/planning_safety_costmap", map_qos);
+    collision_publisher_ = create_publisher<msg::CollisionMap>("/mini_nav/static_collision_map", map_qos);
+    observation_uncertainty_ = declarePositiveDoubleParameter("planning.observation_uncertainty", 0.03);
+    localization_uncertainty_ = declare_parameter<double>("planning.localization_uncertainty", 0.03);
+    if (!std::isfinite(localization_uncertainty_) || localization_uncertainty_ < 0.0)
+        throw std::invalid_argument("planning.localization_uncertainty must be finite and nonnegative");
+    dynamic_policy_ = declare_parameter<std::string>("planning.dynamic_policy", "immediate");
+    if (dynamic_policy_ != "immediate" && dynamic_policy_ != "static_then_stable")
+        throw std::invalid_argument("Unknown dynamic obstacle policy");
     raw_path_publisher_ = create_publisher<nav_msgs::msg::Path>("/mini_nav/raw_path", map_qos);
     path_publisher_ = create_publisher<nav_msgs::msg::Path>("/mini_nav/global_path", map_qos);
     axes_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -153,6 +170,8 @@ mini_nav_nodes::CostmapPublisherNode::CostmapPublisherNode(int size_x,
             if (!localization_epoch_.empty() && localization_epoch_ != msg->data) {
                 clearPath(); waitForNewLocalizationTf();
                 latest_cloud_.reset();
+                stable_observations_.clear();
+                stable_scan_stamp_ = 0.0;
             }
             localization_epoch_ = msg->data;
         });
@@ -341,10 +360,18 @@ void mini_nav_nodes::CostmapPublisherNode::loadMapMessage(
         // 在提交新地图前完成膨胀，确保 A* 总能使用与原始地图对应的规划图。
         auto new_planning_costmap = std::make_unique<mini_nav_core::Costmap2D>(
           mini_nav_core::InflateCostmap(*new_costmap, inflation_parameters_));
+        auto safety_parameters = inflation_parameters_;
+        safety_parameters.inscribed_radius = 0.0;
+        auto new_safety_costmap = std::make_unique<mini_nav_core::Costmap2D>(
+          mini_nav_core::InflateCostmap(*new_costmap, safety_parameters));
 
         // 替换旧地图。std::move()是 C++11 引入的右值引用转换，将 new_costmap 的所有权转移给 costmap_。
         costmap_ = std::move(new_costmap);
         planning_costmap_ = std::move(new_planning_costmap);
+        safety_costmap_ = std::move(new_safety_costmap);
+        stable_observations_.clear();
+        stable_scan_stamp_ = 0.0;
+        actual_start_.reset();
         map_received_ = true;
         // 地图变化后，旧路径的碰撞判断不再可信。
         demo_start_cell_.reset();
@@ -701,13 +728,70 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
         clearPath();
         return false;
     }
-    const auto & obstacle_map = fused_costmap_ ? *fused_costmap_ : *costmap_;
+    const auto & obstacle_map = *collision_source_;
+    start_unsafe_ = false;
+    mini_nav_core::PathPoint start_point{};
+    costmap_->MapToWorld(start.x, start.y, start_point.x, start_point.y);
+    if (actual_start_) start_point = *actual_start_;
+    const double body_radius = inflation_parameters_.robot_radius + inflation_parameters_.safety_margin;
+    const double radius = body_radius + localization_uncertainty_;
+    mini_nav_core::PathPoint points_translation{};
+    double points_yaw = 0.0;
+    if (collision_points_frame_ == odom_frame_id_) {
+        try {
+            const auto tf = tf_buffer_->lookupTransform(odom_frame_id_, frame_id_,
+                rclcpp::Time(0, 0, get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(.05));
+            const auto & q = tf.transform.rotation;
+            const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
+            const double age = (now() - rclcpp::Time(tf.header.stamp, get_clock()->get_clock_type())).seconds();
+            if (!std::isfinite(norm) || std::abs(norm - 1.0) > 1e-3 ||
+                !std::isfinite(tf.transform.translation.x) || !std::isfinite(tf.transform.translation.y) ||
+                (rclcpp::Time(tf.header.stamp).nanoseconds() != 0 &&
+                 (!std::isfinite(age) || age < -.7 || age > max_pose_age_))) {
+                clearPath(); return false;
+            }
+            points_translation = {tf.transform.translation.x, tf.transform.translation.y};
+            points_yaw = tf2::getYaw(q);
+        } catch (const tf2::TransformException &) { clearPath(); return false; }
+    }
+    const auto make_geometry = [&](const std::vector<mini_nav_core::PathPoint> & points,
+                                   double terminal_margin = 0.0) {
+        mini_nav_core::CollisionGeometry result{
+            obstacle_map, points, radius + terminal_margin, observation_uncertainty_, true};
+        if (collision_points_frame_ == odom_frame_id_) {
+            result.point_radius = body_radius + terminal_margin;
+            result.points_from_grid_translation = points_translation;
+            result.points_from_grid_yaw = points_yaw;
+        }
+        return result;
+    };
+    const auto current_geometry = make_geometry(collision_points_);
+    if (!current_geometry.IsClear(start_point, start_point)) {
+        start_unsafe_ = true;
+        clearPath();
+        RCLCPP_WARN(get_logger(), "start_in_collision at (%.4f, %.4f)", start_point.x, start_point.y);
+        return false;
+    }
+    std::vector<mini_nav_core::PathPoint> planning_points;
+    if (dynamic_policy_ == "immediate") planning_points = collision_points_;
+    else if (dynamic_replan_) {
+        for (std::size_t index = 0; index < dynamic_points_.size(); ++index) {
+            const auto & point = dynamic_points_[index];
+            unsigned int mx, my;
+            if (!costmap_->WorldToMap(point.x, point.y, mx, my)) continue;
+            const auto it = stable_observations_.find(static_cast<std::size_t>(my) * costmap_->GetSizeInCellsX() + mx);
+            if (it != stable_observations_.end() && it->second.count >= 3 &&
+                it->second.last - it->second.first >= .3) planning_points.push_back(collision_points_[index]);
+        }
+    }
+    const auto geometry = make_geometry(planning_points);
+    // 覆盖整个允许停车区域，避免终点中心安全但容差内的实际停车点不安全。
+    const auto terminal_geometry = make_geometry(collision_points_, goal_position_tolerance_);
     // A* 在膨胀规划图上搜索；原始图仍用于定位和地图显示。
     mini_nav_core::AStarPlanner planner(cost_travel_multiplier_);
     const std::vector<mini_nav_core::MapLocation> grid_path =
-      planner.Plan(*planning_costmap_, obstacle_map,
-                   inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
-                   start, goal, inflation_parameters_.inflate_around_unknown, goal_tolerance_);
+      planner.Plan(*planning_costmap_, geometry, start_point, start, goal, goal_tolerance_,
+          &terminal_geometry, &current_geometry);
 
     if (grid_path.empty()) {
         clearPath();
@@ -727,15 +811,21 @@ bool mini_nav_nodes::CostmapPublisherNode::PlanAndPublish(
     }
 
     // 核心层检查捷径穿越格、连续车体扫掠和积分软代价；失败则保留原始安全路径。
-    const auto final_points = mini_nav_core::SimplifyAndSmoothPath(
+    auto final_points = mini_nav_core::SimplifyAndSmoothPath(
       obstacle_map, *planning_costmap_, grid_path,
-      inflation_parameters_.robot_radius + inflation_parameters_.safety_margin,
-      cost_travel_multiplier_, inflation_parameters_.inflate_around_unknown);
+      radius, cost_travel_multiplier_, true, &geometry);
     if (final_points.empty()) {
         clearPath();
         RCLCPP_WARN(get_logger(), "A* path failed continuous body-clearance validation");
         return false;
     }
+    if (!current_geometry.IsClear(start_point, final_points.front())) {
+        start_unsafe_ = true;
+        clearPath();
+        return false;
+    }
+    if (std::hypot(start_point.x - final_points.front().x, start_point.y - final_points.front().y) > 1e-6)
+        final_points.insert(final_points.begin(), start_point);
     std::vector<mini_nav_core::PathPoint> raw_points;
     raw_points.reserve(grid_path.size());
     for (const auto & cell : grid_path) {
@@ -793,6 +883,9 @@ void mini_nav_nodes::CostmapPublisherNode::initialPoseCallback(
   const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr message)
 {
     clearPath();
+    stable_observations_.clear();
+    stable_scan_stamp_ = 0.0;
+    actual_start_.reset();
     if (use_initial_pose_as_start_) {
         demo_start_cell_.reset();
         if (!map_received_ || message->header.frame_id != frame_id_) {
@@ -929,10 +1022,7 @@ bool mini_nav_nodes::CostmapPublisherNode::lookupCurrentCell(
             RCLCPP_WARN(get_logger(), "Current robot position is outside the map or invalid");
             return false;
         }
-        if (planning_costmap_->GetCost(mx, my) >= mini_nav_core::kInscribedInflatedObstacle) {
-            RCLCPP_WARN(get_logger(), "Current robot cell (%u, %u) is inside the planning safety zone", mx, my);
-            return false;
-        }
+        actual_start_ = mini_nav_core::PathPoint{x, y};
         cell = {mx, my};
         return true;
     } catch (const tf2::TransformException & exception) {
@@ -1000,6 +1090,30 @@ void mini_nav_nodes::CostmapPublisherNode::publishMap()
 
     // QoS 在创建 publisher 时已固定；这里只负责发送新消息。
     map_publisher_->publish(message);
+    msg::CollisionMap collision;
+    collision.grid = message;
+    const bool collision_valid = rebuildPlanningMap();
+    for (std::size_t i = 0; i < collision.grid.data.size(); ++i) {
+        const auto cost = collision_source_->GetCost(i);
+        collision.grid.data[i] = cost == kUnknownCost ? -1 : cost >= kLethalObstacle ? 100 : 0;
+    }
+    // 与规划起点检查共享全部连续端点；稳定观测门限只控制全局绕行路线。
+    collision.points_frame_id = collision_points_frame_;
+    for (const auto & point : collision_points_) {
+        geometry_msgs::msg::Point endpoint;
+        endpoint.x = point.x;
+        endpoint.y = point.y;
+        collision.points.push_back(endpoint);
+    }
+    collision.observation_uncertainty = observation_uncertainty_;
+    collision.valid = collision_valid;
+    if (fuse_local_obstacles_ && latest_scan_) collision.grid.header.stamp = latest_scan_->header.stamp;
+    if (require_cloud_ && latest_cloud_ &&
+        rclcpp::Time(latest_cloud_->header.stamp) < rclcpp::Time(collision.grid.header.stamp))
+        collision.grid.header.stamp = latest_cloud_->header.stamp;
+    collision.clearance_radius = inflation_parameters_.robot_radius + inflation_parameters_.safety_margin +
+        localization_uncertainty_;
+    collision_publisher_->publish(collision);
     auto planning_message = message;
     for (unsigned int my = 0; my < planning_message.info.height; ++my) {
       for (unsigned int mx = 0; mx < planning_message.info.width; ++mx) {
@@ -1009,6 +1123,11 @@ void mini_nav_nodes::CostmapPublisherNode::publishMap()
       }
     }
     planning_costmap_publisher_->publish(planning_message);
+    auto safety_message = message;
+    for (std::size_t index = 0; index < safety_message.data.size(); ++index) {
+        safety_message.data[index] = mini_nav_nodes::CostToOccupancyValue(safety_costmap_->GetCost(index));
+    }
+    safety_costmap_publisher_->publish(safety_message);
     if (!global_path_.poses.empty()) {
         mini_nav_core::MapLocation current{0, 0};
         if (!use_initial_pose_as_start_ && !lookupCurrentCell(current, 0.0)) {
@@ -1126,7 +1245,11 @@ void mini_nav_nodes::CostmapPublisherNode::publishCoordinateAxes()
  */
 bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
 {
+    dynamic_points_.clear();
+    collision_points_.clear();
+    collision_points_frame_ = frame_id_;
     fused_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(*costmap_);
+    collision_source_ = std::make_unique<mini_nav_core::Costmap2D>(*costmap_);
     if (fuse_local_obstacles_) {
         if (!latest_scan_ || !local_obstacles_ ||
             std::chrono::duration<double>(std::chrono::steady_clock::now() - scan_received_).count() > 0.8 ||
@@ -1144,6 +1267,10 @@ bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
             const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
             if (!std::isfinite(norm) || std::abs(norm - 1.0) > 1e-3 ||
                 !std::isfinite(tf.transform.translation.x) || !std::isfinite(tf.transform.translation.y)) return false;
+            // 碰撞端点保留在 odom，静态先验的 map 配准误差不叠加到同源相对观测。
+            collision_points_frame_ = scan.header.frame_id == frame_id_ ? frame_id_ : odom_frame_id_;
+            const auto point_tf = tf_buffer_->lookupTransform(collision_points_frame_, scan.header.frame_id,
+                rclcpp::Time(scan.header.stamp, get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(.05));
             // Rasterize original laser endpoints once in map coordinates. Re-rasterizing an odom
             // occupancy cell adds another cell footprint and can falsely engulf the robot during turns.
             for (std::size_t i = 0; i < scan.ranges.size(); ++i) {
@@ -1158,7 +1285,13 @@ bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
                 tf2::doTransform(source, target, tf);
                 unsigned int mx, my;
                 if (fused_costmap_->WorldToMap(target.pose.position.x, target.pose.position.y, mx, my) &&
-                    fused_costmap_->GetCost(mx, my) != kUnknownCost) fused_costmap_->SetCost(mx, my, kLethalObstacle);
+                    fused_costmap_->GetCost(mx, my) != kUnknownCost) {
+                    dynamic_points_.push_back({target.pose.position.x, target.pose.position.y});
+                    geometry_msgs::msg::PoseStamped observed;
+                    tf2::doTransform(source, observed, point_tf);
+                    collision_points_.push_back({observed.pose.position.x, observed.pose.position.y});
+                    fused_costmap_->SetCost(mx, my, kLethalObstacle);
+                }
             }
         } catch (const tf2::TransformException &) { return false; }
     }
@@ -1182,13 +1315,42 @@ bool mini_nav_nodes::CostmapPublisherNode::rebuildPlanningMap()
                 tf2::doTransform(source, target, tf);
                 unsigned int mx, my;
                 if (fused_costmap_->WorldToMap(target.pose.position.x, target.pose.position.y, mx, my) &&
-                    fused_costmap_->GetCost(mx, my) != kUnknownCost)
+                    fused_costmap_->GetCost(mx, my) != kUnknownCost) {
+                    collision_source_->SetCost(mx, my, kLethalObstacle);
                     fused_costmap_->SetCost(mx, my, kLethalObstacle);
+                }
             }
         } catch (const std::exception &) { return false; }
     }
+    if (latest_scan_) {
+        const double stamp = rclcpp::Time(latest_scan_->header.stamp).seconds();
+        if (stamp < stable_scan_stamp_) stable_observations_.clear();
+        if (stamp != stable_scan_stamp_) {
+            std::unordered_map<std::size_t, bool> seen;
+            for (const auto & point : dynamic_points_) {
+                unsigned int mx, my;
+                if (!costmap_->WorldToMap(point.x, point.y, mx, my)) continue;
+                const auto index = static_cast<std::size_t>(my) * costmap_->GetSizeInCellsX() + mx;
+                if (seen[index]) continue;
+                seen[index] = true;
+                auto & observation = stable_observations_[index];
+                if (observation.count == 0 || stamp - observation.last > 1.5)
+                    observation = StableObservation{stamp, stamp, 1};
+                else { observation.last = stamp; ++observation.count; }
+            }
+            for (auto it = stable_observations_.begin(); it != stable_observations_.end();) {
+                if (stamp - it->second.last > 1.5) it = stable_observations_.erase(it);
+                else ++it;
+            }
+            stable_scan_stamp_ = stamp;
+        }
+    }
     planning_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(
       mini_nav_core::InflateCostmap(*fused_costmap_, inflation_parameters_));
+    auto safety_parameters = inflation_parameters_;
+    safety_parameters.inscribed_radius = 0.0;
+    safety_costmap_ = std::make_unique<mini_nav_core::Costmap2D>(
+      mini_nav_core::InflateCostmap(*fused_costmap_, safety_parameters));
     return true;
 }
 
@@ -1207,7 +1369,7 @@ void mini_nav_nodes::CostmapPublisherNode::computePath(
     const auto started = std::chrono::steady_clock::now();
     const auto goal = handle->get_goal();
     result->error_code = ComputePath::Result::NO_VALID_PATH;
-    if (!goal->planner_id.empty() && goal->planner_id != "AStar") {
+    if (!goal->planner_id.empty() && goal->planner_id != "AStar" && goal->planner_id != "AStarDynamic") {
         result->error_code = ComputePath::Result::INVALID_PLANNER;
     } else if (!map_received_) {
         result->error_msg = "map_unavailable";
@@ -1217,10 +1379,13 @@ void mini_nav_nodes::CostmapPublisherNode::computePath(
     } else if (!rebuildPlanningMap()) {
         result->error_msg = "fresh_obstacles_unavailable";
     } else {
+        actual_start_.reset();
+        dynamic_replan_ = goal->planner_id == "AStarDynamic";
         // Check the start against current observations, never a cached dynamic obstacle map.
         mini_nav_core::MapLocation start{}, end{};
         bool valid_start = false;
         if (goal->use_start) {
+            actual_start_ = mini_nav_core::PathPoint{goal->start.pose.position.x, goal->start.pose.position.y};
             valid_start = costmap_->WorldToMap(goal->start.pose.position.x, goal->start.pose.position.y,
               start.x, start.y);
         } else { valid_start = lookupCurrentCell(start, 0.0); }
@@ -1230,6 +1395,9 @@ void mini_nav_nodes::CostmapPublisherNode::computePath(
         } else if (PlanAndPublish(start, end, goal->goal.pose.orientation)) {
             result->path = global_path_;
             result->error_code = ComputePath::Result::NONE;
+        } else if (start_unsafe_) {
+            result->error_code = ComputePath::Result::START_OCCUPIED;
+            result->error_msg = "start_in_collision";
         }
     }
     result->planning_time = rclcpp::Duration::from_seconds(

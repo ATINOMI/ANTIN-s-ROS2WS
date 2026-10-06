@@ -79,8 +79,10 @@ namespace mini_nav_nodes
         mini_nav_core::InflationParameters inflation;
         inflation.robot_radius = PositiveParameter(*this, "local_costmap.robot_radius", 0.24);
         inflation.safety_margin = declare_parameter<double>("local_costmap.safety_margin", 0.02);
-        inflation.inflation_radius = PositiveParameter(*this, "local_costmap.inflation_radius", 0.45);
-        inflation.cost_scaling_factor = PositiveParameter(*this, "local_costmap.cost_scaling_factor", 10.0);
+        inflation.inscribed_radius = declare_parameter<double>(
+            "local_costmap.inscribed_radius", 0.22549849949589046);
+        inflation.inflation_radius = PositiveParameter(*this, "local_costmap.inflation_radius", 0.70);
+        inflation.cost_scaling_factor = PositiveParameter(*this, "local_costmap.cost_scaling_factor", 3.0);
         inflation.inflate_around_unknown =
           declare_parameter<bool>("local_costmap.inflate_around_unknown", false);
         if (!std::isfinite(inflation.safety_margin) || inflation.safety_margin < 0.0 ||
@@ -89,6 +91,9 @@ namespace mini_nav_nodes
         }
         grid_ = std::make_unique<mini_nav_core::RollingObstacleGrid>(
           GridCells(width, resolution), GridCells(height, resolution), resolution, inflation);
+        safety_inflation_ = inflation;
+        safety_inflation_.inscribed_radius = 0.0;
+        observation_uncertainty_ = PositiveParameter(*this, "local_costmap.observation_uncertainty", 0.03);
 
         odom_frame_id_ = declare_parameter<std::string>("odom_frame_id", "odom");
         base_frame_id_ = declare_parameter<std::string>("base_frame_id", "base_footprint");
@@ -109,6 +114,10 @@ namespace mini_nav_nodes
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
         map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
           "/mini_nav/local_costmap", rclcpp::QoS(1).reliable());
+        safety_map_publisher_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+          "/mini_nav/local_safety_costmap", rclcpp::QoS(1).reliable());
+        collision_publisher_ = create_publisher<msg::CollisionMap>(
+          "/mini_nav/local_collision_map", rclcpp::QoS(1).reliable());
         valid_publisher_ = create_publisher<std_msgs::msg::Bool>(
           "/mini_nav/local_costmap_valid", rclcpp::QoS(1).reliable());
         scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
@@ -139,6 +148,7 @@ namespace mini_nav_nodes
         valid_ = false;
         last_scan_stamp_.reset();
         grid_->Reset();
+        integrated_cloud_stamp_.reset();
     }
 
     /**
@@ -259,8 +269,9 @@ namespace mini_nav_nodes
                     for (; x != x.end(); ++x, ++y, ++z) {
                         if (!std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) continue;
                         const auto point = sensor_to_odom * tf2::Vector3(*x, *y, *z);
-                        grid_->MarkObstacle(point.x(), point.y(), stamp.seconds());
+                        grid_->MarkObstacle(point.x(), point.y(), stamp.seconds(), false);
                     }
+                    integrated_cloud_stamp_ = stamp;
                 } catch (const std::exception &) { cloud_valid = false; }
             }
         }
@@ -282,6 +293,31 @@ namespace mini_nav_nodes
             message.data.push_back(CostToOccupancyValue(cost));
         }
         map_publisher_->publish(message);
+        // 从原始观测单独膨胀真实车体，不能再次膨胀已生成的显示图。
+        const auto safety = valid_ ? mini_nav_core::InflateCostmap(raw, safety_inflation_) : raw;
+        for (std::size_t index = 0; index < safety.GetCellCount(); ++index) {
+            message.data[index] = CostToOccupancyValue(safety.GetCost(index));
+        }
+        safety_map_publisher_->publish(message);
+        msg::CollisionMap collision;
+        collision.grid = message;
+        // 原子快照携带观测时间，定时重发不能把旧感知变成新感知。
+        if (last_scan_stamp_) collision.grid.header.stamp = *last_scan_stamp_;
+        if (require_cloud_ && integrated_cloud_stamp_ && last_scan_stamp_ &&
+            *integrated_cloud_stamp_ < *last_scan_stamp_)
+            collision.grid.header.stamp = *integrated_cloud_stamp_;
+        const auto coverage = grid_->CollisionGrid();
+        for (std::size_t i = 0; i < coverage.GetCellCount(); ++i)
+            collision.grid.data[i] = CostToOccupancyValue(coverage.GetCost(i));
+        for (const auto & point : grid_->ObstaclePoints()) {
+            geometry_msgs::msg::Point value;
+            value.x = point.x; value.y = point.y;
+            collision.points.push_back(value);
+        }
+        collision.observation_uncertainty = observation_uncertainty_;
+        collision.clearance_radius = safety_inflation_.robot_radius + safety_inflation_.safety_margin;
+        collision.valid = valid_ && cloud_valid;
+        collision_publisher_->publish(collision);
         std_msgs::msg::Bool status;
         status.data = valid_ && cloud_valid;
         valid_publisher_->publish(status);

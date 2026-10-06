@@ -22,6 +22,10 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME} "msg/CollisionMap.msg"
+  DEPENDENCIES nav_msgs geometry_msgs)
+rosidl_get_typesupport_target(collision_typesupport ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 add_executable(costmap_publisher_node
   src/main.cpp
@@ -46,6 +50,7 @@ ament_target_dependencies(local_costmap_node
   geometry_msgs nav_msgs rclcpp sensor_msgs std_msgs tf2 tf2_geometry_msgs tf2_ros
 )
 target_link_libraries(local_costmap_node mini_nav_core::mini_nav_core)
+target_link_libraries(local_costmap_node "${collision_typesupport}")
 
 add_executable(path_follower_node
   src/main.cpp
@@ -58,6 +63,7 @@ ament_target_dependencies(path_follower_node
   geometry_msgs nav_msgs nav2_msgs rclcpp rclcpp_action std_msgs tf2 tf2_geometry_msgs tf2_ros
 )
 target_link_libraries(path_follower_node mini_nav_core::mini_nav_core)
+target_link_libraries(path_follower_node "${collision_typesupport}")
 
 target_compile_definitions(mini_nav_amcl_node PRIVATE MINI_NAV_BUILD_AMCL=1)
 
@@ -78,6 +84,7 @@ ament_target_dependencies(costmap_publisher_node
   visualization_msgs
 )
 target_link_libraries(costmap_publisher_node mini_nav_core::mini_nav_core)
+target_link_libraries(costmap_publisher_node "${collision_typesupport}")
 target_compile_features(mini_nav_amcl_node PUBLIC cxx_std_17)
 target_include_directories(mini_nav_amcl_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -129,6 +136,10 @@ endforeach()
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  add_test(NAME test_costmap_safety COMMAND /usr/bin/python3
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_costmap_safety.py ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(test_costmap_safety PROPERTIES TIMEOUT 35
+    ENVIRONMENT "ROS_DOMAIN_ID=216;RMW_IMPLEMENTATION=rmw_cyclonedds_cpp;ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST")
   add_test(NAME test_navigation_integration COMMAND /usr/bin/python3
     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_navigation_integration.py ${CMAKE_CURRENT_BINARY_DIR})
   set_tests_properties(test_navigation_integration PROPERTIES TIMEOUT 160
@@ -141,6 +152,7 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_planner_dynamic_obstacles geometry_msgs nav_msgs nav2_msgs sensor_msgs
     rclcpp rclcpp_action tf2 tf2_geometry_msgs tf2_ros visualization_msgs)
   target_link_libraries(test_planner_dynamic_obstacles mini_nav_core::mini_nav_core)
+  target_link_libraries(test_planner_dynamic_obstacles "${collision_typesupport}")
 
   ament_add_gtest(test_amcl_tf_cache
     test/test_amcl_tf_cache.cpp
@@ -177,4 +189,5 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+ament_export_dependencies(rosidl_default_runtime)
 ament_package()

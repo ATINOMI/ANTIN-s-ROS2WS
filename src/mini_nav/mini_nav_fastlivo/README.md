@@ -127,3 +127,49 @@ colcon test-result --test-result-base build/mini_nav_nodes --verbose
 ```
 
 `tools/validate_mapping.py`、`validate_navigation.py`、`validate_frontend_fault.py` 是会启动仿真并驱动车辆的独立验收脚本，必须使用空闲的 `ROS_DOMAIN_ID=224`，并按建图、导航、故障的顺序执行。不会连接默认 219 域，也不访问手柄；脚本只停止自己启动的进程。
+
+## 复用原二维地图，FAST-LIVO2 负责定位
+
+这套组合已在当前 Gazebo 场景验证：二维导航图采用
+`mini_localization_astar.launch.py` 默认的 `tb3_learning.yaml/pgm`，
+三维先验只供 FAST-LIVO2 配准定位，导航阶段不再生成二维高度地图。
+原 AMCL 启动入口继续可用。FAST-LIVO2 内部仍维护局部参考，它不能仅凭
+一张二维图直接恢复三维地图坐标；本组合通过已保存的三维几何先验补充重定位约束。
+
+当前已绑定地图：
+`/home/a/ros2_ws/maps/fastlivo_static/map_static_2a3a449dc6cf48d3`。
+原二维 PGM 逐字节复制；保留它的分辨率、原点、占用/空闲/未知格。
+三维先验采用之前已验证的 `map_f321189dd1d14011`，经过小范围平面配准
+转换到二维地图坐标，不是未经校准直接替换 YAML。
+
+启动：
+
+```bash
+source /home/a/ros2_ws/install_fastlivo/setup.bash
+source /home/a/ros2_ws/install/setup.bash
+ros2 launch mini_nav_bringup fastlivo_navigation.launch.py \
+  map_bundle:=/home/a/ros2_ws/maps/fastlivo_static/map_static_2a3a449dc6cf48d3 \
+  use_3d_collision_cloud:=false
+```
+
+启动后在 RViz 用 `2D Pose Estimate` 指定小车在旧地图上的初始位置和朝向，
+等定位有效后再发导航目标。默认出生点对应地图约 `(0, 0)`，方向约沿 +X；
+这是当前配准与出生配置，换出生位置后需要填写实际初值。
+只有定位适配器发布动态 `map -> odom`，只启动一个速度看门狗。
+这套入口只加载地图，退出不需要保存导航地图。
+
+需要绑定另一张同坐标附近的二维图时：
+
+```bash
+ros2 run mini_nav_fastlivo bind_static_map \
+  --prior-bundle /home/a/ros2_ws/maps/fastlivo2_acceptance/map_f321189dd1d14011 \
+  --map /home/a/ros2_ws/src/mini_nav/mini_nav_bringup/maps/tb3_learning.yaml \
+  --output /home/a/ros2_ws/maps/fastlivo_static
+```
+
+每次保存新的绑定目录并输出配准诊断；旧源文件不被修改。工具面向两张
+近似共用初始坐标的平地地图，搜索范围为 XY 各 ±0.5 m、yaw ±0.2 rad；
+不是全局地图识别。超范围或轮廓不匹配时拒绝绑定，需要手工标定。
+新模块只在准备地图时执行二维轮廓配准；运行期仍是原三维 GICP 定位。
+
+验证记录见 [静态二维图与 FAST-LIVO 定位](../logs/26-10-4/static_map_fastlivo_navigation.md)。

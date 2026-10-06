@@ -1,3 +1,9 @@
+/**
+ * @file use-ikfom.hpp
+ * @brief FAST-LIO2 的状态组合、IMU 连续过程模型及状态/噪声雅可比。状态 DIM=24、DOF=23，重力模长为 9.809。
+ * @author Antinomy
+ * @date 2026-10-05
+ */
 #ifndef USE_IKFOM_H
 #define USE_IKFOM_H
 
@@ -9,6 +15,11 @@ typedef MTK::S2<double, 98090, 10000, 1> S2;
 typedef MTK::vect<1, double> vect1;
 typedef MTK::vect<2, double> vect2;
 
+/**
+ * @brief 生成 FAST-LIO2 组合状态。
+ * @note pos、rot、vel、grav 使用同一惯性参考系；rot 将 IMU 向量转入该系。offset_R_L_I/offset_T_L_I 是 LiDAR 到 IMU 的旋转/平移。
+ * @note 误差索引：pos 0、rot 3、外参旋转 6、外参平移 9、vel 12、bg 15、ba 18、grav 21（2 DOF）。过程导数中的 grav 占 3 维。
+ */
 MTK_BUILD_MANIFOLD(state_ikfom,
 ((vect3, pos))
 ((SO3, rot))
@@ -20,11 +31,17 @@ MTK_BUILD_MANIFOLD(state_ikfom,
 ((S2, grav))
 );
 
+/**
+ * @brief 生成 IMU 过程输入：acc 为 IMU 系加速度（m/s²），gyro 为角速度（rad/s）。
+ */
 MTK_BUILD_MANIFOLD(input_ikfom,
 ((vect3, acc))
 ((vect3, gyro))
 );
 
+/**
+ * @brief 生成 12 维过程噪声：陀螺仪、加速度计噪声及两种偏置随机游走，按 ng、na、nbg、nba 排列。
+ */
 MTK_BUILD_MANIFOLD(process_noise_ikfom,
 ((vect3, ng))
 ((vect3, na))
@@ -32,6 +49,11 @@ MTK_BUILD_MANIFOLD(process_noise_ikfom,
 ((vect3, nba))
 );
 
+/**
+ * @brief 构造默认过程噪声对角协方差。
+ * @return 12×12 矩阵；ng/na 对角值 1e-4，nbg/nba 对角值 1e-5，各交叉项为零。
+ * @note 本函数不乘 dt；predict 中噪声雅可比乘 dt 后在两侧传播 Q。
+ */
 MTK::get_cov<process_noise_ikfom>::type process_noise_cov()
 {
 	MTK::get_cov<process_noise_ikfom>::type cov = MTK::get_cov<process_noise_ikfom>::type::Zero();
@@ -44,11 +66,18 @@ MTK::get_cov<process_noise_ikfom>::type process_noise_cov()
 
 //double L_offset_to_I[3] = {0.04165, 0.02326, -0.0284}; // Avia 
 //vect3 Lidar_offset_to_IMU(L_offset_to_I, 3);
+/**
+ * @brief 计算 IMU 连续时间过程导数。
+ * @param s 当前状态，函数仅读取其值。
+ * @param in IMU 系加速度和角速度输入。
+ * @return 24 维导数：位置为 vel，姿态为 gyro-bg，速度为 rot·(acc-ba)+grav，其余分量为零。
+ */
 Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in)
 {
 	Eigen::Matrix<double, 24, 1> res = Eigen::Matrix<double, 24, 1>::Zero();
 	vect3 omega;
 	in.gyro.boxminus(omega, s.bg);
+	/* 加速度先在 IMU 系扣除偏置，再旋转并加惯性系重力；改变顺序会混用坐标系。 */
 	vect3 a_inertial = s.rot * (in.acc-s.ba); 
 	for(int i = 0; i < 3; i++ ){
 		res(i) = s.vel[i];
@@ -58,6 +87,12 @@ Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in)
 	return res;
 }
 
+/**
+ * @brief 计算过程导数对 23 维状态局部误差的雅可比。
+ * @param s 当前状态，提供姿态与重力局部基。
+ * @param in IMU 输入，用 acc-ba 构造姿态耦合。
+ * @return 24×23 矩阵；行按 DIM 排列、列按 DOF 排列。
+ */
 Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in)
 {
 	Eigen::Matrix<double, 24, 23> cov = Eigen::Matrix<double, 24, 23>::Zero();
@@ -70,6 +105,7 @@ Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in)
 	cov.template block<3, 3>(12, 18) = -s.rot.toRotationMatrix();
 	Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
 	Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
+	/* 重力模长固定，只估计方向：S2_Mx 将 2 维局部误差映射到 3 维重力变化，不能替换成 3×3 单位阵。 */
 	s.S2_Mx(grav_matrix, vec, 21);
 	cov.template block<3, 2>(12, 21) =  grav_matrix; 
 	cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity(); 
@@ -77,6 +113,12 @@ Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in)
 }
 
 
+/**
+ * @brief 计算过程导数对 12 维噪声的雅可比。
+ * @param s 当前状态，提供加速度噪声到惯性系的旋转。
+ * @param in 保留过程回调签名一致性，当前未使用。
+ * @return 24×12 矩阵，噪声列按 ng、na、nbg、nba 排列。
+ */
 Eigen::Matrix<double, 24, 12> df_dw(state_ikfom &s, const input_ikfom &in)
 {
 	Eigen::Matrix<double, 24, 12> cov = Eigen::Matrix<double, 24, 12>::Zero();
@@ -87,6 +129,12 @@ Eigen::Matrix<double, 24, 12> df_dw(state_ikfom &s, const input_ikfom &in)
 	return cov;
 }
 
+/**
+ * @brief 将姿态四元数转换为显示用欧拉角。
+ * @param orient 有效姿态四元数，系数顺序为 x、y、z、w。
+ * @return roll、pitch、yaw，使用 57.3 近似乘数转为角度（deg）。
+ * @note 与 RotMtoEuler 的弧度输出不同；接近俯仰 ±90° 时设 yaw=0。零四元数会导致除以 unit=0。
+ */
 vect3 SO3ToEuler(const SO3 &orient) 
 {
 	Eigen::Matrix<double, 3, 1> _ang;

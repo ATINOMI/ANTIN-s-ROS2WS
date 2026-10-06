@@ -2,16 +2,23 @@ costmap_publisher:
   ros__parameters:
     planning:
       # Gazebo Waffle SDF 最远碰撞角点 0.237 m，URDF 为 0.238 m；向上取 0.24 m。
+      observation_uncertainty: 0.03
+      # map 配准实测约 4 cm；在原有 2 cm 余量之外额外预留 3 cm。
+      localization_uncertainty: 0.03
+      dynamic_policy: static_then_stable
       robot_radius: 0.24
       safety_margin: 0.02
-      # 障碍、未知格与地图外侧都留 0.26 m 硬安全距离；
-      # 只有确定障碍在 0.26 到 0.45 m 间生成衰减软代价。
-      inflation_radius: 0.45
-      cost_scaling_factor: 10.0
-      # 未知格始终禁行；开启后只额外传播 0.26 m 硬安全区。
+      # learning 官方 0.22 m 圆足迹经 0.01 m padding 后的真实内切半径。
+      # 只控制膨胀代价；原图扫掠和跟踪车体圆盘仍使用 0.24 + 0.02 m。
+      inscribed_radius: 0.22549849949589046
+      inflation_radius: 0.70
+      cost_scaling_factor: 3.0
+      # 未知格可接收硬代价；开启后也作为完整膨胀源，不改写原始地图。
       inflate_around_unknown: false
       cost_travel_multiplier: 2.0
       # 原目标不可达时，在其栅格中心周围寻找最近可达安全点（米）；0 禁用。
       goal_tolerance: 0.5
+      # 覆盖跟踪器允许的整个停车区域；须不小于 controller.goal_position_tolerance。
+      goal_position_tolerance: 0.12
       # 超过该秒数的机器人 TF 不可作为规划起点。
       max_pose_age: 1.0
