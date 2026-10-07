@@ -1,0 +1,5 @@
+navigation_manager:
+  ros__parameters:
+    replan_interval: 1.0
+    blocked_timeout: 20.0
+    task_timeout: 180.0

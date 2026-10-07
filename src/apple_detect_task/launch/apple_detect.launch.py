@@ -1,3 +1,19 @@
+"""
+******************************************************************************
+@file      apple_detect.launch.py
+@author    ANTINOMI
+@date      2026-07-30
+@brief     苹果检测任务的 ROS 2 启动文件。
+           本文件同时启动视频图像发布节点和图像监测节点，
+           并集中配置视频路径、图像话题、发布周期和结果话题。
+******************************************************************************
+@attention
+
+本文件属于 apple_detect_task ROS 2 功能包。
+启动参数可以在命令行中覆盖 LaunchArgument 的默认值。
+******************************************************************************
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration

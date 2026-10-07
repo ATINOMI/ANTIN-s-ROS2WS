@@ -1,0 +1,7 @@
+<library path="mini_nav_rviz_plugins">
+    <class name="mini_nav_rviz_plugins/NavigationStatus"
+           type="mini_nav_rviz_plugins::NavigationStatusPanel"
+           base_class_type="rviz_common::Panel">
+        <description>mini_nav 导航状态、停车原因、指令速度和局部感知状态。</description>
+    </class>
+</library>
