@@ -1,0 +1,3 @@
+# 粒子滤波诊断网页保留在仓库中，不计入 GitHub 语言统计。
+src/mini_nav/docs/mini_nav_pf_debug*.html linguist-documentation
+src/mini_nav/mini_nav_pf_debug/web/viewer.html linguist-documentation
